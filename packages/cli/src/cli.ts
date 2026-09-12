@@ -8,6 +8,7 @@ import { CliError } from './errors.js';
 import { emit } from './output.js';
 import { runLogin } from './commands/login.js';
 import { runProjectsGet, runProjectsList, runSearch } from './commands/projects.js';
+import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from './commands/docs.js';
 
 export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
   return new PidbClient(loadConfig(env));
@@ -52,6 +53,44 @@ export function buildProgram(): Command {
     .action(async (query: string, opts: { json?: boolean }) => {
       emit(await runSearch(clientFrom(), query), opts.json === true);
     });
+
+  const docs = program.command('docs').description('Documents (Markdown)');
+  docs
+    .command('list')
+    .argument('[target]', 'project slug or "global"', 'global')
+    .option('--json', 'raw JSON output')
+    .action(async (target: string, opts: { json?: boolean }) => {
+      emit(await runDocsList(clientFrom(), target), opts.json === true);
+    });
+  docs
+    .command('get')
+    .argument('<target>', 'project slug, or the document slug for a global document')
+    .argument('[doc]', 'document slug')
+    .option('--refs', 'resolve {{secret:...}} references')
+    .option('--json', 'raw JSON output')
+    .action(async (a: string, b: string | undefined, opts: { refs?: boolean; json?: boolean }) => {
+      const { target, doc } = resolveDocTarget(a, b);
+      emit(await runDocsGet(clientFrom(), target, doc, { refs: opts.refs }), opts.json === true);
+    });
+  docs
+    .command('put')
+    .argument('<target>', 'project slug, or the document slug for a global document')
+    .argument('[doc]', 'document slug')
+    .requiredOption('--file <path>', 'Markdown file to upload')
+    .requiredOption('--title <title>', 'document title')
+    .requiredOption('--category <category>', 'document category')
+    .option('--force', 'save despite lint findings or unresolved refs')
+    .option('--json', 'raw JSON output')
+    .action(
+      async (
+        a: string,
+        b: string | undefined,
+        opts: { file: string; title: string; category: string; force?: boolean; json?: boolean },
+      ) => {
+        const { target, doc } = resolveDocTarget(a, b);
+        emit(await runDocsPut(clientFrom(), target, doc, opts), opts.json === true);
+      },
+    );
 
   return program;
 }
