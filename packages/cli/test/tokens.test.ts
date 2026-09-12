@@ -68,6 +68,15 @@ describe('token create', () => {
     const err = await runTokenCreate(admin(), { name: 'x', scopes: 'docs:read', projects: 'nope' }).catch((e: unknown) => e);
     expect((err as ApiError).status).toBe(400);
   });
+
+  it('rejects --projects that lists no project instead of creating a zero-project token', async () => {
+    await expect(runTokenCreate(admin(), { name: 'empty-projects', scopes: 'docs:read', projects: '' })).rejects.toThrow(CliError);
+    await expect(runTokenCreate(admin(), { name: 'empty-projects', scopes: 'docs:read', projects: '' })).rejects.toThrow(/--projects/);
+    await expect(runTokenCreate(admin(), { name: 'blank-projects', scopes: 'docs:read', projects: ' , ' })).rejects.toThrow(/--projects/);
+
+    const list = (await runTokenList(admin())).json as PublicToken[];
+    expect(list.some((t) => t.name === 'empty-projects' || t.name === 'blank-projects')).toBe(false);
+  });
 });
 
 describe('token list and revoke', () => {

@@ -44,6 +44,9 @@ export async function runTokenCreate(client: PidbClient, opts: TokenCreateOption
           .split(',')
           .map((s) => s.trim())
           .filter((s) => s.length > 0);
+  if (opts.projects !== undefined && projects !== null && projects.length === 0) {
+    throw new CliError('--projects was given but lists no project — omit the flag entirely for a token covering all projects');
+  }
   const expires_at = parseExpires(opts.expires);
   const created = await client.json<PublicToken & { token: string }>('POST', '/api/v1/tokens', {
     body: { name: opts.name, scopes, projects, expires_at },
