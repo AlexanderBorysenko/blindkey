@@ -86,4 +86,43 @@ describe('ui document editor', () => {
     expect((await post('/p/acme/docs/nocsrf', { slug: 'nocsrf', title: 'X', category: 'notes', body_md: 'x' })).statusCode).toBe(403);
     expect((await post('/preview', { body_md: 'x' })).statusCode).toBe(403);
   });
+
+  it('rejects a title over 300 characters and does not create the document', async () => {
+    const title = 'x'.repeat(301);
+    const res = await post('/p/acme/docs/toolong', { csrf, slug: 'toolong', title, category: 'notes', body_md: '# hi\n' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('name="body_md"');
+    expect(getDocument(t.db, acme(), 'toolong')).toBeNull();
+  });
+
+  it('rejects a body over 2,000,000 characters and does not create the document', async () => {
+    const body_md = 'x'.repeat(2_000_001);
+    const res = await post('/p/acme/docs/toobig', { csrf, slug: 'toobig', title: 'Too big', category: 'notes', body_md });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('name="body_md"');
+    expect(getDocument(t.db, acme(), 'toobig')).toBeNull();
+  });
+
+  it('rejects an unknown category and does not create the document', async () => {
+    const res = await post('/p/acme/docs/badcat', { csrf, slug: 'badcat', title: 'Bad cat', category: 'not-a-category', body_md: '# hi\n' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('name="body_md"');
+    expect(getDocument(t.db, acme(), 'badcat')).toBeNull();
+  });
+
+  it('rejects an invalid slug and does not create the document', async () => {
+    const res = await post('/p/acme/docs/new', { csrf, slug: 'Not A Slug', title: 'Bad slug', category: 'notes', body_md: '# hi\n' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('name="body_md"');
+    expect(getDocument(t.db, acme(), 'Not A Slug')).toBeNull();
+  });
+
+  it('rejects a posted slug that differs from an existing document URL, leaving it unchanged', async () => {
+    await post('/p/acme/docs/new', { csrf, slug: 'stable', title: 'Stable', category: 'notes', body_md: '# Stable\n' });
+    const res = await post('/p/acme/docs/stable', { csrf, slug: 'renamed', title: 'Renamed', category: 'notes', body_md: '# Renamed\n' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('name="body_md"');
+    expect(getDocument(t.db, acme(), 'stable')?.title).toBe('Stable');
+    expect(getDocument(t.db, acme(), 'renamed')).toBeNull();
+  });
 });

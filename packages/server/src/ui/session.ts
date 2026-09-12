@@ -44,6 +44,7 @@ export function adminActor(req: FastifyRequest): Actor {
 export function registerSessionResolver(app: FastifyInstance, ctx: AppContext): void {
   let lastPurge = 0;
   app.addHook('onRequest', async (req) => {
+    if (!isUiRequest(req.url)) return;
     const id = uiSessionId(req);
     if (!id) return;
     const nowTs = Date.now();

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { DOC_CATEGORIES, docSlugSchema, lintForSecrets } from '@pidb/shared';
+import { DOC_CATEGORIES, docSlugSchema, documentInputSchema, lintForSecrets } from '@pidb/shared';
 import type { AppContext } from '../../http/context.js';
 import { deleteDocumentFor, listDocumentsFor, readDocumentFor, resolveDocScope, resolveRefs, writeDocumentFor } from '../../services/documents.js';
 import { adminActor, requireAdmin } from '../session.js';
@@ -91,33 +91,37 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: AppContext): v
       const slug = str(b, 'slug', req.params.doc);
       const form = { slug, title: str(b, 'title'), category: str(b, 'category', 'notes'), body_md: str(b, 'body_md') };
       const force = bool(b, 'force');
+      const isNew = req.params.doc === 'new';
 
       const slugCheck = docSlugSchema.safeParse(slug);
-      const categoryOk = (DOC_CATEGORIES as readonly string[]).includes(form.category);
-      if (!slugCheck.success || !categoryOk || !form.title) {
+      const slugMismatch = !isNew && slug !== req.params.doc;
+      const parsed = documentInputSchema.safeParse({ title: form.title, category: form.category, body_md: form.body_md, force });
+      if (!slugCheck.success || slugMismatch || !parsed.success) {
+        const message = slugMismatch
+          ? 'Slug cannot be changed on an existing document.'
+          : !slugCheck.success
+            ? 'Slug must be lowercase letters, digits and dashes.'
+            : !parsed.success
+              ? parsed.error.issues.map((i) => `${i.path.join('.') || 'form'}: ${i.message}`).join('; ')
+              : '';
         return reply.status(400).type('text/html').send(
           renderPage('document-edit', {
             ...pageContext(ctx, req, 'Edit document'),
             prefix: scope.prefix,
             scopeLabel: scope.projectSlug ?? 'global',
-            isNew: req.params.doc === 'new',
-            action: `${scope.prefix}/docs/${req.params.doc === 'new' ? 'new' : encodeURIComponent(req.params.doc)}`,
+            isNew,
+            action: `${scope.prefix}/docs/${isNew ? 'new' : encodeURIComponent(req.params.doc)}`,
             categories: DOC_CATEGORIES,
             form,
             findings: [],
             unresolved: [],
-            error: !form.title ? 'Title is required.' : !categoryOk ? 'Unknown category.' : 'Slug must be lowercase letters, digits and dashes.',
+            error: message,
           }),
         );
       }
 
       try {
-        writeDocumentFor(ctx, adminActor(req), scope.projectSlug, slug, {
-          title: form.title,
-          category: form.category as (typeof DOC_CATEGORIES)[number],
-          body_md: form.body_md,
-          force,
-        });
+        writeDocumentFor(ctx, adminActor(req), scope.projectSlug, slug, parsed.data);
       } catch (err) {
         if (!(err instanceof UnprocessableError)) throw err;
         const details = err.details as { findings?: { line: number; reason: string }[]; unresolved?: string[] };
