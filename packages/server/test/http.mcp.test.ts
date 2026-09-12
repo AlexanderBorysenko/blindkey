@@ -25,6 +25,15 @@ const textOf = (r: Awaited<ReturnType<Client['callTool']>>): string => {
   return c?.text ?? '';
 };
 
+// Plain letters, but broken up before any 32-char run so the secret-value lint
+// (which flags long base64/hex-looking runs) doesn't fire — otherwise a big
+// body would be rejected by the lint (422) rather than by the schema's size
+// cap, confounding the assertion below.
+const bigBody = (len: number): string => {
+  const chunk = 'x'.repeat(31) + ' ';
+  return chunk.repeat(Math.ceil(len / chunk.length)).slice(0, len);
+};
+
 describe('mcp', () => {
   it('lists tools without any reveal tool', async () => {
     t = await makeTestApp();
@@ -53,7 +62,7 @@ describe('mcp', () => {
     const ok = await client.callTool({ name: 'write_document', arguments: { project: 'alpha', slug: 'notes', title: 'N', category: 'notes', body_md: 'clean' } });
     expect(ok.isError).toBeFalsy();
     const big = await client
-      .callTool({ name: 'write_document', arguments: { project: 'alpha', slug: 'notes', title: 'N', category: 'notes', body_md: 'x'.repeat(2_000_001) } })
+      .callTool({ name: 'write_document', arguments: { project: 'alpha', slug: 'notes', title: 'N', category: 'notes', body_md: bigBody(2_000_001) } })
       .catch((e: unknown) => e);
     expect(big instanceof Error || (big as { isError?: boolean }).isError === true).toBe(true);
     const missing = await client.callTool({ name: 'get_project', arguments: { slug: 'beta' } });

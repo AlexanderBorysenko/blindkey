@@ -15,6 +15,7 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: ctx.logLevel ?? 'info', redact: ['req.headers.authorization', 'req.headers.cookie'] },
     trustProxy: ctx.trustProxy ?? false,
+    bodyLimit: 4 * 1024 * 1024,
   });
 
   await app.register(rateLimit, { global: false });

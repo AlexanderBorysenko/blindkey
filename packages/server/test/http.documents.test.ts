@@ -5,6 +5,13 @@ import { listAudit } from '../src/repos/audit.js';
 
 const doc = (body_md: string, extra: Record<string, unknown> = {}) => ({ title: 'Deploy', category: 'deploy', body_md, ...extra });
 
+// Plain letters, but broken up before any 32-char run so the secret-value lint
+// (which flags long base64/hex-looking runs) doesn't fire.
+const bigBody = (len: number): string => {
+  const chunk = 'a'.repeat(31) + ' ';
+  return chunk.repeat(Math.ceil(len / chunk.length)).slice(0, len);
+};
+
 describe('documents routes', () => {
   it('creates (201) then updates (200) a project doc and reads it back', async () => {
     const t = await makeTestApp();
@@ -48,6 +55,16 @@ describe('documents routes', () => {
     const f = await t.app.inject({ method: 'PUT', url: '/api/v1/projects/alpha/docs/x', headers: tok, payload: doc('password: Tr0ub4dor&3', { force: true }) });
     expect(f.statusCode).toBe(201);
     expect(listAudit(t.db, { action: 'doc.write' })[0]?.meta).toEqual({ lint_forced: true, unresolved_refs: 0 });
+  });
+  it('accepts a large body under the schema cap and rejects one over it', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    const tok = auth(t.token(['docs:read', 'docs:write'], ['alpha']));
+    const under = await t.app.inject({ method: 'PUT', url: '/api/v1/projects/alpha/docs/big', headers: tok, payload: doc(bigBody(1_500_000)) });
+    expect(under.statusCode).toBe(201);
+    const over = await t.app.inject({ method: 'PUT', url: '/api/v1/projects/alpha/docs/big', headers: tok, payload: doc(bigBody(2_000_001)) });
+    expect(over.statusCode).toBe(400);
+    expect(over.json().error).toBe('validation');
   });
   it('validates secret refs and returns ref meta on ?resolve=meta', async () => {
     const t = await makeTestApp();
