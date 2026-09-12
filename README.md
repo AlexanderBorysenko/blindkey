@@ -101,6 +101,93 @@ open http://localhost:8080/login
 - `/tokens` creates API tokens (the value is shown once) and revokes them; `/audit` is the paginated audit log.
 - Assets (Pico CSS, htmx) are served from `node_modules` under `/assets` — no CDN, so the UI works offline and under a strict CSP.
 
+## Deployment (Docker)
+
+The stack is three services: `server` (this image), `caddy` (automatic TLS, reverse proxy) and `backup` (the same image running a 24-hour backup loop). Everything lives in `docker/`.
+
+### First run
+
+```bash
+cd docker
+cp .env.example .env            # set PIDB_DOMAIN and PIDB_ACME_EMAIL
+mkdir -p secrets
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" > secrets/master_key
+chmod 600 secrets/master_key
+sudo chown 1000:1000 secrets/master_key   # the containers run as uid 1000 (node)
+```
+
+The order matters: Compose bind-mounts this `file:` secret with its host owner and mode, and the containers run as uid 1000, so the key file must end up owned by uid 1000 — chown it after `chmod`, since once it belongs to uid 1000 a non-root operator can no longer write to it. Skip this and the server can't read the key and restarts in a loop.
+
+**Store `secrets/master_key` in your password manager before going further.** It is mounted at `/run/secrets/master_key` and read through `PIDB_MASTER_KEY_FILE`; it is never baked into an image and never included in a backup. Lose it and every stored secret value is unrecoverable.
+
+Create the admin user and the schema, then start the stack:
+
+```bash
+docker compose run --rm \
+  -e PIDB_ADMIN_USERNAME=alex \
+  -e PIDB_ADMIN_PASSWORD='change-me' \
+  server init
+docker compose up -d
+docker compose logs -f server
+```
+
+Then open `https://$PIDB_DOMAIN/login`. Point the CLI at the same host with `pidb login https://$PIDB_DOMAIN`.
+
+### What each variable does
+
+`docker/.env.example` documents them all. The ones that matter most:
+
+- `PIDB_DOMAIN`, `PIDB_ACME_EMAIL` — Caddy's certificate hostname and ACME contact.
+- `PIDB_TRUST_PROXY=true` — **required** behind Caddy. Fastify only reports `https` (and the admin session cookie only gets its `Secure` flag) when it trusts `X-Forwarded-Proto`. The compose file already pins `PIDB_TRUST_PROXY: "true"` for the `server` service, so this `.env` value is informational — it takes effect only if you run the server outside this compose file.
+- `PIDB_BACKUP_INTERVAL` (seconds, default 86400) and `PIDB_BACKUP_KEEP` (default 14) — the backup loop.
+- `PIDB_LOG_LEVEL` — pino level; logs are JSON on stdout, with credentials and secret-bearing request-body paths redacted.
+
+### Backups and restore
+
+The `backup` service writes `pidb-<timestamp>.sqlite` into the `pidb-data` volume under `/data/backups` every `PIDB_BACKUP_INTERVAL` seconds and prunes to the newest `PIDB_BACKUP_KEEP` copies. A backup is the database only — **it does not contain the master key**, so keep the key somewhere else or the copies are worthless.
+
+Copy one off the host:
+
+```bash
+docker compose cp server:/data/backups ./backups-$(date +%F)
+```
+
+Restore into a stopped stack:
+
+```bash
+docker compose down
+docker compose run --rm --entrypoint sh server -c \
+  'cp /data/backups/pidb-<timestamp>.sqlite /data/pidb.sqlite'
+docker compose up -d
+```
+
+### Rotating the master key
+
+Generate the new key, keep the old one available under its version, then rewrap:
+
+```bash
+# in docker/.env
+#   PIDB_MASTER_KEY_VERSION=2
+#   PIDB_MASTER_KEY_PREVIOUS=1:<old-base64-key>
+# write the NEW key into docker/secrets/master_key, keeping its 1000:1000
+# owner and 600 mode (tee into the existing file rather than overwriting it directly):
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" | sudo tee secrets/master_key > /dev/null
+docker compose run --rm server rotate-key
+docker compose up -d
+```
+
+Once `rotate-key` reports every secret rewrapped, delete `PIDB_MASTER_KEY_PREVIOUS` from `docker/.env` and run `docker compose up -d` again so the containers drop it.
+
+### Upgrading
+
+```bash
+git pull
+docker compose build
+docker compose up -d
+```
+
+Migrations run on startup, so no separate step is needed.
+
 ## Environment
 
 | variable | default | purpose |

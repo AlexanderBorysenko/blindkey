@@ -66,6 +66,6 @@ volumes:
 
 secrets:
   # Mounted read-only at /run/secrets/master_key. The container runs as uid 1000 (node):
-  # on the host run `sudo chown 1000:1000 secrets/master_key && chmod 600 secrets/master_key`.
+  # on the host run `chmod 600 secrets/master_key && sudo chown 1000:1000 secrets/master_key`.
   master_key:
     file: ./secrets/master_key
