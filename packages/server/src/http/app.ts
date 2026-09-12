@@ -9,6 +9,7 @@ import { registerDocumentRoutes } from './routes/documents.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerSecretRoutes } from './routes/secrets.js';
 import { registerAdminRoutes } from './routes/admin.js';
+import { registerMcpRoutes } from './mcp.js';
 
 export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   const app = Fastify({
@@ -38,5 +39,6 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   registerSearchRoutes(app, ctx);
   registerSecretRoutes(app, ctx);
   registerAdminRoutes(app, ctx);
+  registerMcpRoutes(app, ctx);
   return app;
 }
