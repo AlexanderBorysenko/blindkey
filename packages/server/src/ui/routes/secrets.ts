@@ -32,7 +32,15 @@ function fieldRows(b: Record<string, unknown>): FieldRow[] {
     const key = rawKey.trim();
     if (!key) return;
     const sv = sensitiveRaw[i];
-    const sensitive = sv === undefined ? defaultSensitive(key) : sv === '1' || sv === 'true' || sv === 'on';
+    // Only an explicit "visible" token may mean false; anything unrecognised (missing, or a
+    // stale key string from the old checkbox encoding) falls back to the safe default rather
+    // than silently becoming non-sensitive.
+    const sensitive =
+      sv === '0' || sv === 'false' || sv === 'off'
+        ? false
+        : sv === '1' || sv === 'true' || sv === 'on'
+          ? true
+          : defaultSensitive(key);
     rows.push({ key, value: values[i] ?? '', sensitive });
   });
   return rows;

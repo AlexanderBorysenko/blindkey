@@ -84,6 +84,19 @@ describe('ui secret create', () => {
     expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['host', false], ['password', true]]);
   });
 
+  it('falls back to defaultSensitive, never to false, when sensitive carries a stale key-string token (old encoding)', async () => {
+    const res = await post('/p/acme/secrets', {
+      csrf,
+      name: 'OldEncoding',
+      key: ['password', 'host'],
+      value: ['p', 'h'],
+      sensitive: 'password',
+    });
+    expect(res.statusCode).toBe(302);
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'OldEncoding')!;
+    expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['password', true], ['host', false]]);
+  });
+
   it('drops rows with an empty key', async () => {
     await post('/p/acme/secrets', { csrf, name: 'Sparse', key: ['token', ''], value: ['v', 'ignored'] });
     const meta = getSecretMeta(t.db, t.ring, acme(), 'Sparse')!;
