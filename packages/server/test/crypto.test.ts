@@ -39,6 +39,12 @@ describe('envelope', () => {
     expect(decryptField(dek, 1, 'k', encryptField(dek, 1, 'k', ''))).toBe('');
     expect(decryptField(dek, 1, 'k', encryptField(dek, 1, 'k', 'пароль ✓'))).toBe('пароль ✓');
   });
+  it('throws CryptoError for wrong-length key on open', () => {
+    expect(() => open(randomBytes(16), seal(master, Buffer.from('x'), 'aad'), 'aad')).toThrow(CryptoError);
+  });
+  it('throws CryptoError for wrong-length key on seal', () => {
+    expect(() => seal(randomBytes(16), Buffer.from('x'), 'aad')).toThrow(CryptoError);
+  });
 });
 
 describe('tokens', () => {

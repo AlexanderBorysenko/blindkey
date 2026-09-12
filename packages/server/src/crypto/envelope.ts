@@ -7,10 +7,14 @@ const DEK_AAD = 'secret-dek';
 
 export function seal(key: Buffer, plaintext: Buffer, aad: string): Buffer {
   const nonce = randomBytes(NONCE_LEN);
-  const cipher = createCipheriv('aes-256-gcm', key, nonce);
-  cipher.setAAD(Buffer.from(aad, 'utf8'));
-  const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  return Buffer.concat([nonce, cipher.getAuthTag(), ct]);
+  try {
+    const cipher = createCipheriv('aes-256-gcm', key, nonce);
+    cipher.setAAD(Buffer.from(aad, 'utf8'));
+    const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    return Buffer.concat([nonce, cipher.getAuthTag(), ct]);
+  } catch {
+    throw new CryptoError('encrypt failed');
+  }
 }
 
 export function open(key: Buffer, blob: Buffer, aad: string): Buffer {
@@ -18,10 +22,10 @@ export function open(key: Buffer, blob: Buffer, aad: string): Buffer {
   const nonce = blob.subarray(0, NONCE_LEN);
   const tag = blob.subarray(NONCE_LEN, NONCE_LEN + TAG_LEN);
   const ct = blob.subarray(NONCE_LEN + TAG_LEN);
-  const decipher = createDecipheriv('aes-256-gcm', key, nonce);
-  decipher.setAAD(Buffer.from(aad, 'utf8'));
-  decipher.setAuthTag(tag);
   try {
+    const decipher = createDecipheriv('aes-256-gcm', key, nonce);
+    decipher.setAAD(Buffer.from(aad, 'utf8'));
+    decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ct), decipher.final()]);
   } catch {
     throw new CryptoError();
