@@ -19,6 +19,8 @@ beforeAll(async () => {
   t.project('acme');
   const id = getProjectBySlug(t.db, 'acme')!.id;
   createSecret(t.db, t.ring, { projectId: id, name: 'DB', description: '', tags: [], fields: [{ key: 'password', value: 'hunter2hunter2' }] });
+  createSecret(t.db, t.ring, { projectId: id, name: 'foo)(bar', description: '', tags: [], fields: [{ key: 'password', value: 'v1' }] });
+  createSecret(t.db, t.ring, { projectId: id, name: 'foo]bar', description: '', tags: [], fields: [{ key: 'password', value: 'v2' }] });
   upsertDocument(t.db, {
     projectId: id,
     slug: 'deploy',
@@ -28,6 +30,13 @@ beforeAll(async () => {
   });
   upsertDocument(t.db, { projectId: null, slug: 'guidelines', title: 'Guidelines', category: 'guidelines', body_md: '# Guidelines\n' });
   upsertDocument(t.db, { projectId: id, slug: 'doomed', title: 'Doomed', category: 'notes', body_md: 'bye\n' });
+  upsertDocument(t.db, {
+    projectId: id,
+    slug: 'edge-cases',
+    title: 'Edge cases',
+    category: 'notes',
+    body_md: 'Ref one {{secret:foo)(bar}} and ref two {{secret:foo]bar}}.\n',
+  });
 });
 afterAll(async () => {
   await t.app.close();
@@ -63,6 +72,20 @@ describe('ui document view', () => {
     const doc = await page('/global/docs/guidelines');
     expect(doc.statusCode).toBe(200);
     expect(doc.body).toContain('<h1>Guidelines</h1>');
+  });
+
+  it('encodes parentheses in a secret name so the link destination is not truncated', async () => {
+    const res = await page('/p/acme/docs/edge-cases');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('href="/p/acme/secrets/foo%29%28bar"');
+    expect(res.body).not.toContain('href="/p/acme/secrets/foo"');
+    expect(res.body).toContain('{{secret:foo)(bar}}');
+  });
+
+  it('renders a secret name containing "]" as a link instead of breaking the label', async () => {
+    const res = await page('/p/acme/docs/edge-cases');
+    expect(res.body).toContain('href="/p/acme/secrets/foo%5Dbar"');
+    expect(res.body).toContain('{{secret:foo]bar}}');
   });
 
   it('renders 404 HTML for an unknown document', async () => {
