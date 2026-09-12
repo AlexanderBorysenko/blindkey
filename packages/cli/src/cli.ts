@@ -11,6 +11,7 @@ import { runProjectsGet, runProjectsList, runSearch } from './commands/projects.
 import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from './commands/docs.js';
 import { runSecretGet, runSecretSet, runSecretsList } from './commands/secrets.js';
 import { runSecretExec } from './commands/exec.js';
+import { runSecretEnv, runSecretWrite } from './commands/files.js';
 
 export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
   return new PidbClient(loadConfig(env));
@@ -134,6 +135,33 @@ export function buildProgram(): Command {
         emit(await runSecretSet(clientFrom(), target, name, field, opts), opts.json === true);
       },
     );
+  secret
+    .command('write')
+    .argument('<target>', 'project slug or "global"')
+    .argument('<name>', 'secret name')
+    .argument('<field>', 'field key')
+    .requiredOption('--out <path>', 'destination file')
+    .option('--mode <mode>', 'octal file mode', '600')
+    .option('--force', 'overwrite an existing file')
+    .option('--json', 'raw JSON output')
+    .description('Write one field value to a file (never printed)')
+    .action(
+      async (target: string, name: string, field: string, opts: { out: string; mode?: string; force?: boolean; json?: boolean }) => {
+        emit(await runSecretWrite(clientFrom(), target, name, field, opts), opts.json === true);
+      },
+    );
+  secret
+    .command('env')
+    .argument('<target>', 'project slug or "global"')
+    .argument('<name>', 'secret name')
+    .requiredOption('--out <path>', 'destination file')
+    .option('--mode <mode>', 'octal file mode', '600')
+    .option('--force', 'overwrite an existing file')
+    .option('--json', 'raw JSON output')
+    .description('Write every field as key=value lines to a file (never printed)')
+    .action(async (target: string, name: string, opts: { out: string; mode?: string; force?: boolean; json?: boolean }) => {
+      emit(await runSecretEnv(clientFrom(), target, name, opts), opts.json === true);
+    });
   secret
     .command('exec')
     .argument('<target>', 'project slug or "global"')
