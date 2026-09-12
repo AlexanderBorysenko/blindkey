@@ -6,4 +6,6 @@ export interface AppContext {
   ring: KeyRing;
   logLevel?: string;
   trustProxy?: boolean | string;
+  /** Test-only: send pino output here instead of stdout. */
+  loggerStream?: import('node:stream').Writable;
 }

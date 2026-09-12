@@ -17,7 +17,23 @@ import { isUiRequest, renderPage } from '../ui/render.js';
 
 export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: { level: ctx.logLevel ?? 'info', redact: ['req.headers.authorization', 'req.headers.cookie'] },
+    logger: {
+      level: ctx.logLevel ?? 'info',
+      // Secret material must never reach a log line (spec §12): credentials in
+      // headers, and the value-bearing paths of every secrets request body.
+      redact: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'req.body.password',
+        'req.body.value',
+        'req.body.fields',
+        'req.body.*.value',
+        'body.password',
+        'body.value',
+        'body.fields',
+      ],
+      ...(ctx.loggerStream ? { stream: ctx.loggerStream } : {}),
+    },
     trustProxy: ctx.trustProxy ?? false,
     bodyLimit: 4 * 1024 * 1024,
   });
