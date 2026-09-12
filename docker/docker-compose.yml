@@ -1,0 +1,67 @@
+name: pidb
+
+x-image: &image
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: pidb-server:local
+
+services:
+  server:
+    <<: *image
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PIDB_MASTER_KEY_FILE: /run/secrets/master_key
+      PIDB_DATA_DIR: /data
+      PIDB_PORT: "8080"
+    secrets:
+      - master_key
+    volumes:
+      - pidb-data:/data
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - server
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  backup:
+    <<: *image
+    restart: unless-stopped
+    depends_on:
+      - server
+    env_file:
+      - .env
+    environment:
+      PIDB_MASTER_KEY_FILE: /run/secrets/master_key
+      PIDB_DATA_DIR: /data
+    secrets:
+      - master_key
+    volumes:
+      - pidb-data:/data
+    entrypoint: ["/bin/sh", "/app/docker/backup-loop.sh"]
+    healthcheck:
+      disable: true
+
+volumes:
+  pidb-data:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  master_key:
+    file: ./secrets/master_key

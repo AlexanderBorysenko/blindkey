@@ -1,0 +1,12 @@
+{
+	email {$PIDB_ACME_EMAIL}
+}
+
+{$PIDB_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy server:8080
+	log {
+		output stdout
+		format json
+	}
+}
