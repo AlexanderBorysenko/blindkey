@@ -33,10 +33,10 @@ describe('ui audit', () => {
 
   it('filters by action and by actor', async () => {
     const byAction = await page('/audit?action=doc.write');
-    expect(byAction.body).toContain('doc.write');
+    expect(byAction.body).toContain('<td>doc.write</td>');
     expect(byAction.body).not.toContain('secret.reveal');
     const byActor = await page('/audit?actor=admin');
-    expect(byActor.body).toContain('doc.write');
+    expect(byActor.body).toContain('<td>doc.write</td>');
     expect(byActor.body).not.toContain('secret.reveal');
   });
 

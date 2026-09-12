@@ -1,7 +1,7 @@
 <h1>Audit log</h1>
 
 <form method="get" action="/audit">
-  <label>Action <input name="action" value="<%= it.action %>" placeholder="e.g. doc.write" /></label>
+  <label>Action <input name="action" value="<%= it.action %>" placeholder="e.g. auth.login" /></label>
   <label>Actor
     <select name="actor">
       <option value=""<%= it.actor === '' ? ' selected' : '' %>>any</option>
