@@ -29,24 +29,24 @@ Core security rule: **secret values never enter an AI agent's context by default
 
 ## 3. Architecture
 
-Single Node.js (TypeScript, ESM) process built on Fastify, backed by SQLite. Deployed as one Docker container behind Caddy (TLS). CLI is a separate package that talks to the server over HTTPS only.
+Single Node.js 22 (TypeScript 5, ESM) process built on Fastify 5, backed by SQLite. Deployed as one Docker container behind Caddy (TLS). CLI is a separate package that talks to the server over HTTPS only.
 
 ```
 packages/shared   types, zod schemas, secret-reference parser, secret-value lint
-packages/server   Fastify app: db (Drizzle + better-sqlite3), crypto, services,
+packages/server   Fastify app: db (better-sqlite3 + SQL migrations), crypto, repos,
                   REST API, MCP endpoint, server-rendered admin UI
 packages/cli      `pidb` — HTTP client, env/file injection of secret values
 docker/           Dockerfile, docker-compose.yml (server + caddy), Caddyfile
 docs/             specs and plans
 ```
 
-Runtime dependencies (server): `fastify`, `@fastify/cookie`, `@fastify/formbody`, `@fastify/rate-limit`, `@fastify/static`, `@fastify/view` + `eta`, `better-sqlite3`, `drizzle-orm`, `drizzle-kit` (dev), `argon2`, `zod`, `@modelcontextprotocol/sdk`, `marked` (Markdown render for UI), `pino`.
+Runtime dependencies (server): `fastify`, `@fastify/cookie`, `@fastify/formbody`, `@fastify/rate-limit`, `@fastify/static`, `@fastify/view` + `eta`, `better-sqlite3`, `argon2`, `zod`, `@modelcontextprotocol/sdk`, `marked` (Markdown render for UI), `pino`.
 CLI: `commander`, `undici` (or native fetch), `zod`.
 Tooling: `typescript`, `vitest`, `tsx`, `eslint`, `prettier`.
 
 ## 4. Data model
 
-SQLite file at `/data/pidb.sqlite`. Drizzle schema + migrations. FTS5 virtual table over documents.
+SQLite file at `/data/pidb.sqlite`. Hand-written SQL migrations applied by a small in-app migrator (`schema_migrations` table). FTS5 virtual table over documents. `PRAGMA foreign_keys = ON`, `journal_mode = WAL`.
 
 ### projects
 | column | type | notes |
@@ -64,7 +64,7 @@ SQLite file at `/data/pidb.sqlite`. Drizzle schema + migrations. FTS5 virtual ta
 |---|---|---|
 | id | integer pk | |
 | project_id | integer fk nullable | `NULL` = global secret |
-| name | text | human name, e.g. `Staging server`; unique within project (or within global) |
+| name | text | human name, e.g. `Staging server`; unique within project (or within global); must not contain `/` (reserved by reference syntax) |
 | description | text | non-sensitive notes |
 | tags | text (json array) | |
 | dek_wrapped | blob | data-encryption key encrypted with master key |
