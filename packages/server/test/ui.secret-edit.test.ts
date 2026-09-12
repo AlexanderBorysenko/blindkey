@@ -50,13 +50,38 @@ describe('ui secret create', () => {
       tags: 'prod',
       key: ['host', 'password'],
       value: ['smtp.example.com', 's3cret-mail'],
-      sensitive: 'password',
+      sensitive: ['0', '1'],
     });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/p/acme/secrets/SMTP');
     const meta = getSecretMeta(t.db, t.ring, acme(), 'SMTP')!;
     expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['host', false], ['password', true]]);
     expect(revealField(t.db, t.ring, meta.id, 'password')).toBe('s3cret-mail');
+  });
+
+  it('stores sensitivity positionally, aligned with key/value order (not by key string)', async () => {
+    const res = await post('/p/acme/secrets', {
+      csrf,
+      name: 'Positional',
+      key: ['host', 'password'],
+      value: ['h', 'p'],
+      sensitive: ['0', '1'],
+    });
+    expect(res.statusCode).toBe(302);
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'Positional')!;
+    expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['host', false], ['password', true]]);
+  });
+
+  it('falls back to defaultSensitive per row when sensitive is omitted entirely', async () => {
+    const res = await post('/p/acme/secrets', {
+      csrf,
+      name: 'NoJs',
+      key: ['host', 'password'],
+      value: ['h', 'p'],
+    });
+    expect(res.statusCode).toBe(302);
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'NoJs')!;
+    expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['host', false], ['password', true]]);
   });
 
   it('drops rows with an empty key', async () => {
@@ -95,13 +120,63 @@ describe('ui secret edit', () => {
       tags: 'prod',
       key: ['host', 'password'],
       value: ['db2.internal', ''],
-      sensitive: 'password',
+      sensitive: ['0', '1'],
     });
     expect(res.statusCode).toBe(302);
     const meta = getSecretMeta(t.db, t.ring, acme(), 'DB')!;
     expect(meta.description).toBe('updated');
     expect(revealField(t.db, t.ring, meta.id, 'host')).toBe('db2.internal');
     expect(revealField(t.db, t.ring, meta.id, 'password')).toBe('hunter2hunter2');
+  });
+
+  it('rejects a renamed field submitted with an empty value box, leaving the original field intact', async () => {
+    createSecret(t.db, t.ring, {
+      projectId: acme(),
+      name: 'EditProbe',
+      description: '',
+      tags: [],
+      fields: [{ key: 'host', value: 'h1' }, { key: 'password', value: 'p1', sensitive: true }],
+    });
+    const res = await post('/p/acme/secrets/EditProbe', {
+      csrf,
+      name: 'EditProbe',
+      key: ['host', 'passwd'],
+      value: ['h1', ''],
+      sensitive: ['0', '1'],
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).not.toContain('p1');
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'EditProbe')!;
+    expect(meta.fields.map((f) => f.key)).toEqual(['host', 'password']);
+    expect(revealField(t.db, t.ring, meta.id, 'password')).toBe('p1');
+  });
+
+  it('rejects flipping a field to Sensitive with an empty value box, leaving the stored field unchanged', async () => {
+    const res = await post('/p/acme/secrets/EditProbe', {
+      csrf,
+      name: 'EditProbe',
+      key: ['host', 'password'],
+      value: ['', 'p1'],
+      sensitive: ['1', '1'],
+    });
+    expect(res.statusCode).toBe(400);
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'EditProbe')!;
+    expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['host', false], ['password', true]]);
+    expect(revealField(t.db, t.ring, meta.id, 'host')).toBe('h1');
+  });
+
+  it('flips sensitivity when a value is supplied', async () => {
+    const res = await post('/p/acme/secrets/EditProbe', {
+      csrf,
+      name: 'EditProbe',
+      key: ['host', 'password'],
+      value: ['h2', 'p1'],
+      sensitive: ['1', '1'],
+    });
+    expect(res.statusCode).toBe(302);
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'EditProbe')!;
+    expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['host', true], ['password', true]]);
+    expect(revealField(t.db, t.ring, meta.id, 'host')).toBe('h2');
   });
 
   it('removes a field that was dropped from the form', async () => {

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../http/context.js';
-import { NON_SENSITIVE_KEYS, secretInputSchema, secretPatchSchema } from '@pidb/shared';
+import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretPatchSchema } from '@pidb/shared';
 import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
@@ -16,16 +16,24 @@ interface FieldRow {
   sensitive: boolean;
 }
 
-/** Rows arrive as parallel `key`/`value` lists; `sensitive` holds the keys whose box was checked. */
+/**
+ * Rows arrive as three parallel lists: `key`, `value` and `sensitive` (a per-row <select>,
+ * so it is always submitted and aligns positionally — no coupling to the key string, which
+ * would otherwise go stale the moment a key is renamed). The sensitive list is indexed by
+ * the row's ORIGINAL position, before any empty-key row is dropped, so positions stay aligned
+ * with `values`. A missing entry (a truncated or hand-rolled POST) fails safe via `defaultSensitive`.
+ */
 function fieldRows(b: Record<string, unknown>): FieldRow[] {
   const keys = list(b, 'key');
   const values = list(b, 'value');
-  const sensitiveKeys = new Set(list(b, 'sensitive'));
+  const sensitiveRaw = list(b, 'sensitive');
   const rows: FieldRow[] = [];
   keys.forEach((rawKey, i) => {
     const key = rawKey.trim();
     if (!key) return;
-    rows.push({ key, value: values[i] ?? '', sensitive: sensitiveKeys.has(key) });
+    const sv = sensitiveRaw[i];
+    const sensitive = sv === undefined ? defaultSensitive(key) : sv === '1' || sv === 'true' || sv === 'on';
+    rows.push({ key, value: values[i] ?? '', sensitive });
   });
   return rows;
 }
@@ -137,6 +145,33 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
       const b = body(req);
       const rows = fieldRows(b);
       const existing = getSecretFor(ctx, principal, scope.projectSlug, req.params.name);
+      const rerender = (error: string) =>
+        reply.status(400).type('text/html').send(
+          renderPage('secret-edit', {
+            ...pageContext(ctx, req, 'Edit secret'),
+            prefix: scope.prefix,
+            scopeLabel: scope.projectSlug ?? 'global',
+            isNew: false,
+            action: `${scope.prefix}/secrets/${encodeURIComponent(req.params.name)}`,
+            hintKeys: NON_SENSITIVE_KEYS,
+            error,
+            form: { name: str(b, 'name'), description: str(b, 'description'), tags: str(b, 'tags'), rows },
+          }),
+        );
+      // An empty value box means "leave the stored value alone" ONLY for a row that still
+      // names an existing stored field with the same sensitivity. A rename, a new row, or a
+      // sensitivity flip with no value supplied cannot be resolved safely (the stored sensitive
+      // value is never read back into the form), so it must be re-entered instead of silently
+      // dropped or silently kept under a mismatched key/flag.
+      const existingByKey = new Map(existing.fields.map((f) => [f.key, f]));
+      for (const row of rows) {
+        if (row.value === '') {
+          const stored = existingByKey.get(row.key);
+          if (!stored || stored.sensitive !== row.sensitive) {
+            return rerender(`Field "${row.key}": value must be re-entered (its key or sensitivity changed)`);
+          }
+        }
+      }
       const keep = new Set(rows.map((r) => r.key));
       const patch = secretPatchSchema.safeParse({
         name: str(b, 'name', req.params.name),
@@ -147,18 +182,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
         removeFields: existing.fields.map((f) => f.key).filter((k) => !keep.has(k)),
       });
       if (!patch.success) {
-        return reply.status(400).type('text/html').send(
-          renderPage('secret-edit', {
-            ...pageContext(ctx, req, 'Edit secret'),
-            prefix: scope.prefix,
-            scopeLabel: scope.projectSlug ?? 'global',
-            isNew: false,
-            action: `${scope.prefix}/secrets/${encodeURIComponent(req.params.name)}`,
-            hintKeys: NON_SENSITIVE_KEYS,
-            error: patch.error.issues.map((i) => `${i.path.join('.') || 'form'}: ${i.message}`).join('; '),
-            form: { name: str(b, 'name'), description: str(b, 'description'), tags: str(b, 'tags'), rows },
-          }),
-        );
+        return rerender(patch.error.issues.map((i) => `${i.path.join('.') || 'form'}: ${i.message}`).join('; '));
       }
       const updated = updateSecretFor(ctx, adminActor(req), scope.projectSlug, req.params.name, patch.data);
       return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(updated.name)}`, 302);
