@@ -185,7 +185,7 @@ Scopes:
 | `projects:read` | list/get projects |
 | `docs:read` | read documents, search |
 | `docs:write` | create/update/delete documents |
-| `secrets:meta` | list secrets, names, types, descriptions, non-sensitive field values |
+| `secrets:meta` | list secrets, names, tags, descriptions, non-sensitive field values |
 | `secrets:reveal` | read sensitive field values |
 | `secrets:write` | create/update/delete secrets and fields |
 | `admin` | everything, incl. tokens, audit log, project create/delete |
@@ -220,7 +220,7 @@ Secrets
 - Global secrets use `/secrets/:name/...` with identical semantics.
 
 Search
-- `GET /search?q=` → `{ projects: [...], documents: [{ project, slug, title, snippet }], secrets: [{ project, name, type }] }` (`docs:read` for docs, `secrets:meta` for secrets; sections omitted when scope missing). Never searches values.
+- `GET /search?q=` → `{ projects: [...], documents: [{ project, slug, title, snippet }], secrets: [{ project, name, tags }] }` (`docs:read` for docs, `secrets:meta` for secrets; sections omitted when scope missing). Never searches values.
 
 Admin
 - `GET /tokens`, `POST /tokens` `{ name, scopes, project_ids?, expires_at? }` → returns token once, `DELETE /tokens/:id` (revoke) (`admin`)
