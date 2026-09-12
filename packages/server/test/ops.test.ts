@@ -3,6 +3,8 @@ import { mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { openDb } from '../src/db/connection.js';
 import { runInit, runRotateKey, runBackup } from '../src/ops.js';
@@ -45,5 +47,18 @@ describe('ops', () => {
     expect(copy.prepare(`SELECT COUNT(*) AS c FROM projects`).get()).toEqual({ c: 1 });
     copy.close();
     db.close();
+  });
+});
+
+describe('pidb-server cli', () => {
+  it('exits 1 with a clear message when the master key is missing', () => {
+    const root = fileURLToPath(new URL('../../..', import.meta.url));
+    const r = spawnSync(
+      join(root, 'node_modules/.bin/tsx'),
+      [join(root, 'packages/server/src/cli.ts'), 'rotate-key'],
+      { env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' }, encoding: 'utf8' },
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('PIDB_MASTER_KEY');
   });
 });

@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { loadConfig, ConfigError } from './config.js';
+import { loadConfig } from './config.js';
 import { openDb } from './db/connection.js';
 import { runBackup, runInit, runRotateKey, startServer } from './ops.js';
 
@@ -37,7 +37,11 @@ function promptHidden(question: string): Promise<string> {
           resolve(buf.trim());
           return;
         }
-        if (ch === CTRL_C) process.exit(130);
+        if (ch === CTRL_C) {
+          stdin.setRawMode(false);
+          stdout.write('\n');
+          process.exit(130);
+        }
         if (ch === BACKSPACE) buf = buf.slice(0, -1);
         else buf += ch;
       }
@@ -49,7 +53,7 @@ function promptHidden(question: string): Promise<string> {
 function fatal(err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`error: ${msg}`);
-  process.exit(err instanceof ConfigError ? 2 : 1);
+  process.exit(1);
 }
 
 const program = new Command().name('pidb-server').description('Projects Info DB server');
