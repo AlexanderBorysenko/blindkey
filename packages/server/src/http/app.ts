@@ -5,6 +5,8 @@ import type { AppContext } from './context.js';
 import { registerAuth } from './auth.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerProjectRoutes } from './routes/projects.js';
+import { registerDocumentRoutes } from './routes/documents.js';
+import { registerSearchRoutes } from './routes/search.js';
 
 export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   const app = Fastify({
@@ -30,5 +32,7 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
 
   registerHealthRoutes(app, ctx);
   registerProjectRoutes(app, ctx);
+  registerDocumentRoutes(app, ctx);
+  registerSearchRoutes(app, ctx);
   return app;
 }
