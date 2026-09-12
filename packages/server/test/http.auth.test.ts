@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { makeTestApp, auth } from './helpers.js';
 import { listAudit } from '../src/repos/audit.js';
+import { FailureLimiter } from '../src/http/auth.js';
 
 describe('http auth', () => {
   it('serves /health without auth', async () => {
@@ -43,5 +44,17 @@ describe('http auth', () => {
     const r = await t.app.inject({ method: 'GET', url: '/api/v1/nope', headers: auth(t.token(['admin'])) });
     expect(r.statusCode).toBe(404);
     expect(r.json()).toEqual({ error: 'not_found' });
+  });
+});
+
+describe('FailureLimiter', () => {
+  it('evicts idle IPs once their window elapses', () => {
+    const l = new FailureLimiter(2, 1000);
+    l.record('a', 0);
+    l.record('a', 0);
+    expect(l.isBlocked('a', 0)).toBe(true);
+    expect(l.size).toBe(1);
+    expect(l.isBlocked('a', 2000)).toBe(false);
+    expect(l.size).toBe(0);
   });
 });

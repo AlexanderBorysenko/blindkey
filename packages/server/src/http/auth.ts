@@ -23,14 +23,20 @@ export class FailureLimiter {
   ) {}
   private prune(ip: string, ts: number): number[] {
     const list = (this.hits.get(ip) ?? []).filter((t) => ts - t < this.windowMs);
-    this.hits.set(ip, list);
+    if (list.length === 0) this.hits.delete(ip);
+    else this.hits.set(ip, list);
     return list;
   }
   record(ip: string, ts = Date.now()): void {
-    this.prune(ip, ts).push(ts);
+    const list = this.prune(ip, ts);
+    list.push(ts);
+    this.hits.set(ip, list);
   }
   isBlocked(ip: string, ts = Date.now()): boolean {
     return this.prune(ip, ts).length >= this.max;
+  }
+  get size(): number {
+    return this.hits.size;
   }
 }
 
