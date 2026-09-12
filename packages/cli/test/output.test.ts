@@ -14,6 +14,11 @@ describe('table', () => {
   it('handles zero rows', () => {
     expect(table(['A'], [])).toBe('A\n-');
   });
+
+  it('collapses embedded newlines and tabs to single spaces so rows stay on one line', () => {
+    const out = table(['COL1', 'COL2'], [['a\nb', 'x\ty']]);
+    expect(out.split('\n')).toEqual(['COL1  COL2', '----  ----', 'a b   x y']);
+  });
 });
 
 describe('fmtTime', () => {

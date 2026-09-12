@@ -41,7 +41,7 @@ export async function runSearch(client: PidbClient, query: string): Promise<Comm
   }
   if (result.documents) {
     sections.push('Documents:', table(['PROJECT', 'SLUG', 'TITLE', 'SNIPPET'],
-      result.documents.map((d) => [d.project ?? 'global', d.slug, d.title, d.snippet.replace(/\s+/g, ' ')])), '');
+      result.documents.map((d) => [d.project ?? 'global', d.slug, d.title, d.snippet])), '');
   }
   if (result.secrets) {
     sections.push('Secrets:', table(['PROJECT', 'NAME', 'TAGS'],
