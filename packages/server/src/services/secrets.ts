@@ -1,7 +1,7 @@
 import type { SecretInput, SecretPatch } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
-import { assertScope, type Actor, type Principal } from '../auth/principal.js';
-import { NotFoundError } from '../errors.js';
+import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
+import { ForbiddenError, NotFoundError } from '../errors.js';
 import type { ProjectRow } from '../repos/projects.js';
 import { createSecret, deleteSecret, getSecretMeta, listSecrets, revealAllFields, revealField, updateSecret, type SecretMeta } from '../repos/secrets.js';
 import { publicSecret, type PublicSecret } from '../http/serialize.js';
@@ -30,7 +30,9 @@ export function getSecretFor(ctx: AppContext, principal: Principal, projectSlug:
 }
 
 export function revealFieldFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, key: string): string {
-  assertScope(actor.principal, 'secrets:meta');
+  if (!hasScope(actor.principal, 'secrets:meta') && !hasScope(actor.principal, 'secrets:reveal')) {
+    throw new ForbiddenError('secrets:meta');
+  }
   const project = scopeProject(ctx, actor.principal, projectSlug);
   const secret = mustGet(ctx, project?.id ?? null, name);
   const field = secret.fields.find((f) => f.key === key);
