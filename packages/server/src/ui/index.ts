@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import type { AppContext } from '../http/context.js';
 import { PUBLIC_DIR } from './render.js';
+import { registerAdminRoutes } from './routes/admin.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerProjectRoutes } from './routes/projects.js';
@@ -39,4 +40,5 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
   registerProjectRoutes(app, ctx);
   registerDocumentRoutes(app, ctx);
   registerSecretRoutes(app, ctx);
+  registerAdminRoutes(app, ctx);
 }

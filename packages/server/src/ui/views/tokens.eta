@@ -1,0 +1,56 @@
+<h1>API tokens</h1>
+
+<% if (it.created) { %>
+<article>
+  <header><strong>Token created — shown once</strong></header>
+  <p class="field-value"><%= it.created.token %></p>
+  <p><small>Copy it now: pidb stores only a hash, so this value cannot be shown again.</small></p>
+</article>
+<% } %>
+
+<table>
+  <thead><tr><th>ID</th><th>Name</th><th>Prefix</th><th>Scopes</th><th>Projects</th><th>Expires</th><th>Last used</th><th>State</th><th></th></tr></thead>
+  <tbody>
+    <% it.tokens.forEach(function (t) { %>
+    <tr>
+      <td><%= t.id %></td>
+      <td><%= t.name %></td>
+      <td><code><%= t.prefix %></code></td>
+      <td><%= t.scopes.join(', ') %></td>
+      <td><%= t.projects === null ? 'all' : t.projects.join(', ') %></td>
+      <td><%= t.expires_at === null ? 'never' : new Date(t.expires_at).toISOString().slice(0, 19) + 'Z' %></td>
+      <td><%= t.last_used_at === null ? '' : new Date(t.last_used_at).toISOString().slice(0, 19) + 'Z' %></td>
+      <td><%= t.revoked_at === null ? 'active' : 'revoked' %></td>
+      <td>
+        <% if (t.revoked_at === null) { %>
+        <form method="post" action="/tokens/<%= t.id %>/revoke">
+          <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+          <button class="secondary outline" type="submit">Revoke</button>
+        </form>
+        <% } %>
+      </td>
+    </tr>
+    <% }) %>
+  </tbody>
+</table>
+
+<h2>New token</h2>
+<% if (it.error) { %><p role="alert"><%= it.error %></p><% } %>
+<form method="post" action="/tokens">
+  <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+  <label>Name <input name="name" required /></label>
+  <fieldset>
+    <legend>Scopes</legend>
+    <% it.scopes.forEach(function (s) { %>
+    <label><input type="checkbox" name="scopes" value="<%= s %>" /> <%= s %></label>
+    <% }) %>
+  </fieldset>
+  <label>Projects (comma separated slugs; empty = all)
+    <input name="projects" list="project-slugs" />
+  </label>
+  <datalist id="project-slugs">
+    <% it.projects.forEach(function (p) { %><option value="<%= p.slug %>"></option><% }) %>
+  </datalist>
+  <label>Expires in (days; empty = never) <input name="days" type="number" min="1" /></label>
+  <button type="submit">Create token</button>
+</form>
