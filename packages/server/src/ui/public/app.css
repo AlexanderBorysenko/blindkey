@@ -1,0 +1,11 @@
+.masked { font-family: var(--pico-font-family-monospace); letter-spacing: 0.15em; }
+.field-value { font-family: var(--pico-font-family-monospace); word-break: break-all; }
+.findings { border-left: 3px solid var(--pico-del-color); padding-left: 0.75rem; }
+.findings li { margin: 0.25rem 0; }
+.tabs { display: flex; gap: 1rem; margin-bottom: 1rem; }
+.tabs a[aria-current='page'] { font-weight: 700; text-decoration: underline; }
+.editor { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 800px) { .editor { grid-template-columns: 1fr; } }
+.preview { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); padding: 0.75rem; overflow-x: auto; }
+.row-actions { display: flex; gap: 0.5rem; align-items: center; }
+table td, table th { vertical-align: top; }

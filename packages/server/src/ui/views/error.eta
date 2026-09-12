@@ -1,0 +1,5 @@
+<article>
+  <header><strong><%= it.code %></strong></header>
+  <p><%= it.message %></p>
+  <a href="/">Back to projects</a>
+</article>

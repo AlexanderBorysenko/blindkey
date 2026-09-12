@@ -10,6 +10,8 @@ import { registerSearchRoutes } from './routes/search.js';
 import { registerSecretRoutes } from './routes/secrets.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerMcpRoutes } from './mcp.js';
+import { registerUi } from '../ui/index.js';
+import { isUiRequest, renderPage } from '../ui/render.js';
 
 export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   const app = Fastify({
@@ -20,14 +22,20 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
 
   await app.register(rateLimit, { global: false });
   registerAuth(app, ctx);
+  await registerUi(app, ctx);
 
   app.setErrorHandler((err, req, reply) => {
+    const ui = isUiRequest(req.url);
     if (err instanceof AppError) {
       if (err.status >= 500) {
         req.log.error({ err, code: err.code, ...err.details }, 'request failed');
-        return reply.status(err.status).send({ error: err.code, ...err.details });
+        return ui
+          ? reply.status(err.status).type('text/html').send(renderPage('error', { title: 'Error', code: err.code, message: 'Something went wrong.' }))
+          : reply.status(err.status).send({ error: err.code, ...err.details });
       }
-      return reply.status(err.status).send({ error: err.code, message: err.message, ...err.details });
+      return ui
+        ? reply.status(err.status).type('text/html').send(renderPage('error', { title: 'Error', code: err.code, message: err.message }))
+        : reply.status(err.status).send({ error: err.code, message: err.message, ...err.details });
     }
     const e = err as { statusCode?: number; message?: string };
     if (e.statusCode && e.statusCode < 500) {
@@ -39,12 +47,20 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
             : e.statusCode === 415
               ? 'unsupported_media_type'
               : 'bad_request';
-      return reply.status(e.statusCode).send({ error: code, message: e.message ?? 'bad request' });
+      return ui
+        ? reply.status(e.statusCode).type('text/html').send(renderPage('error', { title: 'Error', code, message: e.message ?? 'bad request' }))
+        : reply.status(e.statusCode).send({ error: code, message: e.message ?? 'bad request' });
     }
     req.log.error({ err }, 'unhandled error');
-    return reply.status(500).send({ error: 'internal' });
+    return ui
+      ? reply.status(500).type('text/html').send(renderPage('error', { title: 'Error', code: 'internal', message: 'Something went wrong.' }))
+      : reply.status(500).send({ error: 'internal' });
   });
-  app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: 'not_found' }));
+  app.setNotFoundHandler((req, reply) =>
+    isUiRequest(req.url)
+      ? reply.status(404).type('text/html').send(renderPage('error', { title: 'Not found', code: 'not_found', message: 'That page was not found.' }))
+      : reply.status(404).send({ error: 'not_found' }),
+  );
 
   registerHealthRoutes(app, ctx);
   registerProjectRoutes(app, ctx);
