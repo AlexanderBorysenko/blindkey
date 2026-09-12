@@ -2,6 +2,7 @@ import type { PidbClient } from '../client.js';
 import { seg } from '../client.js';
 import type { ProjectDetail, PublicProject, SearchResult } from '../api-types.js';
 import { fmtTime, table, type CommandResult } from '../output.js';
+import { CliError, EXIT_AUTH } from '../errors.js';
 
 export async function runProjectsList(client: PidbClient): Promise<CommandResult> {
   const projects = await client.json<PublicProject[]>('GET', '/api/v1/projects');
@@ -46,6 +47,9 @@ export async function runSearch(client: PidbClient, query: string): Promise<Comm
   if (result.secrets) {
     sections.push('Secrets:', table(['PROJECT', 'NAME', 'TAGS'],
       result.secrets.map((x) => [x.project ?? 'global', x.name, x.tags.join(',')])), '');
+  }
+  if (result.projects === undefined && result.documents === undefined && result.secrets === undefined) {
+    throw new CliError('token has none of projects:read, docs:read, secrets:meta — nothing to search', EXIT_AUTH);
   }
   return { json: result, text: sections.join('\n').trimEnd() };
 }

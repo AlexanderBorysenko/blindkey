@@ -27,11 +27,14 @@ describe('projects list', () => {
     expect((result.json as PublicProject[]).map((p) => p.slug)).toEqual(['acme', 'beta']);
   });
 
-  it('says so when there is nothing to list', async () => {
-    s.db.exec("DELETE FROM projects WHERE slug = 'beta'");
-    const result = await runProjectsList(client(['projects:read']));
-    expect(result.text).toContain('acme');
-    s.project('beta');
+  it('renders just the header when the token can see no projects', async () => {
+    const scoped = new PidbClient({ url: s.url, token: s.token(['projects:read'], []) });
+    const result = await runProjectsList(scoped);
+    expect(result.text.split('\n')).toEqual([
+      'SLUG  NAME  STATUS  TAGS  UPDATED',
+      '----  ----  ------  ----  -------',
+    ]);
+    expect(result.json).toEqual([]);
   });
 });
 
@@ -63,5 +66,11 @@ describe('search', () => {
   it('omits sections the token cannot see', async () => {
     const result = await runSearch(client(['docs:read']), 'deploy');
     expect(result.text).not.toMatch(/secrets/i);
+  });
+
+  it('refuses instead of silently reporting nothing found when the token has no search scope', async () => {
+    const err = await runSearch(client(['secrets:write']), 'deploy').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { exitCode?: number }).exitCode).toBe(3);
   });
 });
