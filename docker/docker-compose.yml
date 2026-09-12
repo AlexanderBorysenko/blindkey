@@ -16,6 +16,7 @@ services:
       PIDB_MASTER_KEY_FILE: /run/secrets/master_key
       PIDB_DATA_DIR: /data
       PIDB_PORT: "8080"
+      PIDB_TRUST_PROXY: "true"
     secrets:
       - master_key
     volumes:
@@ -28,8 +29,9 @@ services:
     restart: unless-stopped
     depends_on:
       - server
-    env_file:
-      - .env
+    environment:
+      PIDB_DOMAIN: ${PIDB_DOMAIN}
+      PIDB_ACME_EMAIL: ${PIDB_ACME_EMAIL}
     ports:
       - "80:80"
       - "443:443"
@@ -63,5 +65,7 @@ volumes:
   caddy-config:
 
 secrets:
+  # Mounted read-only at /run/secrets/master_key. The container runs as uid 1000 (node):
+  # on the host run `sudo chown 1000:1000 secrets/master_key && chmod 600 secrets/master_key`.
   master_key:
     file: ./secrets/master_key
