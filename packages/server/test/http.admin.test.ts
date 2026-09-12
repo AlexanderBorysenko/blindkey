@@ -34,6 +34,16 @@ describe('admin routes', () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual([expect.objectContaining({ action: 'project.create', actor_type: 'token' })]);
   });
+  it('rate limits repeated /auth/token attempts with error: rate_limited', async () => {
+    const t = await makeTestApp();
+    createAdmin(t.db, 'alex', await hashPassword('correct horse'));
+    let last;
+    for (let i = 0; i < 6; i++) {
+      last = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'wrong' } });
+    }
+    expect(last!.statusCode).toBe(429);
+    expect(last!.json().error).toBe('rate_limited');
+  });
   it('exchanges admin password for an admin token', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('correct horse'));

@@ -35,7 +35,15 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
     }
     const e = err as { statusCode?: number; message?: string };
     if (e.statusCode && e.statusCode < 500) {
-      return reply.status(e.statusCode).send({ error: 'bad_request', message: e.message ?? 'bad request' });
+      const code =
+        e.statusCode === 429
+          ? 'rate_limited'
+          : e.statusCode === 413
+            ? 'payload_too_large'
+            : e.statusCode === 415
+              ? 'unsupported_media_type'
+              : 'bad_request';
+      return reply.status(e.statusCode).send({ error: code, message: e.message ?? 'bad request' });
     }
     req.log.error({ err }, 'unhandled error');
     return reply.status(500).send({ error: 'internal' });
