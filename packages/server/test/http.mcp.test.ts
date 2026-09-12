@@ -52,6 +52,10 @@ describe('mcp', () => {
     expect(textOf(lint)).toContain('lint');
     const ok = await client.callTool({ name: 'write_document', arguments: { project: 'alpha', slug: 'notes', title: 'N', category: 'notes', body_md: 'clean' } });
     expect(ok.isError).toBeFalsy();
+    const big = await client
+      .callTool({ name: 'write_document', arguments: { project: 'alpha', slug: 'notes', title: 'N', category: 'notes', body_md: 'x'.repeat(2_000_001) } })
+      .catch((e: unknown) => e);
+    expect(big instanceof Error || (big as { isError?: boolean }).isError === true).toBe(true);
     const missing = await client.callTool({ name: 'get_project', arguments: { slug: 'beta' } });
     expect(missing.isError).toBe(true);
     expect(textOf(missing)).toContain('not_found');

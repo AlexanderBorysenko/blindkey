@@ -79,7 +79,7 @@ export function buildMcpServer(ctx: AppContext, actor: Actor): McpServer {
         slug: slugSchema,
         title: z.string().min(1).max(300),
         category: z.enum(DOC_CATEGORIES),
-        body_md: z.string(),
+        body_md: z.string().max(2_000_000),
         force: z.boolean().optional(),
       },
     },
@@ -112,11 +112,21 @@ export function registerMcpRoutes(app: FastifyInstance, ctx: AppContext): void {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {
-      void transport.close();
-      void server.close();
+      void transport.close().catch(() => {});
+      void server.close().catch(() => {});
     });
-    await server.connect(transport);
-    await transport.handleRequest(req.raw, reply.raw, req.body);
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req.raw, reply.raw, req.body);
+    } catch (err) {
+      req.log.error({ err }, 'mcp request failed');
+      if (!reply.raw.headersSent) {
+        reply.raw.writeHead(500, { 'content-type': 'application/json' });
+        reply.raw.end(JSON.stringify({ error: 'internal' }));
+      } else {
+        reply.raw.destroy();
+      }
+    }
   });
 
   app.get('/mcp', async (_req, reply) => reply.status(405).send({ error: 'method_not_allowed' }));
