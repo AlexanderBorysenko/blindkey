@@ -1,11 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import cookie from '@fastify/cookie';
 import formbody from '@fastify/formbody';
 import fastifyStatic from '@fastify/static';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import type { AppContext } from '../http/context.js';
-import { PUBLIC_DIR } from './render.js';
+import { PUBLIC_DIR, renderPage } from './render.js';
+import { registerAuthRoutes } from './routes/auth.js';
+import { csrfTokenFor } from './csrf.js';
+import { requireAdmin, uiSessionId } from './session.js';
 
 const require = createRequire(import.meta.url);
 
@@ -18,8 +20,7 @@ function assetRoots(): string[] {
   ];
 }
 
-export async function registerUi(app: FastifyInstance, _ctx: AppContext): Promise<void> {
-  await app.register(cookie);
+export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise<void> {
   await app.register(formbody);
   await app.register(fastifyStatic, {
     root: assetRoots(),
@@ -31,5 +32,14 @@ export async function registerUi(app: FastifyInstance, _ctx: AppContext): Promis
     // @fastify/static@10 invokes setHeaders with the Fastify reply, not the
     // raw node response, so the header is set via reply.header(), not res.setHeader().
     setHeaders: (reply) => reply.header('x-content-type-options', 'nosniff'),
+  });
+
+  registerAuthRoutes(app, ctx);
+
+  // Temporary landing page — Task 3 replaces this handler.
+  app.get('/', async (req, reply) => {
+    requireAdmin(req);
+    const csrf = csrfTokenFor(ctx, uiSessionId(req)!);
+    return reply.type('text/html').send(renderPage('placeholder', { title: 'Projects', nav: true, csrf }));
   });
 }

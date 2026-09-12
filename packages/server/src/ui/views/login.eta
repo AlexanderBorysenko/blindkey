@@ -1,0 +1,11 @@
+<article style="max-width: 26rem; margin: 4rem auto;">
+  <header><strong>pidb</strong> — admin</header>
+  <% if (it.error) { %>
+  <p role="alert"><%= it.error %></p>
+  <% } %>
+  <form method="post" action="/login">
+    <label>Username <input type="text" name="username" autocomplete="username" required autofocus /></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
+    <button type="submit">Log in</button>
+  </form>
+</article>

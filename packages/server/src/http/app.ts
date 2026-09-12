@@ -1,8 +1,10 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import cookie from '@fastify/cookie';
 import { AppError } from '../errors.js';
 import type { AppContext } from './context.js';
 import { registerAuth } from './auth.js';
+import { registerSessionResolver, registerUiGuard } from '../ui/session.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerProjectRoutes } from './routes/projects.js';
 import { registerDocumentRoutes } from './routes/documents.js';
@@ -21,6 +23,9 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   });
 
   await app.register(rateLimit, { global: false });
+  await app.register(cookie);
+  registerSessionResolver(app, ctx);
+  registerUiGuard(app);
   registerAuth(app, ctx);
   await registerUi(app, ctx);
 
