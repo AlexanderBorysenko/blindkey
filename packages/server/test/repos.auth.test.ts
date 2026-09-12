@@ -41,15 +41,20 @@ describe('audit repo', () => {
   it('writes and lists with filters', () => {
     const db = openDb(':memory:');
     writeAudit(db, { actor_type: 'token', actor_id: 1, action: 'secret.reveal', target_type: 'secret', target_id: 5, field_key: 'password', ip: '1.1.1.1', user_agent: 'ua', meta: { x: 1 } }, 100);
-    writeAudit(db, { actor_type: 'admin', actor_id: 1, action: 'doc.write' }, 200);
+    const docWriteId = writeAudit(db, { actor_type: 'admin', actor_id: 1, action: 'doc.write' }, 200);
     const all = listAudit(db, {});
     expect(all.map((r) => r.action)).toEqual(['doc.write', 'secret.reveal']);
     expect(all[1]?.meta).toEqual({ x: 1 });
     expect(all[0]?.meta).toBeNull();
     expect(listAudit(db, { action: 'secret.reveal' })).toHaveLength(1);
     expect(listAudit(db, { actorType: 'admin' })).toHaveLength(1);
-    expect(listAudit(db, { before: 200 }).map((r) => r.ts)).toEqual([100]);
+    expect(listAudit(db, { before: docWriteId }).map((r) => r.ts)).toEqual([100]);
     expect(listAudit(db, { limit: 1 })).toHaveLength(1);
+    // Test tie-safety: rows with same ts should paginate by id correctly
+    const tieId1 = writeAudit(db, { actor_type: 'admin', actor_id: 1, action: 'tie.first' }, 300);
+    const tieId2 = writeAudit(db, { actor_type: 'admin', actor_id: 1, action: 'tie.second' }, 300);
+    expect(listAudit(db, { limit: 1 }).map((r) => r.action)).toEqual(['tie.second']);
+    expect(listAudit(db, { before: tieId2 }).filter((r) => r.ts === 300).map((r) => r.action)).toEqual(['tie.first']);
   });
 });
 

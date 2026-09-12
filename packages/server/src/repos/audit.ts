@@ -39,6 +39,7 @@ export function writeAudit(db: Db, e: AuditEntry, ts: number = now()): number {
 
 export interface AuditQuery {
   limit?: number;
+  /** exclusive upper bound on audit row id (cursor) */
   before?: number;
   action?: string;
   actorType?: string;
@@ -47,7 +48,7 @@ export interface AuditQuery {
 export function listAudit(db: Db, q: AuditQuery): AuditRow[] {
   const where: string[] = [];
   const params: unknown[] = [];
-  if (q.before !== undefined) { where.push('ts < ?'); params.push(q.before); }
+  if (q.before !== undefined) { where.push('id < ?'); params.push(q.before); }
   if (q.action) { where.push('action = ?'); params.push(q.action); }
   if (q.actorType) { where.push('actor_type = ?'); params.push(q.actorType); }
   const limit = Math.min(Math.max(q.limit ?? 100, 1), 1000);
