@@ -30,6 +30,7 @@ export function getSecretFor(ctx: AppContext, principal: Principal, projectSlug:
 }
 
 export function revealFieldFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, key: string): string {
+  assertScope(actor.principal, 'secrets:meta');
   const project = scopeProject(ctx, actor.principal, projectSlug);
   const secret = mustGet(ctx, project?.id ?? null, name);
   const field = secret.fields.find((f) => f.key === key);

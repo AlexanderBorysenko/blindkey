@@ -25,7 +25,7 @@ describe('secrets routes', () => {
     t.project('alpha');
     await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: auth(t.token(['secrets:write'])), payload: staging });
     const meta = auth(t.token(['secrets:meta'], ['alpha']));
-    const reveal = auth(t.token(['secrets:reveal'], ['alpha']));
+    const reveal = auth(t.token(['secrets:reveal', 'secrets:meta'], ['alpha']));
     const denied = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Staging%20server/fields/password', headers: meta });
     expect(denied.statusCode).toBe(403);
     expect(denied.json().scope).toBe('secrets:reveal');
@@ -53,7 +53,7 @@ describe('secrets routes', () => {
   });
   it('updates and deletes with secrets:write, global secrets work', async () => {
     const t = await makeTestApp();
-    const w = auth(t.token(['secrets:write', 'secrets:reveal']));
+    const w = auth(t.token(['secrets:write', 'secrets:reveal', 'secrets:meta']));
     expect((await t.app.inject({ method: 'POST', url: '/api/v1/secrets', headers: w, payload: { name: 'GitHub PAT', fields: [{ key: 'token', value: 't1' }] } })).statusCode).toBe(201);
     const u = await t.app.inject({ method: 'PATCH', url: '/api/v1/secrets/GitHub%20PAT', headers: w, payload: { fields: [{ key: 'token', value: 't2' }, { key: 'url', value: 'https://github.com' }], description: 'd' } });
     expect(u.statusCode).toBe(200);
@@ -72,6 +72,35 @@ describe('secrets routes', () => {
     const r = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Staging%20server', headers: auth(t.token(['secrets:meta'], ['alpha'])) });
     expect(r.statusCode).toBe(500);
     expect(r.json()).toEqual({ error: 'decrypt_failed', secret_id: id });
+  });
+  it('requires secrets:meta before revealing whether a field or secret exists', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: auth(t.token(['secrets:write'])), payload: staging });
+    const docsOnly = auth(t.token(['docs:read'], ['alpha']));
+    const existing = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Staging%20server/fields/password', headers: docsOnly });
+    expect(existing.statusCode).toBe(403);
+    const missing = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Nope/fields/password', headers: docsOnly });
+    expect(missing.statusCode).toBe(403);
+  });
+  it('removes a field via PATCH removeFields', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    const w = auth(t.token(['secrets:write', 'secrets:meta'], ['alpha']));
+    await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: w, payload: staging });
+    const u = await t.app.inject({ method: 'PATCH', url: '/api/v1/projects/alpha/secrets/Staging%20server', headers: w, payload: { removeFields: ['host'] } });
+    expect(u.statusCode).toBe(200);
+    const meta = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Staging%20server', headers: w });
+    expect(meta.json().fields.map((f: { key: string }) => f.key)).toEqual(['password', 'private_key']);
+  });
+  it('rejects PATCH renaming a secret onto an existing name in the same project', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    const w = auth(t.token(['secrets:write', 'secrets:meta'], ['alpha']));
+    await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: w, payload: staging });
+    await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: w, payload: { name: 'Other', fields: [{ key: 'host', value: 'h' }] } });
+    const r = await t.app.inject({ method: 'PATCH', url: '/api/v1/projects/alpha/secrets/Other', headers: w, payload: { name: 'Staging server' } });
+    expect(r.statusCode).toBe(409);
   });
   it('hides out-of-scope projects as 404', async () => {
     const t = await makeTestApp();
