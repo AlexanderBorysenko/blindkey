@@ -1,0 +1,15 @@
+<% if (it.findings.length) { %>
+<ul class="findings">
+  <% it.findings.forEach(function (f) { %>
+  <li>line <%= f.line %>: <%= f.reason %></li>
+  <% }) %>
+</ul>
+<% } %>
+<% if (it.unresolved.length) { %>
+<ul class="findings">
+  <% it.unresolved.forEach(function (u) { %>
+  <li>unresolved reference: <%= u %></li>
+  <% }) %>
+</ul>
+<% } %>
+<div class="preview"><%~ it.html %></div>
