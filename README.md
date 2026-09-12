@@ -59,3 +59,7 @@ claude mcp add --transport http pidb http://localhost:8080/mcp --header "Authori
 ## Scripts
 
 `npm test` · `npm run typecheck` · `npm run build`
+
+### Error codes
+
+`unauthorized` · `missing_scope` · `not_found` · `validation` · `conflict` · `lint` · `unresolved_refs` · `rate_limited` · `payload_too_large` · `decrypt_failed` · `internal`
