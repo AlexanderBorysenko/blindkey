@@ -39,6 +39,18 @@ describe('http auth', () => {
     }
     expect(last).toBe(429);
   });
+  it('ignores X-Forwarded-For when trustProxy is not enabled', async () => {
+    const t = await makeTestApp();
+    await t.app.inject({
+      method: 'GET',
+      url: '/api/v1/me',
+      headers: { ...auth('pidb_AAAAAAAA_' + 'B'.repeat(43)), 'x-forwarded-for': '9.9.9.9' },
+      remoteAddress: '10.0.0.5',
+    });
+    const audit = listAudit(t.db, { action: 'auth.token_failed' });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.ip).toBe('10.0.0.5');
+  });
   it('returns JSON 404 for unknown routes when authenticated', async () => {
     const t = await makeTestApp();
     const r = await t.app.inject({ method: 'GET', url: '/api/v1/nope', headers: auth(t.token(['admin'])) });

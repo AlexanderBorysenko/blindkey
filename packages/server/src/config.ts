@@ -19,6 +19,7 @@ export interface Config {
   dbPath: string;
   keyRing: KeyRing;
   logLevel: string;
+  trustProxy: boolean | number | string;
 }
 
 function parseKey(b64: string, label: string): Buffer {
@@ -30,6 +31,15 @@ function parseKey(b64: string, label: string): Buffer {
 function parseIntStrict(value: string, label: string): number {
   if (!/^\d+$/.test(value)) throw new ConfigError(`${label} must be an integer`);
   return Number.parseInt(value, 10);
+}
+
+function parseTrustProxy(value: string | undefined): boolean | number | string {
+  if (!value || !value.trim()) return false;
+  const v = value.trim();
+  if (v === 'false') return false;
+  if (v === 'true') return true;
+  if (/^\d+$/.test(v)) return Number.parseInt(v, 10);
+  return v;
 }
 
 export function loadConfig(
@@ -74,5 +84,6 @@ export function loadConfig(
     dbPath: env.PIDB_DB_PATH ?? `${dataDir}/pidb.sqlite`,
     keyRing: { current, keys },
     logLevel: env.PIDB_LOG_LEVEL ?? 'info',
+    trustProxy: parseTrustProxy(env.PIDB_TRUST_PROXY),
   };
 }

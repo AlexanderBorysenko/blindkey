@@ -43,7 +43,7 @@ export function runBackup(db: Db, dir: string, keep = 14, now: Date = new Date()
 export async function startServer(config: Config): Promise<FastifyInstance> {
   mkdirSync(config.dataDir, { recursive: true });
   const db = openDb(config.dbPath);
-  const app = await buildApp({ db, ring: config.keyRing, logLevel: config.logLevel, trustProxy: true });
+  const app = await buildApp({ db, ring: config.keyRing, logLevel: config.logLevel, trustProxy: config.trustProxy });
   app.addHook('onClose', async () => {
     db.close();
   });
