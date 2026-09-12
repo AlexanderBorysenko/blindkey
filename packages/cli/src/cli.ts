@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { PidbClient } from './client.js';
 import { loadConfig } from './config.js';
@@ -43,6 +45,20 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 }
 
 // Run only when this module is the entry point, so tests can import it freely.
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// Compares realpaths (not raw argv[1]/import.meta.url strings) because npm
+// materializes `bin` entries as symlinks: argv[1] is the symlink path while
+// import.meta.url resolves to the target's realpath, so a naive string
+// comparison never matches for an installed bin.
+function isEntryPoint(): boolean {
+  const arg = process.argv[1];
+  if (!arg) return false;
+  try {
+    return fileURLToPath(import.meta.url) === realpathSync(arg);
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   void main();
 }
