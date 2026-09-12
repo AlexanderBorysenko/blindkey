@@ -4,6 +4,7 @@ import { AppError } from '../errors.js';
 import type { AppContext } from './context.js';
 import { registerAuth } from './auth.js';
 import { registerHealthRoutes } from './routes/health.js';
+import { registerProjectRoutes } from './routes/projects.js';
 
 export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   const app = Fastify({
@@ -28,5 +29,6 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: 'not_found' }));
 
   registerHealthRoutes(app, ctx);
+  registerProjectRoutes(app, ctx);
   return app;
 }

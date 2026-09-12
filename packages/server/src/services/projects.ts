@@ -1,0 +1,50 @@
+import type { ProjectInput, ProjectPatch } from '@pidb/shared';
+import type { AppContext } from '../http/context.js';
+import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
+import { createProject, deleteProject, listProjects, updateProject } from '../repos/projects.js';
+import { listDocuments } from '../repos/documents.js';
+import { listSecrets } from '../repos/secrets.js';
+import { publicDocSummary, publicProject, publicSecret, type PublicDocSummary, type PublicProject, type PublicSecret } from '../http/serialize.js';
+import { auditAs, loadProjectFor } from './common.js';
+
+export interface ProjectDetail extends PublicProject {
+  documents: PublicDocSummary[];
+  secrets: PublicSecret[];
+}
+
+export function listProjectsFor(ctx: AppContext, principal: Principal): PublicProject[] {
+  assertScope(principal, 'projects:read');
+  return listProjects(ctx.db, principal.projectIds).map(publicProject);
+}
+
+export function getProjectDetailFor(ctx: AppContext, principal: Principal, slug: string): ProjectDetail {
+  assertScope(principal, 'projects:read');
+  const project = loadProjectFor(ctx, principal, slug);
+  return {
+    ...publicProject(project),
+    documents: hasScope(principal, 'docs:read') ? listDocuments(ctx.db, project.id).map(publicDocSummary) : [],
+    secrets: hasScope(principal, 'secrets:meta') ? listSecrets(ctx.db, ctx.ring, project.id).map(publicSecret) : [],
+  };
+}
+
+export function createProjectFor(ctx: AppContext, actor: Actor, input: ProjectInput): PublicProject {
+  assertScope(actor.principal, 'admin');
+  const project = createProject(ctx.db, input);
+  auditAs(ctx, actor, { action: 'project.create', target_type: 'project', target_id: project.id });
+  return publicProject(project);
+}
+
+export function updateProjectFor(ctx: AppContext, actor: Actor, slug: string, patch: ProjectPatch): PublicProject {
+  assertScope(actor.principal, 'admin');
+  const project = loadProjectFor(ctx, actor.principal, slug);
+  const updated = updateProject(ctx.db, project.id, patch);
+  auditAs(ctx, actor, { action: 'project.update', target_type: 'project', target_id: project.id, meta: { fields: Object.keys(patch) } });
+  return publicProject(updated);
+}
+
+export function deleteProjectFor(ctx: AppContext, actor: Actor, slug: string): void {
+  assertScope(actor.principal, 'admin');
+  const project = loadProjectFor(ctx, actor.principal, slug);
+  deleteProject(ctx.db, project.id);
+  auditAs(ctx, actor, { action: 'project.delete', target_type: 'project', target_id: project.id, meta: { slug } });
+}
