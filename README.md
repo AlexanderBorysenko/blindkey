@@ -54,7 +54,7 @@ claude mcp add --transport http pidb http://localhost:8080/mcp --header "Authori
 | `PIDB_DB_PATH` | `$PIDB_DATA_DIR/pidb.sqlite` | |
 | `PIDB_PORT` / `PIDB_HOST` | `8080` / `0.0.0.0` | |
 | `PIDB_LOG_LEVEL` | `info` | |
-| `PIDB_TRUST_PROXY` | `false` | which proxy hops to trust for client IP: false, true, a hop count, or an IP/CIDR list (set to the reverse-proxy address in Docker) |
+| `PIDB_TRUST_PROXY` | `false` | which proxy hops to trust for client IP: false, true, or a comma-separated IP/CIDR list of trusted proxies (set to the reverse-proxy address in Docker) |
 
 ## Scripts
 

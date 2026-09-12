@@ -55,8 +55,8 @@ describe('loadConfig', () => {
   it('parses PIDB_TRUST_PROXY=true as boolean true', () => {
     expect(loadConfig({ PIDB_MASTER_KEY: key(), PIDB_TRUST_PROXY: 'true' }).trustProxy).toBe(true);
   });
-  it('parses PIDB_TRUST_PROXY as a hop count', () => {
-    expect(loadConfig({ PIDB_MASTER_KEY: key(), PIDB_TRUST_PROXY: '1' }).trustProxy).toBe(1);
+  it('parses PIDB_TRUST_PROXY=false as boolean false', () => {
+    expect(loadConfig({ PIDB_MASTER_KEY: key(), PIDB_TRUST_PROXY: 'false' }).trustProxy).toBe(false);
   });
   it('parses PIDB_TRUST_PROXY as an IP/CIDR list string', () => {
     expect(loadConfig({ PIDB_MASTER_KEY: key(), PIDB_TRUST_PROXY: '127.0.0.1,10.0.0.0/8' }).trustProxy).toBe('127.0.0.1,10.0.0.0/8');

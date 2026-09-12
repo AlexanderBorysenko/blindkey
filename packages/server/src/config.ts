@@ -19,7 +19,7 @@ export interface Config {
   dbPath: string;
   keyRing: KeyRing;
   logLevel: string;
-  trustProxy: boolean | number | string;
+  trustProxy: boolean | string;
 }
 
 function parseKey(b64: string, label: string): Buffer {
@@ -33,12 +33,11 @@ function parseIntStrict(value: string, label: string): number {
   return Number.parseInt(value, 10);
 }
 
-function parseTrustProxy(value: string | undefined): boolean | number | string {
+function parseTrustProxy(value: string | undefined): boolean | string {
   if (!value || !value.trim()) return false;
   const v = value.trim();
   if (v === 'false') return false;
   if (v === 'true') return true;
-  if (/^\d+$/.test(v)) return Number.parseInt(v, 10);
   return v;
 }
 

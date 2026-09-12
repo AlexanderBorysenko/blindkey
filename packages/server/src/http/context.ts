@@ -5,5 +5,5 @@ export interface AppContext {
   db: Db;
   ring: KeyRing;
   logLevel?: string;
-  trustProxy?: boolean | number | string;
+  trustProxy?: boolean | string;
 }
