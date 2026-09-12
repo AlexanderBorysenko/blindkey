@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, statSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { configPath, loadConfig, normalizeUrl, saveConfig } from '../src/config.js';
@@ -67,6 +67,16 @@ describe('saveConfig', () => {
     const env = { PIDB_CONFIG_HOME: join(home, 'd') } as NodeJS.ProcessEnv;
     writeFileSync(join(home, 'd', 'config.json'), '{}', { mode: 0o644 });
     const path = saveConfig({ url: 'http://x', token: 't' }, env);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('tightens the mode of a pre-existing world-listable directory', () => {
+    const dir = join(home, 'existing');
+    mkdirSync(dir, { mode: 0o755 });
+    chmodSync(dir, 0o755); // Ensure it's 0o755 regardless of umask
+    const env = { PIDB_CONFIG_HOME: dir } as NodeJS.ProcessEnv;
+    const path = saveConfig({ url: 'https://pidb.example.com', token: 'pidb_abc' }, env);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 });

@@ -71,6 +71,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CliConfig {
 export function saveConfig(config: CliConfig, env: NodeJS.ProcessEnv = process.env): string {
   const path = configPath(env);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  chmodSync(dirname(path), 0o700); // mkdirSync's mode is ignored when the directory already exists
   writeFileSync(path, `${JSON.stringify({ url: config.url, token: config.token }, null, 2)}\n`, { mode: 0o600 });
   chmodSync(path, 0o600); // writeFileSync's mode is ignored when the file already exists
   return path;
