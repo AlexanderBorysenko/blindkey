@@ -39,6 +39,17 @@ describe('http auth', () => {
     }
     expect(last).toBe(429);
   });
+  it('audits the request user_agent header on a token failure', async () => {
+    const t = await makeTestApp();
+    await t.app.inject({
+      method: 'GET',
+      url: '/api/v1/me',
+      headers: { ...auth('pidb_AAAAAAAA_' + 'B'.repeat(43)), 'user-agent': 'test-agent/1.0' },
+    });
+    const audit = listAudit(t.db, { action: 'auth.token_failed' });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.user_agent).toBe('test-agent/1.0');
+  });
   it('ignores X-Forwarded-For when trustProxy is not enabled', async () => {
     const t = await makeTestApp();
     await t.app.inject({
