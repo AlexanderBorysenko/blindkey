@@ -1,0 +1,49 @@
+<h1>Projects</h1>
+
+<form method="get" action="/search" role="search">
+  <input type="search" name="q" placeholder="Search projects, documents, secret names" value="" />
+  <button type="submit">Search</button>
+</form>
+
+<p>
+  Status:
+  <a href="/">all</a>
+  <% it.statuses.forEach(function (s) { %>
+  · <a href="/?status=<%= s %>"<%= it.status === s ? ' aria-current="page"' : '' %>><%= s %></a>
+  <% }) %>
+</p>
+
+<table>
+  <thead><tr><th>Slug</th><th>Name</th><th>Status</th><th>Tags</th><th>Updated</th></tr></thead>
+  <tbody>
+    <% it.projects.forEach(function (p) { %>
+    <tr>
+      <td><a href="/p/<%= encodeURIComponent(p.slug) %>"><%= p.slug %></a></td>
+      <td><%= p.name %></td>
+      <td><%= p.status %></td>
+      <td><%= p.tags.join(', ') %></td>
+      <td><%= new Date(p.updated_at).toISOString().slice(0, 19) %>Z</td>
+    </tr>
+    <% }) %>
+  </tbody>
+</table>
+
+<details>
+  <summary>New project</summary>
+  <% if (it.error) { %><p role="alert"><%= it.error %></p><% } %>
+  <form method="post" action="/projects">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <label>Slug <input name="slug" value="<%= it.form.slug %>" required /></label>
+    <label>Name <input name="name" value="<%= it.form.name %>" required /></label>
+    <label>Status
+      <select name="status">
+        <% it.statuses.forEach(function (s) { %>
+        <option value="<%= s %>"<%= it.form.status === s ? ' selected' : '' %>><%= s %></option>
+        <% }) %>
+      </select>
+    </label>
+    <label>Tags (comma separated) <input name="tags" value="<%= it.form.tags %>" /></label>
+    <label>Summary <textarea name="summary" rows="3"><%= it.form.summary %></textarea></label>
+    <button type="submit">Create project</button>
+  </form>
+</details>

@@ -4,10 +4,9 @@ import fastifyStatic from '@fastify/static';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import type { AppContext } from '../http/context.js';
-import { PUBLIC_DIR, renderPage } from './render.js';
+import { PUBLIC_DIR } from './render.js';
 import { registerAuthRoutes } from './routes/auth.js';
-import { csrfTokenFor } from './csrf.js';
-import { requireAdmin, uiSessionId } from './session.js';
+import { registerProjectRoutes } from './routes/projects.js';
 
 const require = createRequire(import.meta.url);
 
@@ -35,11 +34,5 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
   });
 
   registerAuthRoutes(app, ctx);
-
-  // Temporary landing page — Task 3 replaces this handler.
-  app.get('/', async (req, reply) => {
-    requireAdmin(req);
-    const csrf = csrfTokenFor(ctx, uiSessionId(req)!);
-    return reply.type('text/html').send(renderPage('placeholder', { title: 'Projects', nav: true, csrf }));
-  });
+  registerProjectRoutes(app, ctx);
 }

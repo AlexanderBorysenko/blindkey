@@ -1,0 +1,40 @@
+<h1>Search</h1>
+
+<form method="get" action="/search" role="search">
+  <input type="search" name="q" value="<%= it.q %>" />
+  <button type="submit">Search</button>
+</form>
+
+<% if (it.result.projects && it.result.projects.length) { %>
+<h2>Projects</h2>
+<ul>
+  <% it.result.projects.forEach(function (p) { %>
+  <li><a href="/p/<%= encodeURIComponent(p.slug) %>"><%= p.slug %></a> — <%= p.name %></li>
+  <% }) %>
+</ul>
+<% } %>
+
+<% if (it.result.documents && it.result.documents.length) { %>
+<h2>Documents</h2>
+<ul>
+  <% it.result.documents.forEach(function (d) { %>
+  <li>
+    <a href="<%= d.project ? '/p/' + encodeURIComponent(d.project) : '/global' %>/docs/<%= encodeURIComponent(d.slug) %>"><%= d.title %></a>
+    <small>(<%= d.project || 'global' %> · <%= d.category %>)</small>
+    <div><small><%= d.snippet %></small></div>
+  </li>
+  <% }) %>
+</ul>
+<% } %>
+
+<% if (it.result.secrets && it.result.secrets.length) { %>
+<h2>Secrets</h2>
+<ul>
+  <% it.result.secrets.forEach(function (s) { %>
+  <li>
+    <a href="<%= s.project ? '/p/' + encodeURIComponent(s.project) : '/global' %>/secrets/<%= encodeURIComponent(s.name) %>"><%= s.name %></a>
+    <small>(<%= s.project || 'global' %>)</small>
+  </li>
+  <% }) %>
+</ul>
+<% } %>
