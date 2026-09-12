@@ -1,0 +1,2 @@
+<span class="field-value" id="value-<%= it.key %>"><%= it.value %></span>
+<button class="outline" type="button" onclick="navigator.clipboard.writeText(document.getElementById('value-<%= it.key %>').textContent)">Copy</button>

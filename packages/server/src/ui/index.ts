@@ -8,6 +8,7 @@ import { PUBLIC_DIR } from './render.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerProjectRoutes } from './routes/projects.js';
+import { registerSecretRoutes } from './routes/secrets.js';
 
 const require = createRequire(import.meta.url);
 
@@ -37,4 +38,5 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
   registerAuthRoutes(app, ctx);
   registerProjectRoutes(app, ctx);
   registerDocumentRoutes(app, ctx);
+  registerSecretRoutes(app, ctx);
 }
