@@ -6,3 +6,4 @@ dist/
 *.sqlite-wal
 *.sqlite-shm
 coverage/
+.claude/worktrees/
