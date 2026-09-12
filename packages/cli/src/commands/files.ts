@@ -1,4 +1,6 @@
-import { chmodSync, writeFileSync } from 'node:fs';
+import { chmodSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { scopedPath, seg, type PidbClient } from '../client.js';
 import type { RevealedFields } from '../api-types.js';
 import { CliError, EXIT_REFUSED } from '../errors.js';
@@ -11,14 +13,32 @@ export function parseMode(mode: string | undefined): number {
 }
 
 export function writeSecretFile(path: string, content: string, mode: number, force: boolean): void {
+  if (!force) {
+    try {
+      writeFileSync(path, content, { mode, flag: 'wx' });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') throw new CliError(`${path} already exists — pass --force to overwrite`, EXIT_REFUSED);
+      throw new CliError(`cannot write ${path}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    chmodSync(path, mode); // writeFileSync's mode is ignored when the file already exists
+    return;
+  }
+
+  // --force: never write into an existing (possibly wide-mode) inode in place — writeFileSync's
+  // mode is ignored on an existing file, so the secret would briefly sit under the old mode.
+  // Instead write to a fresh, exclusively-created temp file at the target mode in the same
+  // directory (so the rename below is atomic and same-filesystem), then rename it over the
+  // destination.
+  const tmp = join(dirname(path), `.${basename(path)}.pidb-${process.pid}-${randomBytes(6).toString('hex')}`);
   try {
-    writeFileSync(path, content, { mode, flag: force ? 'w' : 'wx' });
+    writeFileSync(tmp, content, { mode, flag: 'wx' });
+    chmodSync(tmp, mode); // umask safety
+    renameSync(tmp, path);
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'EEXIST') throw new CliError(`${path} already exists — pass --force to overwrite`, EXIT_REFUSED);
+    rmSync(tmp, { force: true });
     throw new CliError(`cannot write ${path}: ${err instanceof Error ? err.message : String(err)}`);
   }
-  chmodSync(path, mode); // writeFileSync's mode is ignored when overwriting an existing file
 }
 
 export async function runSecretWrite(

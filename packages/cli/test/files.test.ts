@@ -65,6 +65,16 @@ describe('secret write', () => {
     expect(readFileSync(out, 'utf8')).toContain('BEGIN KEY');
   });
 
+  it('replaces the inode on --force so a pre-existing wide-mode file never holds the secret at its old mode', async () => {
+    const out = join(dir, 'key.pem');
+    writeFileSync(out, 'existing', { mode: 0o644 });
+    const before = statSync(out).ino;
+    await runSecretWrite(client(['secrets:reveal']), 'acme', 'SSH', 'content', { out, force: true });
+    expect(statSync(out).mode & 0o777).toBe(0o600);
+    expect(readFileSync(out, 'utf8')).toBe('-----BEGIN KEY-----\nabc\n-----END KEY-----\n');
+    expect(statSync(out).ino).not.toBe(before);
+  });
+
   it('honours --mode', async () => {
     const out = join(dir, 'key.pem');
     await runSecretWrite(client(['secrets:reveal']), 'acme', 'SSH', 'content', { out, mode: '640' });
