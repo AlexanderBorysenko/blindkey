@@ -7,3 +7,5 @@ dist/
 *.sqlite-shm
 coverage/
 .claude/worktrees/
+docker/.env
+docker/secrets/

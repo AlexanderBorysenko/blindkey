@@ -1,0 +1,16 @@
+.git
+.gitignore
+.claude
+.superpowers
+node_modules
+**/node_modules
+**/dist
+coverage
+docs
+data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+docker/.env
+docker/secrets
