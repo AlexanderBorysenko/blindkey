@@ -62,6 +62,8 @@ describe('docs get', () => {
     expect(result.text).toContain('{{secret:DB}}');
     expect(result.text).toMatch(/host/);
     expect(result.text).toMatch(/pidb secret exec/);
+    expect(result.text).not.toContain('db.internal');
+    expect(JSON.stringify(result.json)).not.toContain('db.internal');
   });
 
   it('exits 4 for an unknown document', async () => {
@@ -77,6 +79,39 @@ describe('docs put', () => {
     expect(created.text).toMatch(/created/);
     const updated = await runDocsPut(client(['docs:write']), 'acme', 'notes', { file, title: 'Notes 2', category: 'notes' });
     expect(updated.text).toMatch(/updated/);
+  });
+
+  it('distinguishes created from updated by HTTP status, never by timestamps', async () => {
+    const file = write(join(dir, 'stub.md'), '# Stub\n');
+    const sameTimestamps: PublicDoc = {
+      slug: 'stub',
+      title: 'Stub',
+      category: 'notes',
+      body_md: '# Stub\n',
+      created_at: 1000,
+      updated_at: 1000,
+    };
+    const differentTimestamps: PublicDoc = {
+      slug: 'stub',
+      title: 'Stub',
+      category: 'notes',
+      body_md: '# Stub\n',
+      created_at: 1000,
+      updated_at: 2000,
+    };
+
+    // status: 200 with equal timestamps must still report "updated" — a
+    // timestamp-based implementation (created_at === updated_at) would
+    // wrongly call this "created".
+    const stub200 = { jsonStatus: async () => ({ status: 200, data: sameTimestamps }) } as unknown as PidbClient;
+    const resultUpdated = await runDocsPut(stub200, 'acme', 'stub', { file, title: 'Stub', category: 'notes' });
+    expect(resultUpdated.text).toMatch(/updated/);
+
+    // status: 201 with different timestamps must still report "created" —
+    // pinning that the status code drives the wording, not the timestamps.
+    const stub201 = { jsonStatus: async () => ({ status: 201, data: differentTimestamps }) } as unknown as PidbClient;
+    const resultCreated = await runDocsPut(stub201, 'acme', 'stub', { file, title: 'Stub', category: 'notes' });
+    expect(resultCreated.text).toMatch(/created/);
   });
 
   it('surfaces lint findings and accepts --force', async () => {
