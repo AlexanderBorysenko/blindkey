@@ -19,8 +19,9 @@ const PATTERNS: Pattern[] = [
 
 const ASSIGN_RE = /(?<![A-Za-z])(password|passwd|pwd|secret|token|api[_-]?key)\b\s*[:=]\s*["']?([^\s"'{}<>$]{6,})/gi;
 const BASE64_RE = /(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9+/=])/;
-const HEX_RE = /\b[0-9a-fA-F]{48,}\b/;
+const HEX_RE = /\b[0-9a-fA-F]{32,}\b/;
 const FENCE_RE = /^\s*(```|~~~)\s*([A-Za-z0-9_-]*)/;
+const GIT_SHA1_LEN = 40;
 
 function looksLikeRealValue(v: string): boolean {
   if (v.length >= 12) return true;
@@ -30,12 +31,15 @@ function looksLikeRealValue(v: string): boolean {
 export function lintForSecrets(md: string): LintFinding[] {
   const findings: LintFinding[] = [];
   const lines = md.split(/\r?\n/);
+
+  // First pass: identify lines inside closed example fences
+  const exampleFenceLines = new Set<number>();
   let inFence = false;
   let fenceIsExample = false;
   let fenceMarker = '';
+  let fenceStartIdx = -1;
 
   lines.forEach((line, idx) => {
-    const lineNo = idx + 1;
     const fence = FENCE_RE.exec(line);
     if (fence) {
       const marker = fence[1] ?? '';
@@ -43,13 +47,33 @@ export function lintForSecrets(md: string): LintFinding[] {
         inFence = true;
         fenceMarker = marker;
         fenceIsExample = (fence[2] ?? '').toLowerCase() === 'example';
+        fenceStartIdx = idx;
       } else if (marker === fenceMarker) {
+        // Fence is properly closed
+        if (fenceIsExample) {
+          // Mark all lines between fenceStartIdx and idx as inside example fence (exclude the fence lines themselves)
+          for (let i = fenceStartIdx + 1; i < idx; i++) {
+            exampleFenceLines.add(i);
+          }
+        }
         inFence = false;
         fenceIsExample = false;
       }
+    }
+  });
+
+  // Main linting pass
+  lines.forEach((line, idx) => {
+    const lineNo = idx + 1;
+    const fence = FENCE_RE.exec(line);
+    if (fence) {
+      // Skip fence marker lines
       return;
     }
-    if (inFence && fenceIsExample) return;
+    if (exampleFenceLines.has(idx)) {
+      // Skip lines inside closed example fences
+      return;
+    }
 
     for (const p of PATTERNS) {
       if (p.re.test(line)) findings.push({ line: lineNo, reason: p.reason });
@@ -63,7 +87,9 @@ export function lintForSecrets(md: string): LintFinding[] {
     }
     const b64 = BASE64_RE.exec(line);
     const isB64Blob = b64 !== null && !/^[0-9a-fA-F]+={0,2}$/.test(b64[0]);
-    if (isB64Blob || HEX_RE.test(line)) {
+    const hexMatch = HEX_RE.exec(line);
+    const isHex = hexMatch !== null && hexMatch[0].length !== GIT_SHA1_LEN;
+    if (isB64Blob || isHex) {
       findings.push({ line: lineNo, reason: 'long base64/hex string' });
     }
   });

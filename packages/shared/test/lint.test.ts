@@ -39,4 +39,16 @@ describe('lintForSecrets', () => {
     expect(f).toHaveLength(1);
     expect(f[0]?.line).toBe(6);
   });
+  it('flags 32-char hex strings', () => {
+    expect(reasons('key: abcdef0123456789abcdef0123456789')).toContain('long base64/hex string');
+  });
+  it('flags 64-char hex strings', () => {
+    expect(reasons('key: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')).toContain('long base64/hex string');
+  });
+  it('fails closed on unclosed example fence', () => {
+    const md = '```example\nAKIAIOSFODNN7EXAMPLE';
+    const f = lintForSecrets(md);
+    expect(f).toHaveLength(1);
+    expect(f[0]?.line).toBe(2);
+  });
 });
