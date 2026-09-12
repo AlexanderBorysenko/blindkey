@@ -1,0 +1,28 @@
+{
+  "name": "@pidb/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "pidb-server": "./dist/cli.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts start"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^11.0.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@pidb/shared": "0.1.0",
+    "argon2": "^0.45.0",
+    "better-sqlite3": "^13.0.0",
+    "commander": "^15.0.0",
+    "fastify": "^5.0.0",
+    "pino": "^10.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "pino-pretty": "^13.0.0"
+  }
+}
