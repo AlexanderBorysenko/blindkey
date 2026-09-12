@@ -51,4 +51,10 @@ describe('lintForSecrets', () => {
     expect(f).toHaveLength(1);
     expect(f[0]?.line).toBe(2);
   });
+  it('never flags secret references but still lints other braces', () => {
+    expect(reasons('deploy with {{secret:beta/X}} and {{secret:global/GitHub PAT}}')).toEqual([]);
+    expect(reasons('{{oops AKIAIOSFODNN7EXAMPLE}}')).toContain('AWS access key id');
+    const f = lintForSecrets('a\n{{secret:X}}\nAKIAIOSFODNN7EXAMPLE');
+    expect(f[0]?.line).toBe(3);
+  });
 });

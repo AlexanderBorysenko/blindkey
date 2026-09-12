@@ -1,6 +1,6 @@
 import { docSlugSchema, lintForSecrets, parseSecretRefs, type DocumentInput } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
-import { assertScope, canAccessProject, type Actor, type Principal } from '../auth/principal.js';
+import { assertScope, canAccessProject, hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { NotFoundError, UnprocessableError, ValidationError } from '../errors.js';
 import { getProjectBySlug, type ProjectRow } from '../repos/projects.js';
 import { deleteDocument, getDocument, listDocuments, upsertDocument } from '../repos/documents.js';
@@ -79,7 +79,7 @@ export function readDocumentFor(
   const doc = getDocument(ctx.db, project?.id ?? null, slug);
   if (!doc) throw new NotFoundError('document not found');
   const out: PublicDoc & { refs?: ResolvedRef[] } = publicDoc(doc);
-  if (withRefs) out.refs = resolveRefs(ctx, principal, project, doc.body_md).resolved;
+  if (withRefs && hasScope(principal, 'secrets:meta')) out.refs = resolveRefs(ctx, principal, project, doc.body_md).resolved;
   return out;
 }
 
@@ -93,9 +93,8 @@ export function writeDocumentFor(
   assertScope(actor.principal, 'docs:write');
   const project = resolveDocScope(ctx, actor.principal, projectSlug);
   const cleanSlug = validSlug(slug);
+  const findings = lintForSecrets(input.body_md);
   const { unresolved } = resolveRefs(ctx, actor.principal, project, input.body_md);
-  const mdForLinting = input.body_md.replace(/\{\{[^}]*\}\}/g, '');
-  const findings = lintForSecrets(mdForLinting);
   if (!input.force) {
     if (findings.length) throw new UnprocessableError('lint', { findings });
     if (unresolved.length) throw new UnprocessableError('unresolved_refs', { unresolved });

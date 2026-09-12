@@ -1,3 +1,5 @@
+import { SECRET_REF_RE } from './refs.js';
+
 export interface LintFinding {
   line: number;
   reason: string;
@@ -26,6 +28,10 @@ const GIT_SHA1_LEN = 40;
 function looksLikeRealValue(v: string): boolean {
   if (v.length >= 12) return true;
   return /[0-9!@#%^&*()_+\-=[\]|;,.?/\\]/.test(v);
+}
+
+function blankSecretRefs(line: string): string {
+  return line.replace(SECRET_REF_RE, (m) => ' '.repeat(m.length));
 }
 
 export function lintForSecrets(md: string): LintFinding[] {
@@ -75,19 +81,20 @@ export function lintForSecrets(md: string): LintFinding[] {
       return;
     }
 
+    const text = blankSecretRefs(line);
     for (const p of PATTERNS) {
-      if (p.re.test(line)) findings.push({ line: lineNo, reason: p.reason });
+      if (p.re.test(text)) findings.push({ line: lineNo, reason: p.reason });
     }
-    for (const m of line.matchAll(ASSIGN_RE)) {
+    for (const m of text.matchAll(ASSIGN_RE)) {
       const value = m[2] ?? '';
       if (looksLikeRealValue(value)) {
         findings.push({ line: lineNo, reason: 'credential assignment' });
         break;
       }
     }
-    const b64 = BASE64_RE.exec(line);
+    const b64 = BASE64_RE.exec(text);
     const isB64Blob = b64 !== null && !/^[0-9a-fA-F]+={0,2}$/.test(b64[0]);
-    const hexMatch = HEX_RE.exec(line);
+    const hexMatch = HEX_RE.exec(text);
     const isHex = hexMatch !== null && hexMatch[0].length !== GIT_SHA1_LEN;
     if (isB64Blob || isHex) {
       findings.push({ line: lineNo, reason: 'long base64/hex string' });

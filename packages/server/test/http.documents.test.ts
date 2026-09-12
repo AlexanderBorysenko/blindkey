@@ -67,6 +67,9 @@ describe('documents routes', () => {
       { ref: '{{secret:global/GitHub PAT}}', name: 'GitHub PAT', project: null, fields: [{ key: 'token', sensitive: true }] },
     ]);
     expect(JSON.stringify(g.json())).not.toContain('"h"');
+    const docsOnly = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/docs/x?resolve=meta', headers: auth(t.token(['docs:read'], ['alpha'])) });
+    expect(docsOnly.statusCode).toBe(200);
+    expect(docsOnly.json().refs).toBeUndefined();
   });
 });
 

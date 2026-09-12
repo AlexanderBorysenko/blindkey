@@ -6,12 +6,12 @@ export interface SecretRef {
   name: string;
 }
 
-const REF_RE = /\{\{\s*secret:([^}]*?)\s*\}\}/g;
+export const SECRET_REF_RE = /\{\{\s*secret:([^}]*?)\s*\}\}/g;
 
 export function parseSecretRefs(md: string): SecretRef[] {
   const out: SecretRef[] = [];
   const seen = new Set<string>();
-  for (const m of md.matchAll(REF_RE)) {
+  for (const m of md.matchAll(SECRET_REF_RE)) {
     const target = (m[1] ?? '').trim();
     if (!target) continue;
     let ref: SecretRef;
