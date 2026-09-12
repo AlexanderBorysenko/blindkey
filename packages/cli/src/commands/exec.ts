@@ -8,14 +8,22 @@ export function envKeyFor(key: string): string {
   return `PIDB_${key.toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`;
 }
 
+/** Variables the CLI itself reads for its own configuration — never let a secret field overwrite one of these. */
+const RESERVED_ENV_VARS = ['PIDB_TOKEN', 'PIDB_URL', 'PIDB_CONFIG_HOME'];
+
 export function buildEnv(fields: Record<string, string>, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
+  // The child gets only the one secret it opted into, never the caller's own API token.
+  delete env.PIDB_TOKEN;
   const seen = new Map<string, string>();
   for (const [key, value] of Object.entries(fields)) {
     const name = envKeyFor(key);
     const previous = seen.get(name);
     if (previous !== undefined) {
       throw new CliError(`fields "${previous}" and "${key}" both map to ${name} — rename one of them`);
+    }
+    if (RESERVED_ENV_VARS.includes(name)) {
+      throw new CliError(`field "${key}" maps to the reserved variable ${name} — rename the field`);
     }
     seen.set(name, key);
     env[name] = value;

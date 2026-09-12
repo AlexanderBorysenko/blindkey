@@ -41,6 +41,23 @@ describe('buildEnv', () => {
   it('keeps the parent environment', () => {
     expect(buildEnv({ host: 'h' }, { PATH: '/bin' })).toEqual({ PATH: '/bin', PIDB_HOST: 'h' });
   });
+
+  it('strips the caller\'s PIDB_TOKEN from the child environment', () => {
+    const env = buildEnv({ host: 'h' }, { PATH: '/bin', PIDB_TOKEN: 'pidb_secret' });
+    expect(env).toEqual({ PATH: '/bin', PIDB_HOST: 'h' });
+    expect(env.PIDB_TOKEN).toBeUndefined();
+  });
+
+  it('rejects a field that would overwrite a reserved variable', () => {
+    expect(() => buildEnv({ token: 'sekret-value' }, { PATH: '/bin' })).toThrow(CliError);
+    try {
+      buildEnv({ token: 'sekret-value' }, { PATH: '/bin' });
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect((err as CliError).message).toContain('PIDB_TOKEN');
+      expect((err as CliError).message).not.toContain('sekret-value');
+    }
+  });
 });
 
 describe('runSecretExec', () => {
