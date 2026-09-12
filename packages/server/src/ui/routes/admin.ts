@@ -36,11 +36,26 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     if (scopes.length === 0) {
       return reply.status(400).type('text/html').send(tokensPage(req, { error: 'at least one scope is required' }));
     }
+    // Empty/absent means "never expires". Anything else must be a positive whole number of
+    // days: Date.now() + n * DAY_MS stays a valid positive epoch-ms for a negative or zero n,
+    // so tokenInputSchema's z.number().int().positive() cannot catch an already-expired or
+    // dead-on-arrival token on its own — that must be rejected here, before the arithmetic.
+    let expiresAt: number | null = null;
+    if (days) {
+      const n = Number(days);
+      if (!Number.isInteger(n) || n <= 0) {
+        return reply
+          .status(400)
+          .type('text/html')
+          .send(tokensPage(req, { error: 'Expiry must be a whole number of days greater than zero.' }));
+      }
+      expiresAt = Date.now() + n * DAY_MS;
+    }
     const parsed = tokenInputSchema.safeParse({
       name: str(b, 'name'),
       scopes,
       projects: projects.length ? projects : null,
-      expires_at: days ? Date.now() + Number(days) * DAY_MS : null,
+      expires_at: expiresAt,
     });
     if (!parsed.success) {
       const message = parsed.error.issues.map((i) => `${i.path.join('.') || 'form'}: ${i.message}`).join('; ');

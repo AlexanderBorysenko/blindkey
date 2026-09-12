@@ -69,6 +69,27 @@ describe('ui tokens', () => {
     expect(listTokens(t.db).find((r) => r.id === id)!.revoked_at).not.toBeNull();
   });
 
+  it('rejects a negative expiry instead of minting an already-expired token', async () => {
+    const res = await post('/tokens', { csrf, name: 'bad-days-negative', scopes: 'admin', days: '-5' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Expiry');
+    expect(listTokens(t.db).some((r) => r.name === 'bad-days-negative')).toBe(false);
+  });
+
+  it('rejects a zero expiry instead of minting a dead-on-arrival token', async () => {
+    const res = await post('/tokens', { csrf, name: 'bad-days-zero', scopes: 'admin', days: '0' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Expiry');
+    expect(listTokens(t.db).some((r) => r.name === 'bad-days-zero')).toBe(false);
+  });
+
+  it('rejects a non-numeric expiry', async () => {
+    const res = await post('/tokens', { csrf, name: 'bad-days-nan', scopes: 'admin', days: 'abc' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Expiry');
+    expect(listTokens(t.db).some((r) => r.name === 'bad-days-nan')).toBe(false);
+  });
+
   it('rejects create and revoke without a CSRF token', async () => {
     expect((await post('/tokens', { name: 'nope', scopes: 'admin' })).statusCode).toBe(403);
     expect(listTokens(t.db).some((r) => r.name === 'nope')).toBe(false);
