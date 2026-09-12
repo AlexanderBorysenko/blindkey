@@ -11,10 +11,14 @@ import { registerSecretRoutes } from './routes/secrets.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerMcpRoutes } from './mcp.js';
 
+// Fastify's public types only declare `trustProxy` as boolean | string | string[] | TrustProxyFunction,
+// but it also accepts a hop-count number at runtime (fastify/lib/request.js `getTrustProxyFn`).
+type FastifyTrustProxy = boolean | string | string[] | undefined;
+
 export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: ctx.logLevel ?? 'info', redact: ['req.headers.authorization', 'req.headers.cookie'] },
-    trustProxy: ctx.trustProxy ?? false,
+    trustProxy: (ctx.trustProxy ?? false) as unknown as FastifyTrustProxy,
     bodyLimit: 4 * 1024 * 1024,
   });
 
@@ -23,6 +27,10 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof AppError) {
+      if (err.status >= 500) {
+        req.log.error({ err, code: err.code, ...err.details }, 'request failed');
+        return reply.status(err.status).send({ error: err.code, ...err.details });
+      }
       return reply.status(err.status).send({ error: err.code, message: err.message, ...err.details });
     }
     const e = err as { statusCode?: number; message?: string };

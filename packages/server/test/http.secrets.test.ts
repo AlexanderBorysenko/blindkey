@@ -63,6 +63,16 @@ describe('secrets routes', () => {
     expect((await t.app.inject({ method: 'DELETE', url: '/api/v1/secrets/GitHub%20PAT', headers: w })).statusCode).toBe(404);
     expect(listAudit(t.db, {}).map((a) => a.action)).toEqual(['secret.delete', 'secret.reveal', 'secret.update', 'secret.create']);
   });
+  it('returns a decrypt_failed 500 with the secret id and no message when the DEK is corrupted', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: auth(t.token(['secrets:write'])), payload: staging });
+    const id = (t.db.prepare(`SELECT id FROM secrets WHERE name = ?`).get('Staging server') as { id: number }).id;
+    t.db.prepare(`UPDATE secrets SET dek_wrapped = x'00' WHERE name = ?`).run('Staging server');
+    const r = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Staging%20server', headers: auth(t.token(['secrets:meta'], ['alpha'])) });
+    expect(r.statusCode).toBe(500);
+    expect(r.json()).toEqual({ error: 'decrypt_failed', secret_id: id });
+  });
   it('hides out-of-scope projects as 404', async () => {
     const t = await makeTestApp();
     t.project('alpha');

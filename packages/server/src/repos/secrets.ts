@@ -55,6 +55,15 @@ function loadDek(ring: KeyRing, row: RawSecret): Buffer {
   return unwrapDek(masterKey(ring, row.key_version), row.dek_wrapped);
 }
 
+function withSecret<T>(id: number, fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    if (e instanceof CryptoError) throw new CryptoError(e.message, { secret_id: id });
+    throw e;
+  }
+}
+
 function rawById(db: Db, id: number): RawSecret | null {
   return (db.prepare(`SELECT ${COLS} FROM secrets WHERE id = ?`).get(id) as RawSecret | undefined) ?? null;
 }
@@ -65,22 +74,24 @@ function rawFields(db: Db, secretId: number): RawField[] {
 
 function toMeta(db: Db, ring: KeyRing, row: RawSecret): SecretMeta {
   const fields = rawFields(db, row.id);
-  const hasPublic = fields.some((f) => f.is_sensitive === 0);
-  const dek = hasPublic ? loadDek(ring, row) : null;
-  return {
-    id: row.id,
-    project_id: row.project_id,
-    name: row.name,
-    description: row.description,
-    tags: parseJsonArray<string>(row.tags),
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    fields: fields.map((f) =>
-      f.is_sensitive === 0
-        ? { key: f.key, sensitive: false, value: decryptField(dek!, row.id, f.key, f.value_enc) }
-        : { key: f.key, sensitive: true },
-    ),
-  };
+  return withSecret(row.id, () => {
+    const hasPublic = fields.some((f) => f.is_sensitive === 0);
+    const dek = hasPublic ? loadDek(ring, row) : null;
+    return {
+      id: row.id,
+      project_id: row.project_id,
+      name: row.name,
+      description: row.description,
+      tags: parseJsonArray<string>(row.tags),
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      fields: fields.map((f) =>
+        f.is_sensitive === 0
+          ? { key: f.key, sensitive: false, value: decryptField(dek!, row.id, f.key, f.value_enc) }
+          : { key: f.key, sensitive: true },
+      ),
+    };
+  });
 }
 
 export function getSecretMetaById(db: Db, ring: KeyRing, id: number): SecretMeta | null {
@@ -127,18 +138,20 @@ export function revealField(db: Db, ring: KeyRing, secretId: number, key: string
   if (!row) throw new NotFoundError('secret not found');
   const f = db.prepare(`SELECT key, value_enc, is_sensitive FROM secret_fields WHERE secret_id = ? AND key = ?`).get(secretId, key) as RawField | undefined;
   if (!f) return null;
-  return decryptField(loadDek(ring, row), secretId, key, f.value_enc);
+  return withSecret(secretId, () => decryptField(loadDek(ring, row), secretId, key, f.value_enc));
 }
 
 export function revealAllFields(db: Db, ring: KeyRing, secretId: number): RevealedField[] {
   const row = rawById(db, secretId);
   if (!row) throw new NotFoundError('secret not found');
-  const dek = loadDek(ring, row);
-  return rawFields(db, secretId).map((f) => ({
-    key: f.key,
-    sensitive: f.is_sensitive === 1,
-    value: decryptField(dek, secretId, f.key, f.value_enc),
-  }));
+  return withSecret(secretId, () => {
+    const dek = loadDek(ring, row);
+    return rawFields(db, secretId).map((f) => ({
+      key: f.key,
+      sensitive: f.is_sensitive === 1,
+      value: decryptField(dek, secretId, f.key, f.value_enc),
+    }));
+  });
 }
 
 export function updateSecret(db: Db, ring: KeyRing, id: number, patch: SecretPatch): SecretMeta {

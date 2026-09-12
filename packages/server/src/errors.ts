@@ -47,7 +47,7 @@ export class UnprocessableError extends AppError {
 }
 
 export class CryptoError extends AppError {
-  constructor(message = 'decrypt failed') {
-    super(500, 'decrypt_failed', message);
+  constructor(message = 'decrypt failed', details: Record<string, unknown> = {}) {
+    super(500, 'decrypt_failed', message, details);
   }
 }
