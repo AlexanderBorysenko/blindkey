@@ -210,7 +210,10 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     await buildProgram().parseAsync(argv);
   } catch (err) {
     console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(exitCodeOf(err));
+    // process.exit() can truncate a long console.error write when stderr is a pipe (exactly how
+    // the e2e tests invoke the CLI); setting exitCode and returning lets Node flush before exiting.
+    process.exitCode = exitCodeOf(err);
+    return;
   }
 }
 

@@ -21,7 +21,7 @@ export function writeSecretFile(path: string, content: string, mode: number, for
       if (code === 'EEXIST') throw new CliError(`${path} already exists — pass --force to overwrite`, EXIT_REFUSED);
       throw new CliError(`cannot write ${path}: ${err instanceof Error ? err.message : String(err)}`);
     }
-    chmodSync(path, mode); // writeFileSync's mode is ignored when the file already exists
+    chmodSync(path, mode); // the process umask can narrow the mode passed to writeFileSync, so re-apply it explicitly
     return;
   }
 

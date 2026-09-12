@@ -52,6 +52,8 @@ node packages/cli/dist/cli.js login http://localhost:8080     # prompts for the 
 
 Configuration resolves from `PIDB_URL` / `PIDB_TOKEN`, then `~/.config/pidb/config.json` (written `0600` by `pidb login`; `PIDB_CONFIG_HOME` overrides the directory).
 
+Put `pidb` on your `PATH` first — `npm link -w @pidb/cli` (or prefix each command below with `npx`) — so the examples run as written:
+
 ```bash
 pidb projects list
 pidb projects get acme

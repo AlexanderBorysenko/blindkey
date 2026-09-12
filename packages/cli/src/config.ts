@@ -41,8 +41,9 @@ function readConfigFile(env: NodeJS.ProcessEnv): Partial<CliConfig> {
   let raw: string;
   try {
     raw = readFileSync(path, 'utf8');
-  } catch {
-    return {};
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new CliError(`cannot read config file ${path}: ${err instanceof Error ? err.message : String(err)}`);
   }
   let parsed: unknown;
   try {

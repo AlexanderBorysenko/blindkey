@@ -49,6 +49,26 @@ describe('loadConfig', () => {
     writeFileSync(configPath(envWith()), '{not json');
     expect(() => loadConfig(envWith())).toThrow(/not valid JSON/);
   });
+
+  it('reports an unreadable config file as a read error, not "not configured"', () => {
+    const path = configPath(envWith());
+    writeFileSync(path, JSON.stringify({ url: 'http://x', token: 't' }));
+    chmodSync(path, 0o000);
+    try {
+      if (process.getuid?.() === 0) return; // root ignores file permissions — chmod has no effect
+      let thrown: unknown;
+      try {
+        loadConfig(envWith());
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(CliError);
+      expect((thrown as CliError).message).not.toMatch(/pidb login/);
+      expect((thrown as CliError).message).toContain(path);
+    } finally {
+      chmodSync(path, 0o600);
+    }
+  });
 });
 
 describe('saveConfig', () => {

@@ -93,6 +93,17 @@ describe('PidbClient', () => {
     expect((err as Error).message).toMatch(/cannot reach/);
   });
 
+  it('bounds the message for a non-JSON 5xx error body', async () => {
+    const html = `<html><body>${'x'.repeat(5000)}</body></html>`;
+    const stubFetch = (async () =>
+      new Response(html, { status: 502, headers: { 'content-type': 'text/html' } })) as unknown as typeof fetch;
+    const c = new PidbClient({ url: 'http://example.invalid', token: 't' }, stubFetch);
+    const err = await c.json('GET', '/api/v1/projects').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).exitCode).toBe(1);
+    expect((err as ApiError).message.length).toBeLessThanOrEqual(600);
+  });
+
   it('handles 204 responses', async () => {
     const c = client(s.token(['docs:write']));
     await c.json('PUT', '/api/v1/docs/tmp-doc', { body: { title: 'T', category: 'notes', body_md: 'hi' } });
