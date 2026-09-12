@@ -8,7 +8,7 @@ Spec: `docs/superpowers/specs/2026-09-12-projects-info-db-design.md`.
 
 - `packages/shared` — zod schemas, secret-reference parser (`{{secret:Name}}`), secret-value lint
 - `packages/server` — Fastify server: REST (`/api/v1`), MCP (`/mcp`), `pidb-server` ops CLI
-- `packages/cli` — `pidb` client CLI (Plan 2)
+- `packages/cli` — `pidb` client CLI: docs, secret metadata, and value injection (`exec` / `write` / `env`)
 
 ## Quick start (development)
 
@@ -43,6 +43,45 @@ Register the MCP server in Claude Code:
 claude mcp add --transport http pidb http://localhost:8080/mcp --header "Authorization: Bearer $AGENT_TOKEN"
 ```
 
+## CLI (`pidb`)
+
+```bash
+npm run build
+node packages/cli/dist/cli.js login http://localhost:8080     # prompts for the admin credentials
+```
+
+Configuration resolves from `PIDB_URL` / `PIDB_TOKEN`, then `~/.config/pidb/config.json` (written `0600` by `pidb login`; `PIDB_CONFIG_HOME` overrides the directory).
+
+```bash
+pidb projects list
+pidb projects get acme
+pidb docs list acme
+pidb docs get acme deploy --refs          # shows which secrets the doc references
+pidb docs put acme deploy --file deploy.md --title "Deploy" --category deploy
+pidb secrets list acme                    # names, field keys, sensitivity — never values
+pidb search "staging database"
+```
+
+Consuming secret values — none of these print the value:
+
+```bash
+pidb secret exec acme "DB" -- psql        # fields become $PIDB_HOST, $PIDB_PASSWORD, …
+pidb secret write acme "SSH" content --out ~/.ssh/acme_key --mode 600
+pidb secret env acme "DB" --out .env
+pidb secret set acme "DB" password        # value read from stdin
+pidb secret get acme "DB" password --print   # explicit opt-in; exits 2 without --print
+```
+
+Admin:
+
+```bash
+pidb token create --name claude-code --scopes projects:read,docs:read,secrets:meta --projects acme --expires 90d
+pidb token list
+pidb token revoke 3
+```
+
+Exit codes: `0` success, `1` generic error, `2` refused (missing `--print`, would overwrite a file), `3` authentication or missing scope, `4` not found.
+
 ## Environment
 
 | variable | default | purpose |
@@ -62,4 +101,4 @@ claude mcp add --transport http pidb http://localhost:8080/mcp --header "Authori
 
 ### Error codes
 
-`unauthorized` · `missing_scope` · `not_found` · `validation` · `conflict` · `lint` · `unresolved_refs` · `rate_limited` · `payload_too_large` · `decrypt_failed` · `internal`
+`unauthorized` · `missing_scope` · `not_found` · `validation` · `conflict` · `lint` · `unresolved_refs` · `rate_limited` · `payload_too_large` · `unsupported_media_type` · `bad_request` · `decrypt_failed` · `internal`
