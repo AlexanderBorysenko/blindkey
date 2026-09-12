@@ -10,6 +10,7 @@ import { runLogin } from './commands/login.js';
 import { runProjectsGet, runProjectsList, runSearch } from './commands/projects.js';
 import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from './commands/docs.js';
 import { runSecretGet, runSecretSet, runSecretsList } from './commands/secrets.js';
+import { runSecretExec } from './commands/exec.js';
 
 export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
   return new PidbClient(loadConfig(env));
@@ -133,6 +134,15 @@ export function buildProgram(): Command {
         emit(await runSecretSet(clientFrom(), target, name, field, opts), opts.json === true);
       },
     );
+  secret
+    .command('exec')
+    .argument('<target>', 'project slug or "global"')
+    .argument('<name>', 'secret name')
+    .argument('<command...>', 'command to run after --')
+    .description('Run a command with the secret fields injected as PIDB_<KEY> environment variables')
+    .action(async (target: string, name: string, command: string[]) => {
+      process.exitCode = await runSecretExec(clientFrom(), target, name, command);
+    });
 
   return program;
 }

@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import type { Scope } from '@pidb/shared';
 import { openDb, type Db } from '../../server/src/db/connection.js';
 import { buildApp } from '../../server/src/http/app.js';
@@ -57,4 +59,32 @@ export async function makeServer(): Promise<ServerFixture> {
       await app.close();
     },
   };
+}
+
+export interface CliRun {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Run the CLI in a child process and await it. Never use spawnSync here: the
+ * fixture server runs in this process, and a synchronous wait would block the
+ * event loop that has to answer the child's HTTP request.
+ */
+export function runCliAsync(args: string[], env: Record<string, string>, repoRoot: string): Promise<CliRun> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(join(repoRoot, 'node_modules/.bin/tsx'), [join(repoRoot, 'packages/cli/src/cli.ts'), ...args], {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (c: string) => (stdout += c));
+    child.stderr.on('data', (c: string) => (stderr += c));
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
 }
