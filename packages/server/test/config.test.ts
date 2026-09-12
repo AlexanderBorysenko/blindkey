@@ -43,4 +43,10 @@ describe('loadConfig', () => {
     expect(c.dataDir).toBe('/tmp/x');
     expect(c.dbPath).toBe('/tmp/y.sqlite');
   });
+  it('rejects port 0', () => {
+    expect(() => loadConfig({ PIDB_MASTER_KEY: key(), PIDB_PORT: '0' })).toThrow(ConfigError);
+  });
+  it('rejects duplicate previous key versions', () => {
+    expect(() => loadConfig({ PIDB_MASTER_KEY: key(), PIDB_MASTER_KEY_VERSION: '3', PIDB_MASTER_KEY_PREVIOUS: `1:${key()},1:${key()}` })).toThrow(/duplicate/);
+  });
 });

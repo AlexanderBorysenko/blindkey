@@ -57,11 +57,14 @@ export function loadConfig(
     if (version < 1 || version >= current) {
       throw new ConfigError(`previous key version ${version} must be >= 1 and lower than current (${current})`);
     }
+    if (keys.has(version)) {
+      throw new ConfigError(`duplicate key version ${version} in PIDB_MASTER_KEY_PREVIOUS`);
+    }
     keys.set(version, parseKey(entry.slice(idx + 1), `PIDB_MASTER_KEY_PREVIOUS[${version}]`));
   }
 
   const port = parseIntStrict(env.PIDB_PORT ?? '8080', 'PIDB_PORT');
-  if (port > 65535) throw new ConfigError('PIDB_PORT must be <= 65535');
+  if (port < 1 || port > 65535) throw new ConfigError('PIDB_PORT must be between 1 and 65535');
   const dataDir = env.PIDB_DATA_DIR ?? '/data';
 
   return {
