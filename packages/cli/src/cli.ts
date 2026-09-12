@@ -12,6 +12,7 @@ import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from './command
 import { runSecretGet, runSecretSet, runSecretsList } from './commands/secrets.js';
 import { runSecretExec } from './commands/exec.js';
 import { runSecretEnv, runSecretWrite } from './commands/files.js';
+import { runTokenCreate, runTokenList, runTokenRevoke } from './commands/tokens.js';
 
 export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
   return new PidbClient(loadConfig(env));
@@ -170,6 +171,31 @@ export function buildProgram(): Command {
     .description('Run a command with the secret fields injected as PIDB_<KEY> environment variables')
     .action(async (target: string, name: string, command: string[]) => {
       process.exitCode = await runSecretExec(clientFrom(), target, name, command);
+    });
+
+  const token = program.command('token').description('API tokens (requires an admin token)');
+  token
+    .command('create')
+    .requiredOption('--name <name>', 'token name')
+    .requiredOption('--scopes <scopes>', 'comma-separated scopes')
+    .option('--projects <slugs>', 'comma-separated project slugs (default: all projects)')
+    .option('--expires <duration>', 'expiry such as 90d, 12h, 30m')
+    .option('--json', 'raw JSON output')
+    .action(async (opts: { name: string; scopes: string; projects?: string; expires?: string; json?: boolean }) => {
+      emit(await runTokenCreate(clientFrom(), opts), opts.json === true);
+    });
+  token
+    .command('list')
+    .option('--json', 'raw JSON output')
+    .action(async (opts: { json?: boolean }) => {
+      emit(await runTokenList(clientFrom()), opts.json === true);
+    });
+  token
+    .command('revoke')
+    .argument('<id>')
+    .option('--json', 'raw JSON output')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      emit(await runTokenRevoke(clientFrom(), id), opts.json === true);
     });
 
   return program;
