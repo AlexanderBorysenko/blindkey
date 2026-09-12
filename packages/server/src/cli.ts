@@ -22,7 +22,16 @@ async function prompt(question: string): Promise<string> {
 
 function promptHidden(question: string): Promise<string> {
   stdout.write(question);
-  if (!stdin.isTTY) return prompt('');
+  if (!stdin.isTTY) {
+    // Do not reuse prompt(): readline enables terminal mode (which echoes
+    // input) whenever stdout is a TTY, even if stdin is not — e.g. piped
+    // stdin with an interactive stdout would then echo the password.
+    const rl = readline.createInterface({ input: stdin, output: stdout, terminal: false });
+    return rl.question('').then((answer) => {
+      rl.close();
+      return answer.trim();
+    });
+  }
   stdin.setRawMode(true);
   stdin.resume();
   return new Promise<string>((resolve) => {
