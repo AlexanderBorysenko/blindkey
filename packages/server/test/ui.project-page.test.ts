@@ -1,0 +1,85 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { makeTestApp, type TestCtx } from './helpers.js';
+import { createAdmin } from '../src/repos/admin.js';
+import { hashPassword } from '../src/crypto/passwords.js';
+import { createSecret } from '../src/repos/secrets.js';
+import { upsertDocument } from '../src/repos/documents.js';
+import { getProjectBySlug } from '../src/repos/projects.js';
+
+let t: TestCtx;
+let session: string;
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const csrfOf = (b: string) => /name="csrf" value="([^"]+)"/.exec(b)?.[1] ?? '';
+const post = (url: string, payload: Record<string, unknown>) =>
+  t.app.inject({ method: 'POST', url, cookies: { pidb_session: session }, payload });
+
+beforeAll(async () => {
+  t = await makeTestApp();
+  createAdmin(t.db, 'alex', await hashPassword('pw'));
+  session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
+    .cookies.find((c) => c.name === 'pidb_session')!.value;
+  t.project('acme');
+  const id = getProjectBySlug(t.db, 'acme')!.id;
+  upsertDocument(t.db, { projectId: id, slug: 'deploy', title: 'Deploy notes', category: 'deploy', body_md: '# Deploy\n' });
+  createSecret(t.db, t.ring, {
+    projectId: id,
+    name: 'DB',
+    description: 'main database',
+    tags: ['prod'],
+    fields: [{ key: 'host', value: 'db.internal' }, { key: 'password', value: 'hunter2hunter2' }],
+  });
+});
+afterAll(async () => {
+  await t.app.close();
+});
+
+describe('ui project page', () => {
+  it('shows the header and the documents tab by default', async () => {
+    const res = await page('/p/acme');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('acme');
+    expect(res.body).toContain('Deploy notes');
+    expect(res.body).toContain('href="/p/acme/docs/deploy"');
+  });
+
+  it('shows secret metadata on the secrets tab without any sensitive value', async () => {
+    const res = await page('/p/acme?tab=secrets');
+    expect(res.body).toContain('DB');
+    expect(res.body).toContain('main database');
+    expect(res.body).toContain('db.internal');          // non-sensitive value is safe to show
+    expect(res.body).not.toContain('hunter2hunter2');   // sensitive value is not
+    expect(res.body).toContain('href="/p/acme/secrets/DB"');
+  });
+
+  it('updates the project meta', async () => {
+    const form = await page('/p/acme');
+    const res = await post('/p/acme', { csrf: csrfOf(form.body), name: 'Acme Renamed', status: 'paused', tags: 'client, wp', summary: 'Updated' });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('/p/acme');
+    const row = getProjectBySlug(t.db, 'acme')!;
+    expect(row.name).toBe('Acme Renamed');
+    expect(row.status).toBe('paused');
+    expect(row.tags).toEqual(['client', 'wp']);
+  });
+
+  it('rejects an update without a CSRF token', async () => {
+    const res = await post('/p/acme', { name: 'Hacked' });
+    expect(res.statusCode).toBe(403);
+    expect(getProjectBySlug(t.db, 'acme')!.name).toBe('Acme Renamed');
+  });
+
+  it('renders 404 HTML for an unknown project', async () => {
+    const res = await page('/p/nope');
+    expect(res.statusCode).toBe(404);
+    expect(res.headers['content-type']).toContain('text/html');
+  });
+
+  it('deletes a project and redirects to the list', async () => {
+    t.project('doomed');
+    const form = await page('/p/doomed');
+    const res = await post('/p/doomed/delete', { csrf: csrfOf(form.body) });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('/');
+    expect(getProjectBySlug(t.db, 'doomed')).toBeNull();
+  });
+});

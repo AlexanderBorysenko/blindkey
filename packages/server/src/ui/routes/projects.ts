@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { PROJECT_STATUSES, projectInputSchema } from '@pidb/shared';
+import { DOC_CATEGORIES, PROJECT_STATUSES, projectInputSchema, projectPatchSchema } from '@pidb/shared';
 import type { AppContext } from '../../http/context.js';
-import { createProjectFor, listProjectsFor } from '../../services/projects.js';
+import { ValidationError } from '../../errors.js';
+import { createProjectFor, deleteProjectFor, getProjectDetailFor, listProjectsFor, updateProjectFor } from '../../services/projects.js';
 import { searchFor } from '../../services/search.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
@@ -62,5 +63,44 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: AppContext): vo
     }
     const project = createProjectFor(ctx, adminActor(req), parsed.data);
     return reply.redirect(`/p/${encodeURIComponent(project.slug)}`, 302);
+  });
+
+  type SlugParams = { Params: { slug: string }; Querystring: { tab?: string } };
+
+  app.get<SlugParams>('/p/:slug', async (req, reply) => {
+    const principal = requireAdmin(req);
+    const detail = getProjectDetailFor(ctx, principal, req.params.slug);
+    const tab = req.query.tab === 'secrets' ? 'secrets' : 'docs';
+    return reply.type('text/html').send(
+      renderPage('project', {
+        ...pageContext(ctx, req, detail.slug),
+        project: detail,
+        tab,
+        statuses: PROJECT_STATUSES,
+        categories: DOC_CATEGORIES,
+      }),
+    );
+  });
+
+  app.post<SlugParams>('/p/:slug', async (req, reply) => {
+    assertCsrf(ctx, req);
+    requireAdmin(req);
+    const b = body(req);
+    const parsed = projectPatchSchema.safeParse({
+      name: str(b, 'name'),
+      status: str(b, 'status', 'active'),
+      tags: parseTags(b.tags),
+      summary: str(b, 'summary'),
+    });
+    if (!parsed.success) throw new ValidationError(parsed.error.issues);
+    updateProjectFor(ctx, adminActor(req), req.params.slug, parsed.data);
+    return reply.redirect(`/p/${encodeURIComponent(req.params.slug)}`, 302);
+  });
+
+  app.post<SlugParams>('/p/:slug/delete', async (req, reply) => {
+    assertCsrf(ctx, req);
+    requireAdmin(req);
+    deleteProjectFor(ctx, adminActor(req), req.params.slug);
+    return reply.redirect('/', 302);
   });
 }
