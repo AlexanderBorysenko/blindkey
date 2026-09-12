@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { CliError } from './errors.js';
 import { emit } from './output.js';
 import { runLogin } from './commands/login.js';
+import { runProjectsGet, runProjectsList, runSearch } from './commands/projects.js';
 
 export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
   return new PidbClient(loadConfig(env));
@@ -26,6 +27,30 @@ export function buildProgram(): Command {
     .description('Exchange admin credentials for an API token and save it')
     .action(async (url: string, opts: { username?: string; name?: string }) => {
       emit(await runLogin(url, opts), false);
+    });
+
+  const projects = program.command('projects').description('Projects');
+  projects
+    .command('list')
+    .option('--json', 'raw JSON output')
+    .action(async (opts: { json?: boolean }) => {
+      emit(await runProjectsList(clientFrom()), opts.json === true);
+    });
+  projects
+    .command('get')
+    .argument('<slug>')
+    .option('--json', 'raw JSON output')
+    .action(async (slug: string, opts: { json?: boolean }) => {
+      emit(await runProjectsGet(clientFrom(), slug), opts.json === true);
+    });
+
+  program
+    .command('search')
+    .argument('<query>')
+    .option('--json', 'raw JSON output')
+    .description('Search projects, documents and secret names (never values)')
+    .action(async (query: string, opts: { json?: boolean }) => {
+      emit(await runSearch(clientFrom(), query), opts.json === true);
     });
 
   return program;
