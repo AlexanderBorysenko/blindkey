@@ -9,6 +9,7 @@ import { emit } from './output.js';
 import { runLogin } from './commands/login.js';
 import { runProjectsGet, runProjectsList, runSearch } from './commands/projects.js';
 import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from './commands/docs.js';
+import { runSecretGet, runSecretSet, runSecretsList } from './commands/secrets.js';
 
 export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
   return new PidbClient(loadConfig(env));
@@ -89,6 +90,47 @@ export function buildProgram(): Command {
       ) => {
         const { target, doc } = resolveDocTarget(a, b);
         emit(await runDocsPut(clientFrom(), target, doc, opts), opts.json === true);
+      },
+    );
+
+  const secrets = program.command('secrets').description('Secret metadata (never values)');
+  secrets
+    .command('list', { isDefault: true })
+    .argument('[target]', 'project slug or "global"', 'global')
+    .option('--json', 'raw JSON output')
+    .action(async (target: string, opts: { json?: boolean }) => {
+      emit(await runSecretsList(clientFrom(), target), opts.json === true);
+    });
+
+  const secret = program.command('secret').description('Consume a single secret');
+  secret
+    .command('get')
+    .argument('<target>', 'project slug or "global"')
+    .argument('<name>', 'secret name')
+    .argument('<field>', 'field key')
+    .option('--print', 'print the value to stdout (refused without this flag)')
+    .option('--json', 'raw JSON output')
+    .action(async (target: string, name: string, field: string, opts: { print?: boolean; json?: boolean }) => {
+      emit(await runSecretGet(clientFrom(), target, name, field, opts), opts.json === true);
+    });
+  secret
+    .command('set')
+    .argument('<target>', 'project slug or "global"')
+    .argument('<name>', 'secret name')
+    .argument('<field>', 'field key')
+    .option('--from-file <path>', 'read the value from a file instead of stdin')
+    .option('--sensitive', 'mark the field sensitive')
+    .option('--non-sensitive', 'mark the field non-sensitive')
+    .option('--create', 'create the secret when it does not exist')
+    .option('--json', 'raw JSON output')
+    .action(
+      async (
+        target: string,
+        name: string,
+        field: string,
+        opts: { fromFile?: string; sensitive?: boolean; nonSensitive?: boolean; create?: boolean; json?: boolean },
+      ) => {
+        emit(await runSecretSet(clientFrom(), target, name, field, opts), opts.json === true);
       },
     );
 
