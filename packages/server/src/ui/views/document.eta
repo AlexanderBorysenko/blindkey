@@ -1,0 +1,26 @@
+<p><a href="<%= it.prefix === '/global' ? '/global/docs' : it.prefix %>">← <%= it.scopeLabel %></a></p>
+<h1><%= it.doc.title %></h1>
+<p><small><code><%= it.doc.slug %></code> · <%= it.doc.category %> · updated <%= new Date(it.doc.updated_at).toISOString().slice(0, 19) %>Z</small></p>
+
+<div class="row-actions">
+  <a role="button" href="<%= it.prefix %>/docs/<%= encodeURIComponent(it.doc.slug) %>/edit">Edit</a>
+  <form method="post" action="<%= it.prefix %>/docs/<%= encodeURIComponent(it.doc.slug) %>/delete" onsubmit="return confirm('Delete this document?');">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <button class="secondary outline" type="submit">Delete</button>
+  </form>
+</div>
+
+<article><%~ it.html %></article>
+
+<% if (it.refs.length) { %>
+<h2>Referenced secrets</h2>
+<ul>
+  <% it.refs.forEach(function (r) { %>
+  <li>
+    <a href="<%= r.project ? '/p/' + encodeURIComponent(r.project) : '/global' %>/secrets/<%= encodeURIComponent(r.name) %>"><%= r.name %></a>
+    — <% r.fields.forEach(function (f) { %><code><%= f.key %></code><% if (f.sensitive) { %>*<% } %> <% }) %>
+  </li>
+  <% }) %>
+</ul>
+<p><small>Values are never shown here. Consume them with <code>pidb secret exec</code>, <code>write</code> or <code>env</code>.</small></p>
+<% } %>

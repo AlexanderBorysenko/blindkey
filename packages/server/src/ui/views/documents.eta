@@ -1,0 +1,15 @@
+<h1>Global documents</h1>
+<table>
+  <thead><tr><th>Slug</th><th>Title</th><th>Category</th><th>Updated</th></tr></thead>
+  <tbody>
+    <% it.documents.forEach(function (d) { %>
+    <tr>
+      <td><a href="/global/docs/<%= encodeURIComponent(d.slug) %>"><%= d.slug %></a></td>
+      <td><%= d.title %></td>
+      <td><%= d.category %></td>
+      <td><%= new Date(d.updated_at).toISOString().slice(0, 19) %>Z</td>
+    </tr>
+    <% }) %>
+  </tbody>
+</table>
+<p><a role="button" href="/global/docs/new/edit">New document</a></p>

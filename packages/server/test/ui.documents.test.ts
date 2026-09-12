@@ -1,0 +1,90 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { makeTestApp, type TestCtx } from './helpers.js';
+import { createAdmin } from '../src/repos/admin.js';
+import { hashPassword } from '../src/crypto/passwords.js';
+import { createSecret } from '../src/repos/secrets.js';
+import { upsertDocument, getDocument } from '../src/repos/documents.js';
+import { getProjectBySlug } from '../src/repos/projects.js';
+
+let t: TestCtx;
+let session: string;
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const csrfOf = (b: string) => /name="csrf" value="([^"]+)"/.exec(b)?.[1] ?? '';
+
+beforeAll(async () => {
+  t = await makeTestApp();
+  createAdmin(t.db, 'alex', await hashPassword('pw'));
+  session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
+    .cookies.find((c) => c.name === 'pidb_session')!.value;
+  t.project('acme');
+  const id = getProjectBySlug(t.db, 'acme')!.id;
+  createSecret(t.db, t.ring, { projectId: id, name: 'DB', description: '', tags: [], fields: [{ key: 'password', value: 'hunter2hunter2' }] });
+  upsertDocument(t.db, {
+    projectId: id,
+    slug: 'deploy',
+    title: 'Deploy notes',
+    category: 'deploy',
+    body_md: '# Deploy\n\nCredentials live in {{secret:DB}}.\n\n<img src=x onerror=alert(1)>\n',
+  });
+  upsertDocument(t.db, { projectId: null, slug: 'guidelines', title: 'Guidelines', category: 'guidelines', body_md: '# Guidelines\n' });
+  upsertDocument(t.db, { projectId: id, slug: 'doomed', title: 'Doomed', category: 'notes', body_md: 'bye\n' });
+});
+afterAll(async () => {
+  await t.app.close();
+});
+
+describe('ui document view', () => {
+  it('renders Markdown as HTML', async () => {
+    const res = await page('/p/acme/docs/deploy');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('<h1>Deploy</h1>');
+  });
+
+  it('turns a secret reference into a link to the secret page', async () => {
+    const res = await page('/p/acme/docs/deploy');
+    expect(res.body).toContain('href="/p/acme/secrets/DB"');
+    expect(res.body).toContain('{{secret:DB}}');
+  });
+
+  it('sanitizes dangerous Markdown', async () => {
+    const res = await page('/p/acme/docs/deploy');
+    expect(res.body).not.toContain('onerror');
+  });
+
+  it('never renders a secret value', async () => {
+    const res = await page('/p/acme/docs/deploy');
+    expect(res.body).not.toContain('hunter2hunter2');
+  });
+
+  it('lists global documents and opens one', async () => {
+    const list = await page('/global/docs');
+    expect(list.statusCode).toBe(200);
+    expect(list.body).toContain('href="/global/docs/guidelines"');
+    const doc = await page('/global/docs/guidelines');
+    expect(doc.statusCode).toBe(200);
+    expect(doc.body).toContain('<h1>Guidelines</h1>');
+  });
+
+  it('renders 404 HTML for an unknown document', async () => {
+    const res = await page('/p/acme/docs/nope');
+    expect(res.statusCode).toBe(404);
+    expect(res.headers['content-type']).toContain('text/html');
+  });
+
+  it('deletes a document with a CSRF token and rejects one without', async () => {
+    const view = await page('/p/acme/docs/doomed');
+    const bad = await t.app.inject({ method: 'POST', url: '/p/acme/docs/doomed/delete', cookies: { pidb_session: session }, payload: {} });
+    expect(bad.statusCode).toBe(403);
+    expect(getDocument(t.db, getProjectBySlug(t.db, 'acme')!.id, 'doomed')).not.toBeNull();
+
+    const ok = await t.app.inject({
+      method: 'POST',
+      url: '/p/acme/docs/doomed/delete',
+      cookies: { pidb_session: session },
+      payload: { csrf: csrfOf(view.body) },
+    });
+    expect(ok.statusCode).toBe(302);
+    expect(ok.headers.location).toBe('/p/acme');
+    expect(getDocument(t.db, getProjectBySlug(t.db, 'acme')!.id, 'doomed')).toBeNull();
+  });
+});
