@@ -41,6 +41,8 @@ describe('ui projects list', () => {
     const res = await page('/?status=archived');
     expect(res.body).toContain('beta');
     expect(res.body).not.toContain('href="/p/acme"');
+    expect(res.body).toContain('aria-current="page"');
+    expect(res.body).not.toContain('aria-current=&quot;page&quot;');
   });
 
   it('escapes project text instead of rendering it as HTML', async () => {

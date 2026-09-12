@@ -84,6 +84,23 @@ pidb token revoke 3
 
 Exit codes: `0` success, `1` generic error, `2` refused (missing `--print`, would overwrite a file), `3` authentication or missing scope, `4` not found.
 
+## Admin UI
+
+The server renders an admin UI at `/` — the same Fastify process, no separate build.
+
+```bash
+npm run build
+PIDB_ADMIN_USERNAME=alex PIDB_ADMIN_PASSWORD=change-me node packages/server/dist/cli.js init
+node packages/server/dist/cli.js start
+open http://localhost:8080/login
+```
+
+- Log in with the admin credentials created by `pidb-server init`; the session is a `pidb_session` cookie (httpOnly, SameSite=Lax, `Secure` behind HTTPS) valid for 7 days.
+- Projects, documents and secrets are browsable and editable; document saves run the same secret-value lint as the API, with "Save anyway" as the audited override.
+- Sensitive secret fields are masked. "Reveal" fetches one field, writes an `audit_log` row with `actor_type = admin`, and the response is `no-store`. To use a value, prefer `pidb secret exec|write|env`.
+- `/tokens` creates API tokens (the value is shown once) and revokes them; `/audit` is the paginated audit log.
+- Assets (Pico CSS, htmx) are served from `node_modules` under `/assets` — no CDN, so the UI works offline and under a strict CSP.
+
 ## Environment
 
 | variable | default | purpose |

@@ -9,7 +9,7 @@
   Status:
   <a href="/">all</a>
   <% it.statuses.forEach(function (s) { %>
-  · <a href="/?status=<%= s %>"<%= it.status === s ? ' aria-current="page"' : '' %>><%= s %></a>
+  · <a href="/?status=<%= s %>" aria-current="<%= it.status === s ? 'page' : 'false' %>"><%= s %></a>
   <% }) %>
 </p>
 

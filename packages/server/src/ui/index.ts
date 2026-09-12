@@ -4,7 +4,7 @@ import fastifyStatic from '@fastify/static';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import type { AppContext } from '../http/context.js';
-import { PUBLIC_DIR } from './render.js';
+import { PUBLIC_DIR, isUiRequest } from './render.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerDocumentRoutes } from './routes/documents.js';
@@ -23,6 +23,29 @@ function assetRoots(): string[] {
 }
 
 export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise<void> {
+  // The UI serves its own scripts and styles only; htmx and Pico come from /assets.
+  const CSP = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+  ].join('; ');
+
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (!isUiRequest(req.url)) return payload;
+    reply.header('content-security-policy', CSP);
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('referrer-policy', 'same-origin');
+    reply.header('x-frame-options', 'DENY');
+    // Pages that can show secret material must never sit in a shared cache.
+    const path = req.url.split('?')[0] ?? '';
+    if (path.includes('/secrets') || path === '/tokens' || path === '/audit') reply.header('cache-control', 'no-store');
+    return payload;
+  });
+
   await app.register(formbody);
   await app.register(fastifyStatic, {
     root: assetRoots(),
