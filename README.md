@@ -110,13 +110,17 @@ The stack is three services: `server` (this image), `caddy` (automatic TLS, reve
 ```bash
 cd docker
 cp .env.example .env            # set PIDB_DOMAIN and PIDB_ACME_EMAIL
+chmod 600 .env                  # it will hold key material during rotations
 mkdir -p secrets
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" > secrets/master_key
+umask 077
+openssl rand -base64 32 > secrets/master_key
 chmod 600 secrets/master_key
 sudo chown 1000:1000 secrets/master_key   # the containers run as uid 1000 (node)
 ```
 
-The order matters: Compose bind-mounts this `file:` secret with its host owner and mode, and the containers run as uid 1000, so the key file must end up owned by uid 1000 — chown it after `chmod`, since once it belongs to uid 1000 a non-root operator can no longer write to it. Skip this and the server can't read the key and restarts in a loop.
+This does not require Node on the host — `openssl` is enough, and it's what you'll also use for rotation later. Do not use `node -e "..." > secrets/master_key` on a Docker-only VPS with no Node installed: the shell still creates the file, redirection succeeds, and you get a silently empty key.
+
+The order matters: Compose bind-mounts this `file:` secret with its host owner and mode, and the containers run as uid 1000, so the key file must end up owned by uid 1000 — chown it after `chmod`, since once it belongs to uid 1000 a non-root operator can no longer write to it. Skip this and the server can't read the key and restarts in a loop. With userns-remap or rootless Docker, the in-container uid 1000 maps to a different host uid — chown to that mapped uid instead of 1000.
 
 **Store `secrets/master_key` in your password manager before going further.** It is mounted at `/run/secrets/master_key` and read through `PIDB_MASTER_KEY_FILE`; it is never baked into an image and never included in a backup. Lose it and every stored secret value is unrecoverable.
 
@@ -125,11 +129,12 @@ Create the admin user and the schema, then start the stack:
 ```bash
 docker compose run --rm \
   -e PIDB_ADMIN_USERNAME=alex \
-  -e PIDB_ADMIN_PASSWORD='change-me' \
   server init
 docker compose up -d
 docker compose logs -f server
 ```
+
+`init` prompts for the admin password with hidden input (it is never echoed and never passed as `-e PIDB_ADMIN_PASSWORD=...`, which would land in shell history and the process list).
 
 Then open `https://$PIDB_DOMAIN/login`. Point the CLI at the same host with `pidb login https://$PIDB_DOMAIN`.
 
@@ -146,39 +151,83 @@ Then open `https://$PIDB_DOMAIN/login`. Point the CLI at the same host with `pid
 
 The `backup` service writes `pidb-<timestamp>.sqlite` into the `pidb-data` volume under `/data/backups` every `PIDB_BACKUP_INTERVAL` seconds and prunes to the newest `PIDB_BACKUP_KEEP` copies. A backup is the database only — **it does not contain the master key**, so keep the key somewhere else or the copies are worthless.
 
-Copy one off the host:
+Backups live on the same `pidb-data` volume as the database itself, so `docker compose down -v` deletes them along with everything else. Copy them off the host regularly — this needs the stack up:
 
 ```bash
 docker compose cp server:/data/backups ./backups-$(date +%F)
 ```
 
-Restore into a stopped stack:
+Restore: stop the whole stack first (do **not** pass `-v`, or the backups you're about to restore from disappear too), replace the database file inside a throwaway container, then bring the stack back up:
 
 ```bash
 docker compose down
-docker compose run --rm --entrypoint sh server -c \
-  'cp /data/backups/pidb-<timestamp>.sqlite /data/pidb.sqlite'
+docker compose run --rm --entrypoint sh server -c '
+  mv /data/pidb.sqlite /data/pidb.sqlite.pre-restore
+  rm -f /data/pidb.sqlite-wal /data/pidb.sqlite-shm
+  cp /data/backups/pidb-<timestamp>.sqlite /data/pidb.sqlite
+'
 docker compose up -d
 ```
+
+Renaming the live file aside (rather than overwriting it) keeps a copy in case the restore was a mistake, and removing the stale `-wal`/`-shm` files stops SQLite from replaying the *old* database's uncommitted write-ahead log onto the *restored* file after an unclean stop.
+
+**Verify before trusting the restore:** log in to the admin UI and reveal one secret field, or from a machine with the CLI run `pidb secret get <target> <name> <field> --print`. A decrypt error here means the backup was wrapped with a different master key version than the one currently loaded — see [Rotating the master key](#rotating-the-master-key) for how to load an old key version alongside the current one. Once you've confirmed the restore is good, delete `/data/pidb.sqlite.pre-restore`.
 
 ### Rotating the master key
 
-Generate the new key, keep the old one available under its version, then rewrap:
+Rotation rewraps every secret's DEK from the old key to a new one, so it needs the whole stack stopped — a server or backup process running against a live database while the key underneath it changes can wrap new secrets with the wrong version, or read the new key labelled as the old one. Secrets created in that window are lost once the old key is discarded, so don't skip the "stop" step:
 
 ```bash
-# in docker/.env
-#   PIDB_MASTER_KEY_VERSION=2
-#   PIDB_MASTER_KEY_PREVIOUS=1:<old-base64-key>
-# write the NEW key into docker/secrets/master_key, keeping its 1000:1000
-# owner and 600 mode (tee into the existing file rather than overwriting it directly):
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" | sudo tee secrets/master_key > /dev/null
-docker compose run --rm server rotate-key
+docker compose stop server backup
+```
+
+Read the *current* (old) key and store it in your password manager, labelled with its version — you'll need it as long as any backup wrapped with it still exists:
+
+```bash
+sudo cat secrets/master_key
+```
+
+Edit `docker/.env` directly (not `echo`/`tee`, which leaves the key in shell history) to bump the version and record the old key as a previous version:
+
+```
+PIDB_MASTER_KEY_VERSION=2
+PIDB_MASTER_KEY_PREVIOUS=1:<old-base64-key-you-just-read>
+```
+
+(If `PIDB_MASTER_KEY_PREVIOUS` already has entries from an earlier rotation, append this one as another comma-separated `version:key` pair rather than replacing it.)
+
+Generate the new key into a temporary file first, sanity-check its length, and only then install it in place — this avoids the failure mode where a host with no Node installed silently truncates the live key file to empty:
+
+```bash
+umask 077
+openssl rand -base64 32 > new_master_key
+test "$(wc -c < new_master_key)" -eq 45 && \
+  sudo install -o 1000 -g 1000 -m 600 new_master_key secrets/master_key
+rm -f new_master_key
+```
+
+The 45-byte check (44 base64 characters plus the trailing newline `openssl` writes) is what stops an empty or short file — e.g. from a failed `openssl` call — from ever being installed as the live key. Store the new key in the password manager too, labelled with its version.
+
+Now rewrap every secret and bring the stack back up:
+
+```bash
+docker compose run --rm server rotate-key   # prints: rewrapped N secrets to key version 2
 docker compose up -d
 ```
 
-Once `rotate-key` reports every secret rewrapped, delete `PIDB_MASTER_KEY_PREVIOUS` from `docker/.env` and run `docker compose up -d` again so the containers drop it.
+Once `rotate-key` has succeeded, you *may* remove `PIDB_MASTER_KEY_PREVIOUS` from `docker/.env` and run `docker compose up -d` again so the recreated containers drop it (until then, `docker inspect` and `docker compose config` still show it in plain text). **Keep every retired key in the password manager anyway**, for as long as any backup wrapped with it exists — that's every backup taken before this rotation, for up to `PIDB_BACKUP_KEEP` days, plus any copies you've moved off-host. Deleting a retired key while such a backup still exists makes that backup permanently unreadable.
+
+To restore a pre-rotation backup later: follow [Backups and restore](#backups-and-restore), then set `PIDB_MASTER_KEY_VERSION`/`PIDB_MASTER_KEY_PREVIOUS` in `docker/.env` so both the backup's key version and the current key are loaded, run `docker compose run --rm server rotate-key` to bring the restored data up to the current key, then `docker compose up -d`.
 
 ### Upgrading
+
+Take a backup first:
+
+```bash
+docker compose run --rm -e PIDB_BACKUP_ONCE=1 backup
+```
+
+(the `backup` service's entrypoint is the same loop script that runs on a schedule; `PIDB_BACKUP_ONCE=1` makes it run a single backup and exit instead of looping.)
 
 ```bash
 git pull

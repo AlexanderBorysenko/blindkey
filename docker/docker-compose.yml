@@ -21,6 +21,8 @@ services:
       - master_key
     volumes:
       - pidb-data:/data
+    # Never publish ports for this service: PIDB_TRUST_PROXY=true above is only
+    # safe because Caddy is the sole way in.
     expose:
       - "8080"
 
@@ -28,7 +30,8 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     environment:
       PIDB_DOMAIN: ${PIDB_DOMAIN}
       PIDB_ACME_EMAIL: ${PIDB_ACME_EMAIL}
@@ -45,7 +48,8 @@ services:
     <<: *image
     restart: unless-stopped
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     env_file:
       - .env
     environment:
