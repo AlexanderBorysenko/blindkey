@@ -65,7 +65,9 @@ describe('logging', () => {
     });
     expect(res.statusCode).toBe(401); // no token: the route is never reached
     await app.close();
-    expect(lines.join('\n')).not.toContain(SECRET_VALUE);
+    const all = lines.join('\n');
+    expect(all).toContain('incoming request');
+    expect(all).not.toContain(SECRET_VALUE);
   });
 
   it('still redacts the authorization header and the cookie', async () => {
@@ -73,13 +75,26 @@ describe('logging', () => {
     const db = openDb(':memory:');
     const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
     const app: FastifyInstance = await buildApp({ db, ring, logLevel: 'trace', loggerStream: stream });
+    // The path must start with /api/ — anything else is a UI path, and the
+    // admin-UI guard would redirect it to /login before the handler runs.
+    // Fastify's default `req` serializer only emits method/url/host/remoteAddress/
+    // remotePort and drops headers entirely, so headers never reach a log line
+    // through the normal request log — this probe logs them explicitly through a
+    // child logger whose `req` serializer is the identity function, so the root
+    // logger's redact config still applies to the object we hand it.
+    app.post('/api/v1/__header-probe', { config: { public: true } }, async (req, reply) => {
+      req.log.child({}, { serializers: { req: (r: unknown) => r } }).info({ req: { headers: req.headers } }, 'header-probe');
+      return reply.send({ ok: true });
+    });
     await app.inject({
-      method: 'GET',
-      url: '/api/v1/projects',
+      method: 'POST',
+      url: '/api/v1/__header-probe',
       headers: { authorization: 'Bearer pidb_super-secret-token', cookie: 'pidb_session=abc123' },
     });
     await app.close();
     const all = lines.join('\n');
+    expect(all).toContain('header-probe');
+    expect(all).toContain('[Redacted]');
     expect(all).not.toContain('pidb_super-secret-token');
     expect(all).not.toContain('abc123');
   });
