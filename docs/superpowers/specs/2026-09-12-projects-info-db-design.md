@@ -65,31 +65,21 @@ SQLite file at `/data/pidb.sqlite`. Drizzle schema + migrations. FTS5 virtual ta
 | id | integer pk | |
 | project_id | integer fk nullable | `NULL` = global secret |
 | name | text | human name, e.g. `Staging server`; unique within project (or within global) |
-| type | text | `server` \| `login` \| `api_key` \| `ssh_key` \| `database` \| `env_file` \| `generic` |
 | description | text | non-sensitive notes |
 | tags | text (json array) | |
 | dek_wrapped | blob | data-encryption key encrypted with master key |
 | key_version | integer | master key version used to wrap DEK |
 | created_at, updated_at | integer | |
 
-Type only provides a default field template in the UI/CLI; any field keys are allowed on any type.
-
-Default templates:
-- `server`: host, port, username, password, private_key
-- `login`: url, username, password
-- `api_key`: url, key
-- `ssh_key`: host, username, private_key, public_key
-- `database`: host, port, database, username, password
-- `env_file`: content
-- `generic`: (none)
+Contract: a secret is a **flat, one-level object of string keys to string values**. No fixed type. Any keys allowed (`host`, `username`, `password`, `private_key`, `content`, `whatever`). Categorization is via `tags` and `description` only. The UI offers optional key presets (server, login, api key, database) purely as typing shortcuts that insert empty rows; nothing is stored about which preset was used.
 
 ### secret_fields
 | column | type | notes |
 |---|---|---|
 | id | integer pk | |
 | secret_id | integer fk | cascade delete |
-| key | text | `host`, `username`, `password`, `private_key`, ... unique per secret |
-| value_enc | blob | AES-256-GCM ciphertext (nonce ‖ tag ‖ ct) |
+| key | text | any string, unique per secret |
+| value_enc | blob | AES-256-GCM ciphertext (nonce ‖ tag ‖ ct) of the UTF-8 string value |
 | is_sensitive | integer bool | `false` → shown in listings; `true` → reveal-only |
 | sort | integer | display order |
 
@@ -178,7 +168,7 @@ Syntax: `{{secret:<name>}}` for a secret in the same project, `{{secret:global/<
 
 - `packages/shared/refs.ts` parses references from Markdown.
 - On document save, server resolves each ref; unresolved refs → 422 `{ unresolved: [...] }` (also overridable with `force`, but not audited specially).
-- Admin UI renders refs as links to the secret page. API returns raw Markdown; `GET .../docs/:doc?resolve=meta` additionally returns `refs: [{ name, project, type, fields: [{key, sensitive}] }]` so agents know which CLI command to run.
+- Admin UI renders refs as links to the secret page. API returns raw Markdown; `GET .../docs/:doc?resolve=meta` additionally returns `refs: [{ name, project, fields: [{key, sensitive}] }]` so agents know which CLI command to run.
 
 Seeded global document `guidelines` (category `guidelines`) explains: document categories, headings convention, how to reference secrets, "never paste values", and the CLI commands agents should use.
 
@@ -210,7 +200,7 @@ Base `/api/v1`. JSON. Errors: `{ error: <code>, message?: string, ...details }`.
 
 Projects
 - `GET /projects` → `[{ slug, name, status, tags, summary, updated_at }]`
-- `GET /projects/:slug` → project + `documents: [{ slug, title, category, updated_at }]` + `secrets: [{ name, type, description, tags, fields: [{ key, sensitive, value? }] }]` (value present only for non-sensitive fields)
+- `GET /projects/:slug` → project + `documents: [{ slug, title, category, updated_at }]` + `secrets: [{ name, description, tags, fields: [{ key, sensitive, value? }] }]` (value present only for non-sensitive fields)
 - `POST /projects`, `PATCH /projects/:slug`, `DELETE /projects/:slug` (`admin`)
 
 Documents
@@ -224,7 +214,7 @@ Secrets
 - `GET /projects/:slug/secrets/:name` → meta for one secret (`secrets:meta`)
 - `GET /projects/:slug/secrets/:name/fields/:key` → `{ key, value }` (`secrets:reveal` for sensitive, `secrets:meta` for non-sensitive); `Accept: text/plain` returns raw value
 - `GET /projects/:slug/secrets/:name/fields` → all fields `{ key: value }` (`secrets:reveal`) — used by `pidb secret exec`; one audit row per sensitive field
-- `POST /projects/:slug/secrets` `{ name, type, description, tags, fields: [{ key, value, sensitive? }] }` (`secrets:write`)
+- `POST /projects/:slug/secrets` `{ name, description, tags, fields: [{ key, value, sensitive? }] }` — keys and values must be strings (`secrets:write`)
 - `PATCH /projects/:slug/secrets/:name` — meta and/or field upserts/removals (`secrets:write`)
 - `DELETE /projects/:slug/secrets/:name` (`secrets:write`)
 - Global secrets use `/secrets/:name/...` with identical semantics.
@@ -245,11 +235,11 @@ Tools (all read-only except `write_document`):
 | tool | scope | returns |
 |---|---|---|
 | `list_projects` | projects:read | slugs, names, status, summary |
-| `get_project(slug)` | projects:read | summary, document index, secret meta (names/types/non-sensitive fields) |
+| `get_project(slug)` | projects:read | summary, document index, secret meta (names/tags/non-sensitive fields) |
 | `read_document(project?, slug)` | docs:read | body + refs meta |
 | `write_document(project?, slug, title, category, body_md, force?)` | docs:write | ok / lint findings |
 | `search(query)` | docs:read / secrets:meta | as REST |
-| `list_secrets(project?)` | secrets:meta | meta only |
+| `list_secrets(project?)` | secrets:meta | names, descriptions, tags, non-sensitive fields |
 
 **There is no reveal tool.** Tool descriptions instruct agents to use `pidb secret exec / write / env` to consume values.
 
@@ -266,7 +256,7 @@ Config resolution: `PIDB_URL` / `PIDB_TOKEN` env → `~/.config/pidb/config.json
 - `pidb secrets list [<slug>]` — meta table
 - `pidb secret exec <slug|global> "<name>" -- <command...>` — fetches all fields, injects as env `PIDB_<KEY_UPPER>` (e.g. `PIDB_HOST`, `PIDB_PASSWORD`), spawns command with inherited stdio. Values never written to CLI stdout/stderr.
 - `pidb secret write <slug|global> "<name>" <field> --out <path> [--mode 600]` — writes value to file, default mode `0600`, refuses to overwrite without `--force`.
-- `pidb secret env <slug|global> "<name>" --out <path>` — for `env_file` type writes `content` field; for other types writes `KEY=value` lines. Mode `0600`.
+- `pidb secret env <slug|global> "<name>" --out <path>` — writes one `key=value` line per field (keys as stored). Mode `0600`. To materialize a stored `.env` blob, keep it in a single field (e.g. `content`) and use `pidb secret write ... content --out .env`.
 - `pidb secret get <slug|global> "<name>" <field> --print` — prints value to stdout. Without `--print` prints a warning explaining exec/write/env and exits 2. Intended for humans.
 - `pidb secret set <slug|global> "<name>" <field>` — reads value from stdin or `--from-file`, upserts.
 - `pidb token create --name --scopes a,b --projects x,y [--expires 90d]` / `pidb token list` / `pidb token revoke <id>`
@@ -287,7 +277,7 @@ Pages:
 - `/` — projects list, status filter, search box
 - `/p/:slug` — project header (name, status, tags, summary edit), tabs: Documents, Secrets
 - `/p/:slug/docs/:doc` — view rendered Markdown (refs → links); `/edit` textarea + live preview (HTMX POST to `/preview`), lint findings shown inline, "Save anyway"
-- `/p/:slug/secrets/:name` — fields table; sensitive fields masked with "Reveal" button (HTMX fetch, audited) and "Copy"; edit form with dynamic add/remove field rows, type template button
+- `/p/:slug/secrets/:name` — fields table; sensitive fields masked with "Reveal" button (HTMX fetch, audited) and "Copy"; edit form with dynamic add/remove key/value rows, optional preset button that inserts empty common keys
 - `/global/docs/...`, `/global/secrets/...` — same as above for global
 - `/tokens` — list, create (shows token once), revoke
 - `/audit` — paginated table with filters
@@ -326,6 +316,7 @@ Integration (`server`, `fastify.inject`, in-memory SQLite, migrations applied):
 - auth: no token 401, bad token 401 + audit, revoked 401
 - scopes: each route × missing scope → 403; project outside `project_ids` → 404
 - `GET project` hides sensitive values, shows non-sensitive
+- secret create rejects non-string keys/values and nested objects (400)
 - reveal writes audit row; `fields` bulk reveal writes one row per sensitive field
 - document save with secret-looking content → 422; `force` → 201 + audited
 - unresolved ref → 422
