@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { SCOPES, tokenInputSchema } from '@pidb/shared';
 import type { AppContext } from '../../http/context.js';
-import { createTokenFor, listTokensFor, revokeTokenFor } from '../../services/admin.js';
+import { createTokenFor, listAuditFor, listTokensFor, revokeTokenFor } from '../../services/admin.js';
 import { listProjectsFor } from '../../services/projects.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
@@ -71,5 +71,42 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     requireAdmin(req);
     revokeTokenFor(ctx, adminActor(req), Number.parseInt(req.params.id, 10));
     return reply.redirect('/tokens', 302);
+  });
+
+  type AuditQs = { Querystring: { limit?: string; before?: string; action?: string; actor?: string } };
+
+  app.get<AuditQs>('/audit', async (req, reply) => {
+    const principal = requireAdmin(req);
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit ?? '50', 10) || 50, 1), 200);
+    const before = req.query.before ? Number.parseInt(req.query.before, 10) : undefined;
+    // A junk cursor (NaN) or a non-positive one both degrade to "no cursor" rather than
+    // producing a confusing page: audit ids are positive, so `id < 0` would just come back empty.
+    const validBefore = before !== undefined && Number.isFinite(before) && before > 0 ? before : undefined;
+    const action = req.query.action ?? '';
+    const actor = req.query.actor ?? '';
+    const rows = listAuditFor(ctx, principal, {
+      limit,
+      before: validBefore,
+      action: action || undefined,
+      actorType: actor || undefined,
+    });
+    const last = rows.at(-1);
+    const query = new URLSearchParams();
+    if (limit !== 50) query.set('limit', String(limit));
+    if (action) query.set('action', action);
+    if (actor) query.set('actor', actor);
+    const olderQuery = new URLSearchParams(query);
+    if (last) olderQuery.set('before', String(last.id));
+    return reply.type('text/html').send(
+      renderPage('audit', {
+        ...pageContext(ctx, req, 'Audit log'),
+        rows,
+        limit,
+        action,
+        actor,
+        olderHref: rows.length === limit && last ? `/audit?${olderQuery.toString()}` : null,
+        resetHref: `/audit?${query.toString()}`,
+      }),
+    );
   });
 }

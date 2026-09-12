@@ -1,0 +1,36 @@
+<h1>Audit log</h1>
+
+<form method="get" action="/audit">
+  <label>Action <input name="action" value="<%= it.action %>" placeholder="e.g. doc.write" /></label>
+  <label>Actor
+    <select name="actor">
+      <option value=""<%= it.actor === '' ? ' selected' : '' %>>any</option>
+      <option value="admin"<%= it.actor === 'admin' ? ' selected' : '' %>>admin</option>
+      <option value="token"<%= it.actor === 'token' ? ' selected' : '' %>>token</option>
+    </select>
+  </label>
+  <label>Rows <input name="limit" type="number" min="1" max="200" value="<%= it.limit %>" /></label>
+  <button type="submit">Filter</button>
+</form>
+
+<table>
+  <thead><tr><th>ID</th><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Field</th><th>IP</th></tr></thead>
+  <tbody>
+    <% it.rows.forEach(function (r) { %>
+    <tr>
+      <td><%= r.id %></td>
+      <td><%= new Date(r.ts).toISOString().slice(0, 19) %>Z</td>
+      <td><%= r.actor_type %><%= r.actor_id === null ? '' : ' #' + r.actor_id %></td>
+      <td><%= r.action %></td>
+      <td><%= r.target_type === null ? '' : r.target_type + ' #' + r.target_id %></td>
+      <td><%= r.field_key === null ? '' : r.field_key %></td>
+      <td><%= r.ip %></td>
+    </tr>
+    <% }) %>
+  </tbody>
+</table>
+
+<p>
+  <a href="<%= it.resetHref %>">Newest</a>
+  <% if (it.olderHref) { %> · <a href="<%= it.olderHref %>">Older →</a><% } %>
+</p>
