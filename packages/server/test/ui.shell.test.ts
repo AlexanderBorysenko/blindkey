@@ -1,9 +1,11 @@
+import type { FastifyRequest } from 'fastify';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { makeTestApp, type TestCtx } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { createSecret } from '../src/repos/secrets.js';
 import { getProjectBySlug } from '../src/repos/projects.js';
+import { pageContext } from '../src/ui/forms.js';
 
 let t: TestCtx;
 let session: string;
@@ -62,5 +64,23 @@ describe('app shell', () => {
     const res = await page('/does-not-exist');
     expect(res.statusCode).toBe(404);
     expect(res.body).not.toContain('class="sidebar"');
+  });
+
+  it('does not 500 on a valid-hex-but-invalid-UTF-8 slug segment', async () => {
+    // %E0%A4 is a well-formed percent escape but not valid UTF-8, so a raw decodeURIComponent
+    // throws URIError. In this Fastify version the request never even reaches our handler for
+    // this exact URL (Fastify's own FST_ERR_BAD_URL guard rejects it with 400 first), but the
+    // assertion and the direct unit test below both guard the real invariant regardless of
+    // that framework behaviour.
+    const res = await page('/p/%E0%A4/secrets/new');
+    expect(res.statusCode).not.toBe(500);
+  });
+
+  it('pageContext does not throw when the path has an undecodable slug segment', () => {
+    // Exercises forms.ts's activeSlugFor directly, bypassing Fastify's own URL guard, so this
+    // is the test that actually goes red if the try/catch in activeSlugFor is removed.
+    const fakeReq = { url: '/p/%E0%A4/secrets/new', query: {}, cookies: {} } as unknown as FastifyRequest;
+    expect(() => pageContext(t.ctx, fakeReq, 'New secret')).not.toThrow();
+    expect(pageContext(t.ctx, fakeReq, 'New secret').activeSlug).toBeNull();
   });
 });

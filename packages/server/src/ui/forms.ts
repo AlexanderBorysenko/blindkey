@@ -46,7 +46,14 @@ export interface PageContext {
 
 function activeSlugFor(path: string): string | null {
   const m = /^\/p\/([^/]+)/.exec(path);
-  return m?.[1] ? decodeURIComponent(m[1]) : null;
+  if (!m?.[1]) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    // Valid-hex-but-invalid-UTF-8 percent escapes (e.g. `%E0%A4`) throw URIError.
+    // Such a path can never match a real project slug, so treat it as "no active project".
+    return null;
+  }
 }
 
 export function pageContext(ctx: AppContext, req: FastifyRequest, title: string): PageContext {

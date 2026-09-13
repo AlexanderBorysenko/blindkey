@@ -9,12 +9,12 @@
 <div class="navgroup">
   <h4>Projects</h4>
   <% if (it.nav.projects.length === 0) { %>
-  <p class="tag">No projects yet</p>
+  <p class="note">No projects yet</p>
   <% } %>
   <% it.nav.projects.forEach(function(p){ %>
-  <a href="/p/<%= p.slug %>" class="<%= p.status === 'archived' ? 'archived' : '' %>" <%~ it.activeSlug === p.slug ? 'aria-current="page"' : '' %>>
+  <a href="/p/<%= p.slug %>" class="<%= p.status === 'archived' ? 'archived' : '' %>" title="<%= p.name %>" <%~ it.activeSlug === p.slug ? 'aria-current="page"' : '' %>>
     <span class="dot status-<%= p.status %>"></span>
-    <span><%= p.name %></span>
+    <span class="mono"><%= p.slug %></span>
     <span class="count" data-count="<%= p.secrets %>"><%= p.secrets %></span>
   </a>
   <% }); %>
