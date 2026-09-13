@@ -21,6 +21,7 @@ beforeAll(async () => {
   t.project('acme');
   const id = getProjectBySlug(t.db, 'acme')!.id;
   upsertDocument(t.db, { projectId: id, slug: 'deploy', title: 'Deploy notes', category: 'deploy', body_md: '# Deploy\n' });
+  upsertDocument(t.db, { projectId: id, slug: 'runbook', title: 'Runbook', category: 'notes', body_md: '# Runbook\n' });
   createSecret(t.db, t.ring, {
     projectId: id,
     name: 'DB',
@@ -55,7 +56,11 @@ describe('ui project page', () => {
 
   it('shows counts on the tabs', async () => {
     const res = await page('/p/acme');
-    expect(res.body).toMatch(/data-count="1">1<\/span>/);
+    const tabs = res.body.slice(res.body.indexOf('<nav class="tabs"'), res.body.indexOf('</nav>'));
+    // acme has 2 documents and 1 secret; the tabs must show each tab's own count,
+    // not e.g. the sidebar's per-project secret badge (which would also read data-count="1").
+    expect(tabs).toMatch(/Documents\s*<span class="count" data-count="2">2<\/span>/);
+    expect(tabs).toMatch(/Secrets\s*<span class="count" data-count="1">1<\/span>/);
   });
 
   it('puts the delete form inside its confirm dialog', async () => {
