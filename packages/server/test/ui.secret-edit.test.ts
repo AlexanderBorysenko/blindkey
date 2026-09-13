@@ -4,6 +4,25 @@ import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { createSecret, getSecretMeta, revealField } from '../src/repos/secrets.js';
 import { getProjectBySlug } from '../src/repos/projects.js';
+import { renderPage } from '../src/ui/render.js';
+
+describe('secret-edit view: hint keys are embedded safely', () => {
+  it('escapes "<" in a hint key as the six characters \\u003c, never a literal </script>', () => {
+    const html = renderPage('secret-edit', {
+      title: 'New secret',
+      csrf: 'tok',
+      prefix: '/global',
+      scopeLabel: 'global',
+      isNew: true,
+      action: '/global/secrets',
+      hintKeys: ['a</script>b'],
+      error: null,
+      form: { name: '', description: '', tags: '', rows: [{ key: '', value: '', sensitive: true }] },
+    });
+    expect(html).toContain('a\\u003c/script>b');
+    expect(html).not.toContain('a</script>b');
+  });
+});
 
 let t: TestCtx;
 let session: string;
@@ -144,16 +163,28 @@ describe('ui secret edit', () => {
 
   it('accepts a POST built from the rendered edit form, keeping the field order and password sensitivity', async () => {
     const form = await page('/p/acme/secrets/DB/edit');
-    expect(form.body).toContain('value="host"');
-    expect(form.body).toContain('value="password"');
+    // Parse the rendered form itself (scoped to <main>) rather than hand-writing the payload:
+    // the three lists below are what a browser would actually submit for this form as rendered.
+    const main = /<main[^>]*>([\s\S]*?)<\/main>/.exec(form.body)![1];
+    const keys = [...main.matchAll(/name="key" value="([^"]*)"/g)].map((m) => m[1]);
+    const values = [...main.matchAll(/<textarea name="value"[^>]*>([\s\S]*?)<\/textarea>/g)].map((m) => m[1]);
+    const sensitives = [...main.matchAll(/name="sensitive" value="(\d)"/g)].map((m) => m[1]);
+    expect(keys).toEqual(['host', 'password']);
+    // host is not sensitive, so its stored value is shown; password's box starts empty.
+    expect(values).toEqual(['db.internal', '']);
+    expect(sensitives).toEqual(['0', '1']);
+
+    // Change host's value; leave password's box empty, exactly as parsed from the form.
+    values[0] = 'db3.internal';
+
     const res = await post('/p/acme/secrets/DB', {
       csrf,
       name: 'DB',
       description: 'updated',
       tags: 'prod',
-      key: ['host', 'password'],
-      value: ['db3.internal', ''],
-      sensitive: ['0', '1'],
+      key: keys,
+      value: values,
+      sensitive: sensitives,
     });
     expect(res.statusCode).toBe(302);
     const meta = getSecretMeta(t.db, t.ring, acme(), 'DB')!;
