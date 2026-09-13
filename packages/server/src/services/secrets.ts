@@ -35,13 +35,17 @@ export function getSecretFor(ctx: AppContext, principal: Principal, projectSlug:
  * same scope/permission resolution as `getSecretFor` (so a non-admin scoped to another project
  * still gets NotFoundError rather than leaking existence), and additionally requires the `admin`
  * scope: the audit log is admin-only, unlike secret metadata.
+ *
+ * Bounded by the secret's own `created_at`: `secrets.id` has no `AUTOINCREMENT`, so a deleted
+ * secret's id can be reused by a later one, and without this bound the newer secret's page would
+ * show its predecessor's audit rows (a history leak across reused ids).
  */
 export function recentSecretAccessFor(ctx: AppContext, principal: Principal, projectSlug: string | null, name: string, limit = 5): AuditRow[] {
   assertScope(principal, 'secrets:meta');
   const project = scopeProject(ctx, principal, projectSlug);
   const secret = mustGet(ctx, project?.id ?? null, name);
   assertScope(principal, 'admin');
-  return listAuditForTarget(ctx.db, 'secret', secret.id, limit);
+  return listAuditForTarget(ctx.db, 'secret', secret.id, limit, secret.created_at);
 }
 
 export function revealFieldFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, key: string): string {

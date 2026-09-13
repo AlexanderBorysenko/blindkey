@@ -64,14 +64,28 @@ export function listAudit(db: Db, q: AuditQuery): AuditRow[] {
   return rows.map(mapAuditRow);
 }
 
-/** Recent audit rows for one target (e.g. a secret), newest first. Used by the secret page's "recent access" panel. */
-export function listAuditForTarget(db: Db, targetType: string, targetId: number, limit = 5): AuditRow[] {
+/**
+ * Recent audit rows for one target (e.g. a secret), newest first. Used by the secret page's
+ * "recent access" panel.
+ *
+ * `sinceTs`, when given, adds `AND ts >= ?`: `target_id` is not guaranteed unique across the
+ * lifetime of a row's target (e.g. `secrets.id` is `INTEGER PRIMARY KEY` without `AUTOINCREMENT`,
+ * so a deleted secret's id can be reused by a later one), so a caller that can be reused this way
+ * must bound the query by its own creation time to avoid showing a predecessor's audit history.
+ */
+export function listAuditForTarget(db: Db, targetType: string, targetId: number, limit = 5, sinceTs?: number): AuditRow[] {
   const lim = Math.min(Math.max(limit, 1), 50);
+  const where = ['target_type = ?', 'target_id = ?'];
+  const params: unknown[] = [targetType, targetId];
+  if (sinceTs !== undefined) {
+    where.push('ts >= ?');
+    params.push(sinceTs);
+  }
   const rows = db
     .prepare(
       `SELECT id, ts, actor_type, actor_id, action, target_type, target_id, field_key, ip, user_agent, meta
-       FROM audit_log WHERE target_type = ? AND target_id = ? ORDER BY ts DESC, id DESC LIMIT ?`,
+       FROM audit_log WHERE ${where.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`,
     )
-    .all(targetType, targetId, lim) as RawAuditRow[];
+    .all(...params, lim) as RawAuditRow[];
   return rows.map(mapAuditRow);
 }

@@ -24,6 +24,11 @@ interface FieldRow {
  * the row's ORIGINAL position, before any empty-key row is dropped, so positions stay aligned
  * with `values`. A missing entry (a truncated or hand-rolled POST) fails safe via `defaultSensitive`.
  */
+/** POSIX single-quote a string for safe use in a shell command line (each `'` becomes `'\''`). */
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function fieldRows(b: Record<string, unknown>): FieldRow[] {
   const keys = list(b, 'key');
   const values = list(b, 'value');
@@ -122,9 +127,10 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
           scopeLabel: scope.projectSlug ?? 'global',
           secret,
           access: recentSecretAccessFor(ctx, principal, scope.projectSlug, secret.name),
-          // Matches the target form of `pidb secret env <target> "<name>"`: `global` addresses the
-          // top-level collection (see packages/cli/src/client.ts `scopedPath`), a project slug otherwise.
-          cliRef: scope.projectSlug ? `${scope.projectSlug}/${secret.name}` : secret.name,
+          // A runnable `pidb secret env <target> <name> --out .env`: `target` is the project slug
+          // or the literal `global` (see packages/cli/src/client.ts `scopedPath`), and `name` is
+          // POSIX single-quoted so a name containing spaces or quotes still pastes as one argument.
+          cliRef: `${scope.projectSlug ?? 'global'} ${shQuote(secret.name)} --out .env`,
         }),
       );
     });
