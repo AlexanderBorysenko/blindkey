@@ -1,15 +1,10 @@
-<% if (it.findings.length) { %>
-<ul class="findings">
-  <% it.findings.forEach(function (f) { %>
-  <li>line <%= f.line %>: <%= f.reason %></li>
-  <% }) %>
-</ul>
+<% if (it.findings.length || it.unresolved.length) { %>
+<div class="alert warn">
+  <strong>This document looks like it contains secret material.</strong>
+  <ul class="findings">
+    <% it.findings.forEach(function (f) { %><li>line <%= f.line %>: <%= f.reason %></li><% }) %>
+    <% it.unresolved.forEach(function (u) { %><li>unresolved reference: <%= u %></li><% }) %>
+  </ul>
+</div>
 <% } %>
-<% if (it.unresolved.length) { %>
-<ul class="findings">
-  <% it.unresolved.forEach(function (u) { %>
-  <li>unresolved reference: <%= u %></li>
-  <% }) %>
-</ul>
-<% } %>
-<div class="preview"><%~ it.html %></div>
+<div class="preview doc"><%~ it.html %></div>

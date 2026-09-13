@@ -65,6 +65,19 @@ describe('ui document view', () => {
     expect(res.body).not.toContain('hunter2hunter2');
   });
 
+  it('shows the referenced secret field as a lock chip when sensitive', async () => {
+    const res = await page('/p/acme/docs/deploy');
+    expect(res.body).toContain('class="chip lock"');
+  });
+
+  it('wraps the delete form in a confirm dialog', async () => {
+    const res = await page('/p/acme/docs/deploy');
+    const dialogStart = res.body.indexOf('<dialog');
+    const deleteFormIdx = res.body.indexOf('/docs/deploy/delete');
+    expect(dialogStart).toBeGreaterThan(-1);
+    expect(deleteFormIdx).toBeGreaterThan(dialogStart);
+  });
+
   it('lists global documents and opens one', async () => {
     const list = await page('/global/docs');
     expect(list.statusCode).toBe(200);
@@ -107,7 +120,7 @@ describe('ui document view', () => {
       payload: { csrf: csrfOf(view.body) },
     });
     expect(ok.statusCode).toBe(302);
-    expect(ok.headers.location).toBe('/p/acme');
+    expect(ok.headers.location).toBe('/p/acme?done=deleted');
     expect(getDocument(t.db, getProjectBySlug(t.db, 'acme')!.id, 'doomed')).toBeNull();
   });
 });

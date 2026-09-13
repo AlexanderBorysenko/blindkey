@@ -39,7 +39,7 @@ describe('ui document editor', () => {
   it('creates a document and redirects to its page', async () => {
     const res = await post('/p/acme/docs/new', { csrf, slug: 'notes', title: 'Notes', category: 'notes', body_md: '# Notes\n' });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/p/acme/docs/notes');
+    expect(res.headers.location).toBe('/p/acme/docs/notes?done=saved');
     expect(getDocument(t.db, acme(), 'notes')?.title).toBe('Notes');
   });
 

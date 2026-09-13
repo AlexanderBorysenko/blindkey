@@ -58,7 +58,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: AppContext): v
       requireAdmin(req);
       const scope = scopeOf(req.params);
       deleteDocumentFor(ctx, adminActor(req), scope.projectSlug, req.params.doc);
-      return reply.redirect(scope.projectSlug ? scope.prefix : '/global/docs', 302);
+      return reply.redirect(scope.projectSlug ? `${scope.prefix}?done=deleted` : '/global/docs?done=deleted', 302);
     });
 
     app.get<DocParams>(`${base}/:doc/edit`, async (req, reply) => {
@@ -140,7 +140,7 @@ export function registerDocumentRoutes(app: FastifyInstance, ctx: AppContext): v
           }),
         );
       }
-      return reply.redirect(`${scope.prefix}/docs/${encodeURIComponent(slug)}`, 302);
+      return reply.redirect(`${scope.prefix}/docs/${encodeURIComponent(slug)}?done=saved`, 302);
     });
   }
 

@@ -17,18 +17,19 @@ interface FieldRow {
   sensitive: boolean;
 }
 
-/**
- * Rows arrive as three parallel lists: `key`, `value` and `sensitive` (a per-row <select>,
- * so it is always submitted and aligns positionally — no coupling to the key string, which
- * would otherwise go stale the moment a key is renamed). The sensitive list is indexed by
- * the row's ORIGINAL position, before any empty-key row is dropped, so positions stay aligned
- * with `values`. A missing entry (a truncated or hand-rolled POST) fails safe via `defaultSensitive`.
- */
 /** POSIX single-quote a string for safe use in a shell command line (each `'` becomes `'\''`). */
 function shQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * Rows arrive as three parallel lists: `key`, `value` and `sensitive` (a per-row hidden input
+ * toggled by the lock button, so it is always submitted and aligns positionally — no coupling
+ * to the key string, which would otherwise go stale the moment a key is renamed). The sensitive
+ * list is indexed by the row's ORIGINAL position, before any empty-key row is dropped, so
+ * positions stay aligned with `values`. A missing entry (a truncated or hand-rolled POST) fails
+ * safe via `defaultSensitive`.
+ */
 function fieldRows(b: Record<string, unknown>): FieldRow[] {
   const keys = list(b, 'key');
   const values = list(b, 'value');
@@ -111,7 +112,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
         );
       }
       const created = createSecretFor(ctx, adminActor(req), scope.projectSlug, parsed.data);
-      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(created.name)}`, 302);
+      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(created.name)}?done=created`, 302);
     });
   }
 
@@ -215,7 +216,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
         if (err instanceof ConflictError) return rerender(err.message);
         throw err;
       }
-      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(updated.name)}`, 302);
+      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(updated.name)}?done=saved`, 302);
     });
 
     app.post<SecretParams>(`${base}/:name/delete`, async (req, reply) => {
@@ -223,7 +224,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
       requireAdmin(req);
       const scope = scopeOf(req.params);
       deleteSecretFor(ctx, adminActor(req), scope.projectSlug, req.params.name);
-      return reply.redirect(scope.projectSlug ? `${scope.prefix}?tab=secrets` : '/global/secrets', 302);
+      return reply.redirect(scope.projectSlug ? `${scope.prefix}?tab=secrets&done=deleted` : '/global/secrets?done=deleted', 302);
     });
 
     app.post<SecretParams>(`${base}/:name/reveal`, async (req, reply) => {

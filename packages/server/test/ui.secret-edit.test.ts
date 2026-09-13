@@ -53,7 +53,7 @@ describe('ui secret create', () => {
       sensitive: ['0', '1'],
     });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/p/acme/secrets/SMTP');
+    expect(res.headers.location).toBe('/p/acme/secrets/SMTP?done=created');
     const meta = getSecretMeta(t.db, t.ring, acme(), 'SMTP')!;
     expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['host', false], ['password', true]]);
     expect(revealField(t.db, t.ring, meta.id, 'password')).toBe('s3cret-mail');
@@ -123,6 +123,43 @@ describe('ui secret edit', () => {
     expect(res.body).toContain('value="host"');
     expect(res.body).toContain('value="password"');
     expect(res.body).not.toContain('hunter2hunter2');
+  });
+
+  it('renders the sensitive hidden input positionally, one per field-card, in field order', async () => {
+    const res = await page('/p/acme/secrets/DB/edit');
+    expect(res.statusCode).toBe(200);
+    const sensitiveValues = [...res.body.matchAll(/name="sensitive" value="(\d)"/g)].map((m) => m[1]);
+    // DB has host (not sensitive) then password (sensitive), in that order.
+    expect(sensitiveValues).toEqual(['0', '1']);
+    const rowsSection = res.body.slice(res.body.indexOf('id="rows"'), res.body.indexOf('row-actions'));
+    const cardStarts = [...rowsSection.matchAll(/<div class="field-card/g)].map((m) => m.index!);
+    expect(cardStarts.length).toBe(2);
+    const cards = cardStarts.map((start, i) => rowsSection.slice(start, cardStarts[i + 1] ?? rowsSection.length));
+    for (const card of cards) {
+      const matches = [...card.matchAll(/name="sensitive"/g)];
+      expect(matches.length).toBe(1);
+    }
+    expect(res.body).toContain('aria-pressed="true"');
+  });
+
+  it('accepts a POST built from the rendered edit form, keeping the field order and password sensitivity', async () => {
+    const form = await page('/p/acme/secrets/DB/edit');
+    expect(form.body).toContain('value="host"');
+    expect(form.body).toContain('value="password"');
+    const res = await post('/p/acme/secrets/DB', {
+      csrf,
+      name: 'DB',
+      description: 'updated',
+      tags: 'prod',
+      key: ['host', 'password'],
+      value: ['db3.internal', ''],
+      sensitive: ['0', '1'],
+    });
+    expect(res.statusCode).toBe(302);
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'DB')!;
+    expect(meta.fields.map((f) => [f.key, f.sensitive])).toEqual([['host', false], ['password', true]]);
+    expect(revealField(t.db, t.ring, meta.id, 'host')).toBe('db3.internal');
+    expect(revealField(t.db, t.ring, meta.id, 'password')).toBe('hunter2hunter2');
   });
 
   it('keeps a stored value when the box is left empty and updates one that is filled', async () => {
@@ -239,7 +276,7 @@ describe('ui secret edit', () => {
     expect(form.body).not.toContain('readonly');
     const res = await post('/p/acme/secrets/OldName', { csrf, name: 'NewName', key: ['token'], value: [''], sensitive: ['1'] });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/p/acme/secrets/NewName');
+    expect(res.headers.location).toBe('/p/acme/secrets/NewName?done=saved');
     expect(getSecretMeta(t.db, t.ring, acme(), 'OldName')).toBeNull();
     const meta = getSecretMeta(t.db, t.ring, acme(), 'NewName')!;
     expect(revealField(t.db, t.ring, meta.id, 'token')).toBe('s3cret');
@@ -260,7 +297,7 @@ describe('ui secret edit', () => {
     const view = await page('/p/acme/secrets/Doomed');
     const res = await post('/p/acme/secrets/Doomed/delete', { csrf: csrfOf(view.body) });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/p/acme?tab=secrets');
+    expect(res.headers.location).toBe('/p/acme?tab=secrets&done=deleted');
     expect(getSecretMeta(t.db, t.ring, acme(), 'Doomed')).toBeNull();
   });
 });
