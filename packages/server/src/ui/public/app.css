@@ -170,12 +170,16 @@ details > summary { cursor: pointer; }
 dialog {
   background: var(--surface);
   color: var(--ink);
+  border: none;
+}
+
+dialog.confirm {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 20px;
   max-width: 420px;
 }
-dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+dialog.confirm::backdrop { background: rgb(0 0 0 / 0.35); }
 
 /* ---------- Forms ---------- */
 label {
@@ -371,6 +375,7 @@ input[type='submit'].primary {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  font-size: 12.5px;
 }
 .page-head .actions {
   margin-left: auto;
