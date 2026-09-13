@@ -410,20 +410,17 @@ input[type='submit'].primary {
 }
 
 /* ---------- Tables ---------- */
-.table-wrap,
-.table-scroll {
+.table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
 }
-.table-wrap table,
-.table-scroll table {
+.table-wrap table {
   width: 100%;
   border-collapse: collapse;
 }
-.table-wrap th,
-.table-scroll th {
+.table-wrap th {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -434,24 +431,19 @@ input[type='submit'].primary {
   border-bottom: 1px solid var(--line);
   text-align: left;
 }
-.table-wrap td,
-.table-scroll td {
+.table-wrap td {
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
-.table-wrap tbody tr:last-child td,
-.table-scroll tbody tr:last-child td {
+.table-wrap tbody tr:last-child td {
   border-bottom: none;
 }
-.table-wrap tbody tr:hover td,
-.table-scroll tbody tr:hover td {
+.table-wrap tbody tr:hover td {
   background: var(--accent-soft);
 }
 .table-wrap td,
-.table-wrap th,
-.table-scroll td,
-.table-scroll th {
+.table-wrap th {
   font-variant-numeric: tabular-nums;
 }
 
@@ -476,15 +468,7 @@ tr.act-reveal td:nth-child(4) { color: var(--lock); font-weight: 500; }
 tr.act-delete td:nth-child(4) { color: var(--danger); font-weight: 500; }
 tr.act-auth td:nth-child(4) { color: var(--muted); }
 
-.field-rows { min-width: 36rem; table-layout: fixed; }
-.field-rows :is(input, select, textarea) { margin-bottom: 0; }
-.field-rows th:nth-child(1) { width: 20%; }
-.field-rows th:nth-child(3) { width: 8.5rem; }
-.field-rows th:nth-child(4) { width: 9rem; }
-.field-rows textarea { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; min-height: 2.75rem; }
-
 .row-buttons { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.25rem; }
-.field-rows .row-buttons { flex-wrap: nowrap; margin-top: 0; }
 .row-buttons button { padding: 0.25rem 0.6rem; }
 .row-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
