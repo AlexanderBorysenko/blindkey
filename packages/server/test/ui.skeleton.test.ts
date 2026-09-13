@@ -13,14 +13,29 @@ afterAll(async () => {
 });
 
 describe('ui skeleton', () => {
-  it('serves the Pico stylesheet and htmx from /assets', async () => {
-    const css = await t.app.inject({ method: 'GET', url: '/assets/pico.min.css' });
-    expect(css.statusCode).toBe(200);
-    expect(css.headers['content-type']).toContain('text/css');
-    const js = await t.app.inject({ method: 'GET', url: '/assets/htmx.min.js' });
-    expect(js.statusCode).toBe(200);
+  it('serves the stylesheet, fonts and htmx from /assets', async () => {
     const app = await t.app.inject({ method: 'GET', url: '/assets/app.css' });
     expect(app.statusCode).toBe(200);
+    expect(app.headers['content-type']).toContain('text/css');
+    expect(app.body).toContain('--accent: #3355cc');
+    expect(app.body).toContain('prefers-color-scheme: dark');
+
+    const js = await t.app.inject({ method: 'GET', url: '/assets/htmx.min.js' });
+    expect(js.statusCode).toBe(200);
+
+    const sans = await t.app.inject({
+      method: 'GET',
+      url: '/assets/fonts/plex-sans/ibm-plex-sans-latin-400-normal.woff2',
+    });
+    expect(sans.statusCode).toBe(200);
+    expect(sans.headers['content-type']).toContain('font/woff2');
+
+    const mono = await t.app.inject({
+      method: 'GET',
+      url: '/assets/fonts/plex-mono/ibm-plex-mono-latin-400-normal.woff2',
+    });
+    expect(mono.statusCode).toBe(200);
+    expect(mono.headers['content-type']).toContain('font/woff2');
   });
 
   it('renders an HTML 404 page for an unknown UI path', async () => {

@@ -99,7 +99,7 @@ open http://localhost:8080/login
 - Projects, documents and secrets are browsable and editable; document saves run the same secret-value lint as the API, with "Save anyway" as the audited override.
 - Sensitive secret fields are masked. "Reveal" fetches one field, writes an `audit_log` row with `actor_type = admin`, and the response is `no-store`. To use a value, prefer `pidb secret exec|write|env`.
 - `/tokens` creates API tokens (the value is shown once) and revokes them; `/audit` is the paginated audit log.
-- Assets (Pico CSS, htmx) are served from `node_modules` under `/assets` — no CDN, so the UI works offline and under a strict CSP.
+- Assets (the hand-written `app.css` stylesheet, IBM Plex fonts, htmx) are served from `node_modules`/`src/ui/public` under `/assets` — no CDN, so the UI works offline and under a strict CSP.
 
 ## Deployment (Docker)
 

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import formbody from '@fastify/formbody';
 import fastifyStatic from '@fastify/static';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AppContext } from '../http/context.js';
 import { PUBLIC_DIR, isUiRequest } from './render.js';
 import { registerAdminRoutes } from './routes/admin.js';
@@ -13,17 +13,13 @@ import { registerSecretRoutes } from './routes/secrets.js';
 
 const require = createRequire(import.meta.url);
 
-/** Pico and htmx ship inside their packages; serve them from node_modules, never a CDN. */
+/** htmx and the Plex fonts ship inside their packages; serve them from node_modules, never a CDN. */
 function assetRoots(): string[] {
-  return [
-    PUBLIC_DIR,
-    dirname(require.resolve('@picocss/pico/css/pico.min.css')),
-    dirname(require.resolve('htmx.org/dist/htmx.min.js')),
-  ];
+  return [PUBLIC_DIR, dirname(require.resolve('htmx.org/dist/htmx.min.js'))];
 }
 
 export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise<void> {
-  // The UI serves its own scripts and styles only; htmx and Pico come from /assets.
+  // The UI serves its own scripts and styles only; htmx and the Plex fonts come from /assets.
   const CSP = [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
@@ -56,6 +52,25 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
     // Static assets carry no secrets and must load before a session exists.
     // @fastify/static@10 invokes setHeaders with the Fastify reply, not the
     // raw node response, so the header is set via reply.header(), not res.setHeader().
+    setHeaders: (reply) => reply.header('x-content-type-options', 'nosniff'),
+  });
+
+  // @fontsource/ibm-plex-sans and @fontsource/ibm-plex-mono both ship a files/ directory
+  // with overlapping file names, so they cannot share one static root with PUBLIC_DIR.
+  await app.register(fastifyStatic, {
+    root: join(dirname(require.resolve('@fontsource/ibm-plex-sans/package.json')), 'files'),
+    prefix: '/assets/fonts/plex-sans/',
+    decorateReply: false,
+    cacheControl: true,
+    maxAge: '1h',
+    setHeaders: (reply) => reply.header('x-content-type-options', 'nosniff'),
+  });
+  await app.register(fastifyStatic, {
+    root: join(dirname(require.resolve('@fontsource/ibm-plex-mono/package.json')), 'files'),
+    prefix: '/assets/fonts/plex-mono/',
+    decorateReply: false,
+    cacheControl: true,
+    maxAge: '1h',
     setHeaders: (reply) => reply.header('x-content-type-options', 'nosniff'),
   });
 

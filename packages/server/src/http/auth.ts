@@ -46,7 +46,7 @@ export function registerAuth(app: FastifyInstance, ctx: AppContext): void {
   const limiter = new FailureLimiter();
   app.decorateRequest('principal', null);
   app.addHook('onRequest', async (req) => {
-    // Static UI assets (Pico, htmx, app.css) carry no data and load before a session exists.
+    // Static UI assets (fonts, htmx, app.css) carry no data and load before a session exists.
     if (req.url.startsWith('/assets/')) return;
     if (req.routeOptions.config.public) return;
     if (req.principal) return; // set by an earlier resolver (e.g. admin session, Plan 3)
