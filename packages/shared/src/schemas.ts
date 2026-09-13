@@ -88,6 +88,8 @@ export const secretPatchSchema = z.strictObject({
   tags: tagsSchema.optional(),
   fields: z.array(secretFieldInputSchema).max(200).refine(uniqueKeys, 'duplicate field keys').optional(),
   removeFields: z.array(secretKeySchema).optional(),
+  /** Field keys in display order; unknown keys are ignored, unlisted fields keep their relative order after these. */
+  order: z.array(secretKeySchema).max(200).optional(),
 });
 export type SecretPatch = z.infer<typeof secretPatchSchema>;
 

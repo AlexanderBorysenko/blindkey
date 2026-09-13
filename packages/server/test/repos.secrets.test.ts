@@ -32,6 +32,19 @@ describe('secrets repo', () => {
     const raw = db.prepare(`SELECT value_enc FROM secret_fields WHERE key = 'password'`).get() as { value_enc: Buffer };
     expect(raw.value_enc.toString('utf8')).not.toContain('pw-1');
   });
+  it('reorders fields by patch.order without touching values; unlisted keys keep their relative order after it', () => {
+    const { db, ring, p } = setup();
+    const s = createSecret(db, ring, { projectId: p.id, ...staging });
+    const u = updateSecret(db, ring, s.id, { order: ['password', 'nope', 'host'] });
+    expect(u.fields.map((f) => f.key)).toEqual(['password', 'host', 'username', 'note']);
+    expect(revealField(db, ring, s.id, 'password')).toBe('pw-1');
+  });
+  it('applies patch.order after upserting a new field', () => {
+    const { db, ring, p } = setup();
+    const s = createSecret(db, ring, { projectId: p.id, ...staging });
+    const u = updateSecret(db, ring, s.id, { fields: [{ key: 'port', value: '22' }], order: ['host', 'port', 'username', 'password', 'note'] });
+    expect(u.fields.map((f) => f.key)).toEqual(['host', 'port', 'username', 'password', 'note']);
+  });
   it('enforces unique name per project and allows same name globally', () => {
     const { db, ring, p } = setup();
     createSecret(db, ring, { projectId: p.id, ...staging });

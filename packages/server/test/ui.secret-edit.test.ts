@@ -192,10 +192,67 @@ describe('ui secret edit', () => {
     expect(revealField(t.db, t.ring, meta.id, 'host')).toBe('h2');
   });
 
+  it('renders values as textareas with move buttons', async () => {
+    const res = await page('/p/acme/secrets/EditProbe/edit');
+    expect(res.body).toMatch(/<textarea name="value"/);
+    expect(res.body).not.toMatch(/<input name="value"/);
+    expect(res.body).toContain('moveRow(this, -1)');
+    expect(res.body).toContain('moveRow(this, 1)');
+  });
+
+  it('persists the submitted row order even for rows whose value box is empty', async () => {
+    const res = await post('/p/acme/secrets/EditProbe', {
+      csrf,
+      name: 'EditProbe',
+      key: ['password', 'host'],
+      value: ['', ''],
+      sensitive: ['1', '1'],
+    });
+    expect(res.statusCode).toBe(302);
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'EditProbe')!;
+    expect(meta.fields.map((f) => f.key)).toEqual(['password', 'host']);
+    expect(revealField(t.db, t.ring, meta.id, 'host')).toBe('h2');
+  });
+
+  it('stores multi-line values with LF line endings (browsers submit textareas as CRLF)', async () => {
+    const res = await post('/p/acme/secrets', {
+      csrf,
+      name: 'SshKey',
+      key: ['private_ssh_key'],
+      value: ['-----BEGIN KEY-----\r\nAAAA\r\nBBBB\r\n-----END KEY-----\r\n'],
+      sensitive: ['1'],
+    });
+    expect(res.statusCode).toBe(302);
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'SshKey')!;
+    expect(revealField(t.db, t.ring, meta.id, 'private_ssh_key')).toBe('-----BEGIN KEY-----\nAAAA\nBBBB\n-----END KEY-----\n');
+  });
+
   it('removes a field that was dropped from the form', async () => {
     await post('/p/acme/secrets/DB', { csrf, name: 'DB', key: ['host'], value: [''] });
     const meta = getSecretMeta(t.db, t.ring, acme(), 'DB')!;
     expect(meta.fields.map((f) => f.key)).toEqual(['host']);
+  });
+
+  it('renames a secret from the edit form, keeping its stored values', async () => {
+    createSecret(t.db, t.ring, { projectId: acme(), name: 'OldName', description: '', tags: [], fields: [{ key: 'token', value: 's3cret' }] });
+    const form = await page('/p/acme/secrets/OldName/edit');
+    expect(form.body).not.toContain('readonly');
+    const res = await post('/p/acme/secrets/OldName', { csrf, name: 'NewName', key: ['token'], value: [''], sensitive: ['1'] });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('/p/acme/secrets/NewName');
+    expect(getSecretMeta(t.db, t.ring, acme(), 'OldName')).toBeNull();
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'NewName')!;
+    expect(revealField(t.db, t.ring, meta.id, 'token')).toBe('s3cret');
+  });
+
+  it('re-renders with an error when renaming onto an existing name', async () => {
+    createSecret(t.db, t.ring, { projectId: acme(), name: 'Taken', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    createSecret(t.db, t.ring, { projectId: acme(), name: 'Mover', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const res = await post('/p/acme/secrets/Mover', { csrf, name: 'Taken', key: ['k'], value: [''], sensitive: ['1'] });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('role="alert"');
+    expect(res.body).toContain('already exists');
+    expect(getSecretMeta(t.db, t.ring, acme(), 'Mover')).not.toBeNull();
   });
 
   it('deletes a secret and redirects to the project', async () => {

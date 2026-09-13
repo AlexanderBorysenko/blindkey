@@ -1,2 +1,5 @@
-<span class="field-value" id="value-<%= it.key %>"><%= it.value %></span>
-<button class="outline" type="button" onclick="navigator.clipboard.writeText(document.getElementById('value-<%= it.key %>').textContent)">Copy</button>
+<span class="field-value<%= it.value.includes('\n') ? ' multiline' : '' %>" id="value-<%= it.key %>"><%= it.value %></span>
+<div class="row-buttons">
+  <button class="outline" type="button" onclick="navigator.clipboard.writeText(document.getElementById('value-<%= it.key %>').textContent)">Copy</button>
+  <button class="secondary outline" type="button" onclick="hideField(this)">Hide</button>
+</div>

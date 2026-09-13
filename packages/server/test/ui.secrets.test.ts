@@ -65,6 +65,14 @@ describe('ui secret page', () => {
     expect(rows[0]!.field_key).toBe('password');
   });
 
+  it('lets a revealed value be hidden again', async () => {
+    const view = await page('/p/acme/secrets/DB');
+    expect(view.body).toContain('function hideField(');
+    const res = await post('/p/acme/secrets/DB/reveal', { csrf, key: 'password' });
+    expect(res.body).toContain('onclick="hideField(this)"');
+    expect(res.body).toContain('>Hide</button>');
+  });
+
   it('refuses to reveal without a CSRF token and writes no audit row', async () => {
     const before = listAudit(t.db, { limit: 50 }).filter((r) => r.action === 'secret.reveal').length;
     const res = await post('/p/acme/secrets/DB/reveal', { key: 'password' });

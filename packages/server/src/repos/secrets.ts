@@ -191,6 +191,13 @@ export function updateSecret(db: Db, ring: KeyRing, id: number, patch: SecretPat
         upsert.run(id, f.key, encryptField(dek, id, f.key, f.value), sensitive ? 1 : 0, sort);
       }
     }
+    if (patch.order?.length) {
+      const current = (db.prepare(`SELECT key FROM secret_fields WHERE secret_id = ? ORDER BY sort, id`).all(id) as { key: string }[]).map((r) => r.key);
+      const listed = new Set(patch.order);
+      const final = [...new Set(patch.order.filter((k) => current.includes(k))), ...current.filter((k) => !listed.has(k))];
+      const setSort = db.prepare(`UPDATE secret_fields SET sort = ? WHERE secret_id = ? AND key = ?`);
+      final.forEach((k, i) => setSort.run(i, id, k));
+    }
     return getSecretMetaById(db, ring, id)!;
   })();
 }

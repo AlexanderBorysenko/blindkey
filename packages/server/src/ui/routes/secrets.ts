@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../http/context.js';
 import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretPatchSchema } from '@pidb/shared';
 import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
+import { ConflictError } from '../../errors.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
 import { body, list, parseTags, pageContext, str } from '../forms.js';
@@ -41,7 +42,9 @@ function fieldRows(b: Record<string, unknown>): FieldRow[] {
         : sv === '1' || sv === 'true' || sv === 'on'
           ? true
           : defaultSensitive(key);
-    rows.push({ key, value: values[i] ?? '', sensitive });
+    // Browsers submit <textarea> line breaks as CRLF; store LF so multi-line values
+    // (SSH keys, certificates) come back byte-identical to what was pasted.
+    rows.push({ key, value: (values[i] ?? '').replace(/\r\n?/g, '\n'), sensitive });
   });
   return rows;
 }
@@ -188,11 +191,20 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
         // An empty box means "leave the stored value alone", so those rows are not sent.
         fields: rows.filter((r) => r.value !== '').map((r) => ({ key: r.key, value: r.value, sensitive: r.sensitive })),
         removeFields: existing.fields.map((f) => f.key).filter((k) => !keep.has(k)),
+        // Rows with an empty box are not in `fields`, so the form order is sent separately.
+        order: rows.map((r) => r.key),
       });
       if (!patch.success) {
         return rerender(patch.error.issues.map((i) => `${i.path.join('.') || 'form'}: ${i.message}`).join('; '));
       }
-      const updated = updateSecretFor(ctx, adminActor(req), scope.projectSlug, req.params.name, patch.data);
+      let updated;
+      try {
+        updated = updateSecretFor(ctx, adminActor(req), scope.projectSlug, req.params.name, patch.data);
+      } catch (err) {
+        // A rename onto a taken name: keep the form so the edit is not lost.
+        if (err instanceof ConflictError) return rerender(err.message);
+        throw err;
+      }
       return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(updated.name)}`, 302);
     });
 

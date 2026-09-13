@@ -1,5 +1,17 @@
 .masked { font-family: var(--pico-font-family-monospace); letter-spacing: 0.15em; }
-.field-value { font-family: var(--pico-font-family-monospace); word-break: break-all; }
+.field-value { font-family: var(--pico-font-family-monospace); overflow-wrap: anywhere; white-space: pre-wrap; }
+/* Multi-line values (keys, certificates) keep their lines intact and scroll sideways instead of wrapping mid-token. */
+.field-value.multiline { display: block; white-space: pre; overflow-wrap: normal; overflow-x: auto; max-width: min(30rem, 55vw); }
+.table-scroll { overflow-x: auto; }
+.field-rows { min-width: 36rem; table-layout: fixed; }
+.field-rows :is(input, select, textarea) { margin-bottom: 0; }
+.field-rows th:nth-child(1) { width: 20%; }
+.field-rows th:nth-child(3) { width: 8.5rem; }
+.field-rows th:nth-child(4) { width: 9rem; }
+.field-rows select { padding-inline-end: 1.75rem; }
+.field-rows textarea { font-family: var(--pico-font-family-monospace); resize: vertical; min-height: 2.75rem; }
+.row-buttons { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.25rem; }
+.field-rows .row-buttons { flex-wrap: nowrap; margin-top: 0; }
 .findings { border-left: 3px solid var(--pico-del-color); padding-left: 0.75rem; }
 .findings li { margin: 0.25rem 0; }
 .tabs { display: flex; gap: 1rem; margin-bottom: 1rem; }
@@ -7,5 +19,8 @@
 .editor { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 @media (max-width: 800px) { .editor { grid-template-columns: 1fr; } }
 .preview { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); padding: 0.75rem; overflow-x: auto; }
-.row-actions { display: flex; gap: 0.5rem; align-items: center; }
+.row-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+/* Pico gives form controls a bottom margin (and forms their own), which pushes an in-form button out of line with a bare link-button. */
+.row-actions form, .row-actions :is(button, [role=button]), .row-buttons :is(button, [role=button]) { margin: 0; width: auto; }
+.row-buttons button { padding: 0.25rem 0.6rem; }
 table td, table th { vertical-align: top; }
