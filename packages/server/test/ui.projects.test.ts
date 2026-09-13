@@ -40,7 +40,10 @@ describe('ui projects list', () => {
   it('filters by status', async () => {
     const res = await page('/?status=archived');
     expect(res.body).toContain('beta');
-    expect(res.body).not.toContain('href="/p/acme"');
+    // The sidebar legitimately links every project regardless of the table's status filter
+    // (R1); only the filtered <main> table content is asserted here.
+    const main = res.body.slice(res.body.indexOf('<main'), res.body.indexOf('</main>'));
+    expect(main).not.toContain('href="/p/acme"');
     expect(res.body).toContain('aria-current="page"');
     expect(res.body).not.toContain('aria-current=&quot;page&quot;');
   });

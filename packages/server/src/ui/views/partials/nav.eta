@@ -1,0 +1,49 @@
+<a class="brand" href="/">
+  <span class="mark">pi</span>
+  <span>pidb</span>
+</a>
+<form class="side-search" method="get" action="/search">
+  <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+  <input type="search" name="q" placeholder="Search" />
+</form>
+<div class="navgroup">
+  <h4>Projects</h4>
+  <% if (it.nav.projects.length === 0) { %>
+  <p class="tag">No projects yet</p>
+  <% } %>
+  <% it.nav.projects.forEach(function(p){ %>
+  <a href="/p/<%= p.slug %>" class="<%= p.status === 'archived' ? 'archived' : '' %>" <%~ it.activeSlug === p.slug ? 'aria-current="page"' : '' %>>
+    <span class="dot status-<%= p.status %>"></span>
+    <span><%= p.name %></span>
+    <span class="count" data-count="<%= p.secrets %>"><%= p.secrets %></span>
+  </a>
+  <% }); %>
+</div>
+<div class="navgroup">
+  <h4>Global</h4>
+  <a href="/global/docs" <%~ it.path === '/global/docs' ? 'aria-current="page"' : '' %>>
+    <span>Documents</span>
+    <span class="count"><%= it.nav.globalDocs %></span>
+  </a>
+  <a href="/global/secrets" <%~ it.path === '/global/secrets' ? 'aria-current="page"' : '' %>>
+    <span>Secrets</span>
+    <span class="count"><%= it.nav.globalSecrets %></span>
+  </a>
+</div>
+<div class="navgroup">
+  <h4>Admin</h4>
+  <a href="/tokens" <%~ it.path === '/tokens' ? 'aria-current="page"' : '' %>>
+    <span>API tokens</span>
+    <span class="count"><%= it.nav.tokens %></span>
+  </a>
+  <a href="/audit" <%~ it.path === '/audit' ? 'aria-current="page"' : '' %>>
+    <span>Audit log</span>
+  </a>
+</div>
+<div class="side-foot">
+  <span class="tag">admin</span>
+  <form method="post" action="/logout">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <button class="btn ghost sm" type="submit">Log out</button>
+  </form>
+</div>

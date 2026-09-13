@@ -9,27 +9,44 @@
     <script src="/assets/htmx.min.js" defer></script>
   </head>
   <body>
-    <main class="container">
-      <% if (it.nav) { %>
-      <nav>
-        <ul>
-          <li><strong><a href="/">pidb</a></strong></li>
-          <li><a href="/tokens">Tokens</a></li>
-          <li><a href="/audit">Audit</a></li>
-          <li><a href="/global/docs">Global docs</a></li>
-          <li><a href="/global/secrets">Global secrets</a></li>
-        </ul>
-        <ul>
-          <li>
-            <form method="post" action="/logout">
-              <input type="hidden" name="csrf" value="<%= it.csrf %>" />
-              <button class="secondary outline" type="submit">Log out</button>
-            </form>
-          </li>
-        </ul>
-      </nav>
-      <% } %>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-lock" viewBox="0 0 16 16"><path fill="currentColor" d="M5 7V5a3 3 0 1 1 6 0v2h.5A1.5 1.5 0 0 1 13 8.5v5A1.5 1.5 0 0 1 11.5 15h-7A1.5 1.5 0 0 1 3 13.5v-5A1.5 1.5 0 0 1 4.5 7H5Zm1.5 0h3V5a1.5 1.5 0 0 0-3 0v2Z"/></symbol>
+      <symbol id="i-search" viewBox="0 0 16 16"><path stroke="currentColor" stroke-width="1.6" fill="none" d="M7 12.5A5.5 5.5 0 1 0 7 1.5a5.5 5.5 0 0 0 0 11ZM11 11l3.5 3.5"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 16 16"><path stroke="currentColor" stroke-width="1.4" fill="none" d="M5.5 5.5h8v8h-8zM2.5 10.5v-8h8"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 16 16"><path stroke="currentColor" stroke-width="1.4" fill="none" d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5Z"/><circle cx="8" cy="8" r="2" fill="currentColor"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 16 16"><path stroke="currentColor" stroke-width="1.6" d="M8 3v10M3 8h10"/></symbol>
+      <symbol id="i-check" viewBox="0 0 16 16"><path stroke="currentColor" stroke-width="1.8" fill="none" d="M3 8.5l3 3 7-7"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 16 16"><path stroke="currentColor" stroke-width="1.6" d="M2 4h12M2 8h12M2 12h12"/></symbol>
+    </svg>
+    <% if (it.nav) { %>
+    <div class="shell">
+      <aside class="sidebar">
+        <%~ include('partials/nav', it) %>
+      </aside>
+      <div class="topbar">
+        <a class="brand" href="/">
+          <span class="mark">pi</span>
+          <span>pidb</span>
+        </a>
+        <details class="nav-drawer">
+          <summary class="btn ghost"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg> Menu</summary>
+          <%~ include('partials/nav', it) %>
+        </details>
+      </div>
+      <main class="main">
+        <%~ it.body %>
+      </main>
+    </div>
+    <% } else { %>
+    <main class="main main-bare">
       <%~ it.body %>
     </main>
+    <% } %>
+    <% if (it.flash) { %>
+    <div class="toast" role="status">
+      <svg class="i" aria-hidden="true"><use href="#i-check"/></svg>
+      <%= it.flash %>
+    </div>
+    <% } %>
   </body>
 </html>

@@ -1,6 +1,8 @@
 import type { FastifyRequest } from 'fastify';
 import type { AppContext } from '../http/context.js';
+import { loadNav, type NavData } from '../repos/nav.js';
 import { csrfTokenFor } from './csrf.js';
+import { flashFor } from './format.js';
 import { uiSessionId } from './session.js';
 
 export function body(req: FastifyRequest): Record<string, unknown> {
@@ -35,11 +37,28 @@ export function parseTags(raw: unknown): string[] {
 
 export interface PageContext {
   title: string;
-  nav: true;
+  nav: NavData;
   csrf: string;
+  path: string;
+  activeSlug: string | null;
+  flash: string | null;
+}
+
+function activeSlugFor(path: string): string | null {
+  const m = /^\/p\/([^/]+)/.exec(path);
+  return m?.[1] ? decodeURIComponent(m[1]) : null;
 }
 
 export function pageContext(ctx: AppContext, req: FastifyRequest, title: string): PageContext {
   const id = uiSessionId(req);
-  return { title, nav: true, csrf: id ? csrfTokenFor(ctx, id) : '' };
+  const path = req.url.split('?')[0] ?? req.url;
+  const query = (req.query ?? {}) as Record<string, unknown>;
+  return {
+    title,
+    nav: loadNav(ctx.db),
+    csrf: id ? csrfTokenFor(ctx, id) : '',
+    path,
+    activeSlug: activeSlugFor(path),
+    flash: flashFor(query.done),
+  };
 }
