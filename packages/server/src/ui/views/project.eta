@@ -1,50 +1,97 @@
-<p><a href="/">← Projects</a></p>
-<h1><%= it.project.name %> <small><code><%= it.project.slug %></code></small></h1>
-<p><%= it.project.status %><% if (it.project.tags.length) { %> · <%= it.project.tags.join(', ') %><% } %></p>
-<% if (it.project.summary) { %><p><%= it.project.summary %></p><% } %>
+<p class="crumbs"><a href="/">Projects</a> / <span class="current"><%= it.project.slug %></span></p>
 
-<%~ include('partials/tabs', { slug: it.project.slug, tab: it.tab }) %>
+<div class="page-head">
+  <div>
+    <h1><%= it.project.name %></h1>
+    <% if (it.project.summary) { %><p class="lede"><%= it.project.summary %></p><% } %>
+    <div class="meta">
+      <span class="pill status-<%= it.project.status %>"><%= it.project.status %></span>
+      <% it.project.tags.forEach(function (tag) { %><span class="tag"><%= tag %></span><% }) %>
+      <span>updated <time datetime="<%= it.fmt.iso(it.project.updated_at) %>" title="<%= it.fmt.iso(it.project.updated_at) %>"><%= it.fmt.ago(it.project.updated_at) %></time></span>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn primary" type="button" onclick="document.getElementById('edit-project').showModal()">Edit project</button>
+    <details class="menu">
+      <summary class="btn ghost">⋯</summary>
+      <div class="menu-list">
+        <button class="btn ghost danger" type="button" onclick="document.getElementById('delete-project').showModal()">Delete project…</button>
+      </div>
+    </details>
+  </div>
+</div>
+
+<%~ include('partials/tabs', { slug: it.project.slug, tab: it.tab, docsCount: it.project.documents.length, secretsCount: it.project.secrets.length }) %>
 
 <% if (it.tab === 'docs') { %>
-<table>
-  <thead><tr><th>Slug</th><th>Title</th><th>Category</th><th>Updated</th></tr></thead>
-  <tbody>
-    <% it.project.documents.forEach(function (d) { %>
-    <tr>
-      <td><a href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/<%= encodeURIComponent(d.slug) %>"><%= d.slug %></a></td>
-      <td><%= d.title %></td>
-      <td><%= d.category %></td>
-      <td><%= new Date(d.updated_at).toISOString().slice(0, 19) %>Z</td>
-    </tr>
-    <% }) %>
-  </tbody>
-</table>
-<p><a role="button" href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/new/edit">New document</a></p>
+<% if (it.project.documents.length === 0) { %>
+<div class="empty">
+  <p>No documents yet.</p>
+  <a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/new/edit">New document</a>
+</div>
 <% } else { %>
-<table>
-  <thead><tr><th>Name</th><th>Fields</th><th>Tags</th><th>Description</th></tr></thead>
-  <tbody>
-    <% it.project.secrets.forEach(function (s) { %>
-    <tr>
-      <td><a href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/<%= encodeURIComponent(s.name) %>"><%= s.name %></a></td>
-      <td>
-        <% s.fields.forEach(function (f) { %>
-        <code><%= f.key %></code><% if (f.sensitive) { %>*<% } else if (f.value !== undefined) { %>=<%= f.value %><% } %>
-        <% }) %>
-      </td>
-      <td><%= s.tags.join(', ') %></td>
-      <td><%= s.description %></td>
-    </tr>
-    <% }) %>
-  </tbody>
-</table>
-<p><small>* sensitive — value hidden; open the secret to reveal one field.</small></p>
-<p><a role="button" href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/new">New secret</a></p>
+<div class="toolbar">
+  <span></span>
+  <a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/new/edit"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New document</a>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Document</th><th>Category</th><th>Updated</th></tr></thead>
+    <tbody>
+      <% it.project.documents.forEach(function (d) { %>
+      <tr>
+        <td>
+          <a href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/<%= encodeURIComponent(d.slug) %>"><%= d.title %></a><br />
+          <small class="mono"><%= d.slug %></small>
+        </td>
+        <td><span class="tag"><%= d.category %></span></td>
+        <td><time datetime="<%= it.fmt.iso(d.updated_at) %>" title="<%= it.fmt.iso(d.updated_at) %>"><%= it.fmt.ago(d.updated_at) %></time></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+<% } else { %>
+<% if (it.project.secrets.length === 0) { %>
+<div class="empty">
+  <p>No secrets yet.</p>
+  <a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/new">New secret</a>
+</div>
+<% } else { %>
+<div class="toolbar">
+  <span class="note"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg> Locked fields stay hidden until revealed; every reveal is audited.</span>
+  <a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/new"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New secret</a>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Name</th><th>Fields</th><th>Description</th><th>Updated</th></tr></thead>
+    <tbody>
+      <% it.project.secrets.forEach(function (s) { %>
+      <tr>
+        <td><a class="mono" href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/<%= encodeURIComponent(s.name) %>"><%= s.name %></a></td>
+        <td>
+          <% s.fields.forEach(function (f) { %>
+          <% if (f.sensitive) { %>
+          <span class="chip lock"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg> <%= f.key %></span>
+          <% } else { %>
+          <span class="chip"><%= f.key %><% if (f.value !== undefined) { %> <span class="mono">= <%= f.value %></span><% } %></span>
+          <% } %>
+          <% }) %>
+        </td>
+        <td><%= s.description %></td>
+        <td><time datetime="<%= it.fmt.iso(s.updated_at) %>" title="<%= it.fmt.iso(s.updated_at) %>"><%= it.fmt.ago(s.updated_at) %></time></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
 <% } %>
 
-<details>
-  <summary>Edit project</summary>
-  <form method="post" action="/p/<%= encodeURIComponent(it.project.slug) %>">
+<dialog class="confirm" id="edit-project">
+  <h2>Edit project</h2>
+  <form method="post" action="/p/<%= encodeURIComponent(it.project.slug) %>" class="form-grid">
     <input type="hidden" name="csrf" value="<%= it.csrf %>" />
     <label>Name <input name="name" value="<%= it.project.name %>" required /></label>
     <label>Status
@@ -56,14 +103,21 @@
     </label>
     <label>Tags (comma separated) <input name="tags" value="<%= it.project.tags.join(', ') %>" /></label>
     <label>Summary <textarea name="summary" rows="3"><%= it.project.summary %></textarea></label>
-    <button type="submit">Save</button>
+    <div class="actions">
+      <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn primary" type="submit">Save</button>
+    </div>
   </form>
-</details>
+</dialog>
 
-<details>
-  <summary>Danger zone</summary>
-  <form method="post" action="/p/<%= encodeURIComponent(it.project.slug) %>/delete" onsubmit="return confirm('Delete this project, its documents and its secrets?');">
+<dialog class="confirm" id="delete-project">
+  <h2>Delete project</h2>
+  <p>Delete <%= it.project.slug %>, its documents and its secrets? This cannot be undone.</p>
+  <form method="post" action="/p/<%= encodeURIComponent(it.project.slug) %>/delete">
     <input type="hidden" name="csrf" value="<%= it.csrf %>" />
-    <button class="secondary" type="submit">Delete project</button>
+    <div class="actions">
+      <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn danger solid" type="submit">Delete project</button>
+    </div>
   </form>
-</details>
+</dialog>

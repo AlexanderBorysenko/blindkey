@@ -447,6 +447,15 @@ input[type='submit'].primary {
   font-variant-numeric: tabular-nums;
 }
 
+.is-archived { color: var(--muted); }
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .field-rows { min-width: 36rem; table-layout: fixed; }
 .field-rows :is(input, select, textarea) { margin-bottom: 0; }
 .field-rows th:nth-child(1) { width: 20%; }

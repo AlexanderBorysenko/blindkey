@@ -65,7 +65,7 @@ describe('ui projects list', () => {
       payload: { csrf: csrfOf(form.body), slug: 'gamma', name: 'Gamma', status: 'active', tags: 'client, wp', summary: 'Third one' },
     });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/p/gamma');
+    expect(res.headers.location).toBe('/p/gamma?done=created');
     const created = getProjectBySlug(t.db, 'gamma')!;
     expect(created.name).toBe('Gamma');
     expect(created.tags).toEqual(['client', 'wp']);
@@ -80,6 +80,12 @@ describe('ui projects list', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(getProjectBySlug(t.db, 'nope')).toBeNull();
+  });
+
+  it('shows a filtered empty state naming the status', async () => {
+    const res = await page('/?status=paused');
+    const main = res.body.slice(res.body.indexOf('<main'), res.body.indexOf('</main>'));
+    expect(main).toContain('No paused projects.');
   });
 
   it('re-renders the list with an error for an invalid slug', async () => {
@@ -107,5 +113,11 @@ describe('ui search', () => {
     const res = await page('/search?q=DB');
     expect(res.body).toContain('/p/acme/secrets/DB');
     expect(res.body).not.toContain('hunter2hunter2');
+  });
+
+  it('shows an escaped empty-state message for a query with no hits', async () => {
+    const res = await page('/search?q=' + encodeURIComponent('<script>nope</script>'));
+    expect(res.body).toContain('Nothing matches “&lt;script&gt;nope&lt;/script&gt;”.');
+    expect(res.body).not.toContain('<script>nope</script>');
   });
 });

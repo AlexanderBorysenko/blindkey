@@ -62,7 +62,7 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: AppContext): vo
       );
     }
     const project = createProjectFor(ctx, adminActor(req), parsed.data);
-    return reply.redirect(`/p/${encodeURIComponent(project.slug)}`, 302);
+    return reply.redirect(`/p/${encodeURIComponent(project.slug)}?done=created`, 302);
   });
 
   type SlugParams = { Params: { slug: string }; Querystring: { tab?: string } };
@@ -94,13 +94,13 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: AppContext): vo
     });
     if (!parsed.success) throw new ValidationError(parsed.error.issues);
     updateProjectFor(ctx, adminActor(req), req.params.slug, parsed.data);
-    return reply.redirect(`/p/${encodeURIComponent(req.params.slug)}`, 302);
+    return reply.redirect(`/p/${encodeURIComponent(req.params.slug)}?done=saved`, 302);
   });
 
   app.post<SlugParams>('/p/:slug/delete', async (req, reply) => {
     assertCsrf(ctx, req);
     requireAdmin(req);
     deleteProjectFor(ctx, adminActor(req), req.params.slug);
-    return reply.redirect('/', 302);
+    return reply.redirect('/?done=deleted', 302);
   });
 }

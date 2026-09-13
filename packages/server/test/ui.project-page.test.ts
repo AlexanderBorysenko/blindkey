@@ -49,13 +49,32 @@ describe('ui project page', () => {
     expect(res.body).toContain('db.internal');          // non-sensitive value is safe to show
     expect(res.body).not.toContain('hunter2hunter2');   // sensitive value is not
     expect(res.body).toContain('href="/p/acme/secrets/DB"');
+    expect(res.body).toContain('class="chip lock"');
+    expect(res.body).not.toContain('sensitive — value hidden');
+  });
+
+  it('shows counts on the tabs', async () => {
+    const res = await page('/p/acme');
+    expect(res.body).toMatch(/data-count="1">1<\/span>/);
+  });
+
+  it('puts the delete form inside its confirm dialog', async () => {
+    const res = await page('/p/acme');
+    expect(res.body).toMatch(/<dialog[^>]*id="delete-project"[\s\S]*action="\/p\/acme\/delete"/);
+  });
+
+  it('shows an empty-state message on the secrets tab of a project with no secrets', async () => {
+    t.project('bare');
+    const res = await page('/p/bare?tab=secrets');
+    const main = res.body.slice(res.body.indexOf('<main'), res.body.indexOf('</main>'));
+    expect(main).toContain('No secrets yet.');
   });
 
   it('updates the project meta', async () => {
     const form = await page('/p/acme');
     const res = await post('/p/acme', { csrf: csrfOf(form.body), name: 'Acme Renamed', status: 'paused', tags: 'client, wp', summary: 'Updated' });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/p/acme');
+    expect(res.headers.location).toBe('/p/acme?done=saved');
     const row = getProjectBySlug(t.db, 'acme')!;
     expect(row.name).toBe('Acme Renamed');
     expect(row.status).toBe('paused');
@@ -79,7 +98,7 @@ describe('ui project page', () => {
     const form = await page('/p/doomed');
     const res = await post('/p/doomed/delete', { csrf: csrfOf(form.body) });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/');
+    expect(res.headers.location).toBe('/?done=deleted');
     expect(getProjectBySlug(t.db, 'doomed')).toBeNull();
   });
 });

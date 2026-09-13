@@ -1,37 +1,51 @@
-<h1>Projects</h1>
+<div class="page-head">
+  <div>
+    <h1>Projects</h1>
+  </div>
+  <div class="actions">
+    <button class="btn primary" type="button" onclick="document.getElementById('new-project').showModal()">
+      <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New project
+    </button>
+  </div>
+</div>
 
-<form method="get" action="/search" role="search">
-  <input type="search" name="q" placeholder="Search projects, documents, secret names" value="" />
-  <button type="submit">Search</button>
-</form>
-
-<p>
-  Status:
-  <a href="/">all</a>
+<nav class="tabs">
+  <a href="/" aria-current="<%= it.status === '' ? 'page' : 'false' %>">all</a>
   <% it.statuses.forEach(function (s) { %>
-  · <a href="/?status=<%= s %>" aria-current="<%= it.status === s ? 'page' : 'false' %>"><%= s %></a>
+  <a href="/?status=<%= s %>" aria-current="<%= it.status === s ? 'page' : 'false' %>"><%= s %></a>
   <% }) %>
-</p>
+</nav>
 
-<table>
-  <thead><tr><th>Slug</th><th>Name</th><th>Status</th><th>Tags</th><th>Updated</th></tr></thead>
-  <tbody>
-    <% it.projects.forEach(function (p) { %>
-    <tr>
-      <td><a href="/p/<%= encodeURIComponent(p.slug) %>"><%= p.slug %></a></td>
-      <td><%= p.name %></td>
-      <td><%= p.status %></td>
-      <td><%= p.tags.join(', ') %></td>
-      <td><%= new Date(p.updated_at).toISOString().slice(0, 19) %>Z</td>
-    </tr>
-    <% }) %>
-  </tbody>
-</table>
+<% if (it.projects.length === 0) { %>
+<div class="empty">
+  <p><% if (it.status) { %>No <%= it.status %> projects.<% } else { %>No projects yet.<% } %></p>
+  <button class="btn primary" type="button" onclick="document.getElementById('new-project').showModal()">New project</button>
+</div>
+<% } else { %>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Project</th><th>Status</th><th>Tags</th><th>Updated</th></tr></thead>
+    <tbody>
+      <% it.projects.forEach(function (p) { %>
+      <tr<%~ p.status === 'archived' ? ' class="is-archived"' : '' %>>
+        <td>
+          <a class="mono" href="/p/<%= encodeURIComponent(p.slug) %>"><%= p.slug %></a><br />
+          <small><%= p.name %></small>
+        </td>
+        <td><span class="pill status-<%= p.status %>"><%= p.status %></span></td>
+        <td><% p.tags.forEach(function (tag) { %><span class="tag"><%= tag %></span> <% }) %></td>
+        <td><time datetime="<%= it.fmt.iso(p.updated_at) %>" title="<%= it.fmt.iso(p.updated_at) %>"><%= it.fmt.ago(p.updated_at) %></time></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
 
-<details>
-  <summary>New project</summary>
-  <% if (it.error) { %><p role="alert"><%= it.error %></p><% } %>
-  <form method="post" action="/projects">
+<dialog class="confirm" id="new-project">
+  <h2>New project</h2>
+  <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+  <form method="post" action="/projects" class="form-grid">
     <input type="hidden" name="csrf" value="<%= it.csrf %>" />
     <label>Slug <input name="slug" value="<%= it.form.slug %>" required /></label>
     <label>Name <input name="name" value="<%= it.form.name %>" required /></label>
@@ -44,6 +58,17 @@
     </label>
     <label>Tags (comma separated) <input name="tags" value="<%= it.form.tags %>" /></label>
     <label>Summary <textarea name="summary" rows="3"><%= it.form.summary %></textarea></label>
-    <button type="submit">Create project</button>
+    <div class="actions">
+      <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn primary" type="submit">Create project</button>
+    </div>
   </form>
-</details>
+</dialog>
+<% if (it.error) { %>
+<script>
+  (function () {
+    var dlg = document.getElementById('new-project');
+    if (dlg && !dlg.open) dlg.showModal();
+  })();
+</script>
+<% } %>

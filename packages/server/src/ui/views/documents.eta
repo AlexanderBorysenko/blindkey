@@ -1,15 +1,35 @@
-<h1>Global documents</h1>
-<table>
-  <thead><tr><th>Slug</th><th>Title</th><th>Category</th><th>Updated</th></tr></thead>
-  <tbody>
-    <% it.documents.forEach(function (d) { %>
-    <tr>
-      <td><a href="/global/docs/<%= encodeURIComponent(d.slug) %>"><%= d.slug %></a></td>
-      <td><%= d.title %></td>
-      <td><%= d.category %></td>
-      <td><%= new Date(d.updated_at).toISOString().slice(0, 19) %>Z</td>
-    </tr>
-    <% }) %>
-  </tbody>
-</table>
-<p><a role="button" href="/global/docs/new/edit">New document</a></p>
+<p class="crumbs">Global / <span class="current">Documents</span></p>
+
+<div class="page-head">
+  <div>
+    <h1>Documents</h1>
+  </div>
+  <div class="actions">
+    <a class="btn primary" href="/global/docs/new/edit"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New document</a>
+  </div>
+</div>
+
+<% if (it.documents.length === 0) { %>
+<div class="empty">
+  <p>No documents yet.</p>
+  <a class="btn primary" href="/global/docs/new/edit">New document</a>
+</div>
+<% } else { %>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Document</th><th>Category</th><th>Updated</th></tr></thead>
+    <tbody>
+      <% it.documents.forEach(function (d) { %>
+      <tr>
+        <td>
+          <a href="/global/docs/<%= encodeURIComponent(d.slug) %>"><%= d.title %></a><br />
+          <small class="mono"><%= d.slug %></small>
+        </td>
+        <td><span class="tag"><%= d.category %></span></td>
+        <td><time datetime="<%= it.fmt.iso(d.updated_at) %>" title="<%= it.fmt.iso(d.updated_at) %>"><%= it.fmt.ago(d.updated_at) %></time></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
