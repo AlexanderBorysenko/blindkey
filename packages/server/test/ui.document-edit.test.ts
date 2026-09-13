@@ -36,6 +36,13 @@ describe('ui document editor', () => {
     expect(res.body).toContain('value="deploy"'); // category option
   });
 
+  it('points the Cancel link at /global/docs for a new global document, not the routeless /global', async () => {
+    const res = await t.app.inject({ method: 'GET', url: '/global/docs/new/edit', cookies: { pidb_session: session } });
+    expect(res.statusCode).toBe(200);
+    const main = /<main[\s\S]*<\/main>/.exec(res.body)?.[0] ?? '';
+    expect(main).toContain('href="/global/docs">Cancel</a>');
+  });
+
   it('creates a document and redirects to its page', async () => {
     const res = await post('/p/acme/docs/new', { csrf, slug: 'notes', title: 'Notes', category: 'notes', body_md: '# Notes\n' });
     expect(res.statusCode).toBe(302);

@@ -13,7 +13,7 @@
   <div class="actions">
     <button class="btn primary" type="button" onclick="document.getElementById('edit-project').showModal()">Edit project</button>
     <details class="menu">
-      <summary class="btn ghost">⋯</summary>
+      <summary class="btn ghost" aria-label="More actions">⋯</summary>
       <div class="menu-list">
         <button class="btn ghost danger" type="button" onclick="document.getElementById('delete-project').showModal()">Delete project…</button>
       </div>

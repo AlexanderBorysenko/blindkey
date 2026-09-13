@@ -323,6 +323,18 @@ describe('ui secret edit', () => {
     expect(getSecretMeta(t.db, t.ring, acme(), 'Mover')).not.toBeNull();
   });
 
+  it('keeps the Cancel link and breadcrumb pointed at the original secret after a rename conflict, not the refused name', async () => {
+    createSecret(t.db, t.ring, { projectId: acme(), name: 'TakenName', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    createSecret(t.db, t.ring, { projectId: acme(), name: 'MoverTwo', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const res = await post('/p/acme/secrets/MoverTwo', { csrf, name: 'TakenName', key: ['k'], value: [''], sensitive: ['1'] });
+    expect(res.statusCode).toBe(400);
+    const main = /<main[\s\S]*<\/main>/.exec(res.body)?.[0] ?? '';
+    expect(main).toContain('href="/p/acme/secrets/MoverTwo">Cancel</a>');
+    expect(main).toContain('<span class="current">MoverTwo</span>');
+    expect(main).not.toContain('href="/p/acme/secrets/TakenName">Cancel</a>');
+    expect(main).not.toContain('<span class="current">TakenName</span>');
+  });
+
   it('deletes a secret and redirects to the project', async () => {
     createSecret(t.db, t.ring, { projectId: acme(), name: 'Doomed', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     const view = await page('/p/acme/secrets/Doomed');

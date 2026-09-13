@@ -53,6 +53,6 @@
     <% if (it.findings.length || it.unresolved.length) { %>
     <button type="submit" name="force" value="on" class="btn danger">Save anyway</button>
     <% } %>
-    <a class="btn" href="<%= it.isNew ? it.prefix : it.prefix + '/docs/' + encodeURIComponent(it.form.slug) %>">Cancel</a>
+    <a class="btn" href="<%= it.isNew ? (it.prefix === '/global' ? '/global/docs' : it.prefix) : it.prefix + '/docs/' + encodeURIComponent(it.form.slug) %>">Cancel</a>
   </div>
 </form>

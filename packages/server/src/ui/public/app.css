@@ -63,6 +63,7 @@ img { max-width: 100%; }
   --off: #8b93a1;
   --danger: #c43d32;
   --danger-soft: #fbe9e7;
+  --danger-ink: #ffffff;
   --radius: 8px;
   --radius-sm: 6px;
   color-scheme: light;
@@ -89,6 +90,7 @@ img { max-width: 100%; }
     --off: #7d8594;
     --danger: #ff7a6e;
     --danger-soft: #3a1a17;
+    --danger-ink: #2a0d0a;
     color-scheme: dark;
   }
 }
@@ -275,7 +277,7 @@ input[type='submit'].primary {
 }
 .btn.danger.solid {
   background: var(--danger);
-  color: #fff;
+  color: var(--danger-ink);
   border-color: var(--danger);
 }
 .btn.sm {
@@ -347,6 +349,19 @@ input[type='submit'].primary {
   flex-wrap: wrap;
   gap: 6px;
 }
+fieldset.chip-grid {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+fieldset.chip-grid legend {
+  width: 100%;
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
 
 .muted { color: var(--muted); }
 
@@ -389,6 +404,13 @@ input[type='submit'].primary {
   margin-left: auto;
   display: flex;
   gap: 8px;
+}
+
+dialog.confirm .actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .tabs {
@@ -575,9 +597,10 @@ tr.act-auth td:nth-child(4) { color: var(--muted); }
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
   padding: 10px 14px;
   font-size: 14px;
-  color: var(--ok);
+  color: var(--ink);
   animation: toast-out 0.3s ease 4s forwards;
 }
+.toast .i { color: var(--ok); }
 @keyframes toast-out {
   to { opacity: 0; visibility: hidden; }
 }
@@ -683,6 +706,10 @@ tr.act-auth td:nth-child(4) { color: var(--muted); }
   align-items: center;
   gap: 8px;
   font-weight: 600;
+  color: var(--ink);
+}
+.brand:hover {
+  text-decoration: none;
 }
 .brand .mark {
   display: inline-flex;
@@ -763,6 +790,7 @@ tr.act-auth td:nth-child(4) { color: var(--muted); }
 }
 
 .topbar {
+  position: relative;
   display: none;
   align-items: center;
   justify-content: space-between;
@@ -776,14 +804,20 @@ tr.act-auth td:nth-child(4) { color: var(--muted); }
   cursor: pointer;
 }
 .nav-drawer summary::-webkit-details-marker { display: none; }
-.nav-drawer[open] {
+/* .nav-drawer[open] > :not(summary) selects the drawer body element (everything after the
+   summary); it is wrapped in a single element in layout.eta so only that element — never the
+   summary — is taken out of flow. */
+.nav-drawer[open] > :not(summary) {
   position: absolute;
+  top: 100%;
   left: 0;
   right: 0;
   background: var(--side);
   border-bottom: 1px solid var(--line);
   padding: 0 10px 10px;
   z-index: 20;
+  max-height: calc(100vh - 100%);
+  overflow-y: auto;
 }
 
 @media (max-width: 800px) {

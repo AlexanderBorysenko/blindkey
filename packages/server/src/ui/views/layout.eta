@@ -30,7 +30,9 @@
         </a>
         <details class="nav-drawer">
           <summary class="btn ghost"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg> Menu</summary>
-          <%~ include('partials/nav', it) %>
+          <div class="nav-drawer-body">
+            <%~ include('partials/nav', it) %>
+          </div>
         </details>
       </div>
       <main class="main">
