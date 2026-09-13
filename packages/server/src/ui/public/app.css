@@ -754,6 +754,47 @@ input[type='submit'].primary {
   }
 }
 
+/* ---------- Secret page ---------- */
+.secret-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .secret-grid { grid-template-columns: 1fr; }
+}
+
+.field-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.field-key.locked { color: var(--lock); }
+
+.text-lock { color: var(--lock); }
+
+.timer {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.access-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.access-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+.access-list time { color: var(--muted); }
+
 /* ---------- Document editor ---------- */
 .editor {
   display: grid;

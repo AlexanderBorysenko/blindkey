@@ -1,5 +1,11 @@
-<span class="field-value<%= it.value.includes('\n') ? ' multiline' : '' %>" id="value-<%= it.key %>"><%= it.value %></span>
-<div class="row-buttons">
-  <button class="outline" type="button" onclick="navigator.clipboard.writeText(document.getElementById('value-<%= it.key %>').textContent)">Copy</button>
-  <button class="secondary outline" type="button" onclick="hideField(this)">Hide</button>
+<div class="kv-row revealed" data-field-row="<%= it.key %>">
+  <div class="mono field-key locked"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg> <%= it.key %></div>
+  <div data-field="<%= it.key %>">
+    <span class="field-value<%= it.value.includes('\n') ? ' multiline' : '' %>"><%= it.value %></span>
+  </div>
+  <div class="row-buttons">
+    <span class="timer" data-seconds="30">hides in 30 s</span>
+    <button class="btn sm ghost" type="button" onclick="copyField(this)">Copy</button>
+    <button class="btn sm ghost" type="button" data-hide onclick="hideField(this)">Hide</button>
+  </div>
 </div>

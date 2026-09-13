@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../http/context.js';
 import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretPatchSchema } from '@pidb/shared';
-import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
+import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, recentSecretAccessFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
 import { ConflictError } from '../../errors.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
@@ -121,6 +121,10 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
           prefix: scope.prefix,
           scopeLabel: scope.projectSlug ?? 'global',
           secret,
+          access: recentSecretAccessFor(ctx, principal, scope.projectSlug, secret.name),
+          // Matches the target form of `pidb secret env <target> "<name>"`: `global` addresses the
+          // top-level collection (see packages/cli/src/client.ts `scopedPath`), a project slug otherwise.
+          cliRef: scope.projectSlug ? `${scope.projectSlug}/${secret.name}` : secret.name,
         }),
       );
     });

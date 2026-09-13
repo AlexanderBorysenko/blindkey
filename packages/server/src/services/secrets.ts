@@ -4,6 +4,7 @@ import { assertScope, hasScope, type Actor, type Principal } from '../auth/princ
 import { ForbiddenError, NotFoundError } from '../errors.js';
 import type { ProjectRow } from '../repos/projects.js';
 import { createSecret, deleteSecret, getSecretMeta, listSecrets, revealAllFields, revealField, updateSecret, type SecretMeta } from '../repos/secrets.js';
+import { listAuditForTarget, type AuditRow } from '../repos/audit.js';
 import { publicSecret, type PublicSecret } from '../http/serialize.js';
 import { auditAs, loadProjectFor } from './common.js';
 
@@ -27,6 +28,20 @@ export function getSecretFor(ctx: AppContext, principal: Principal, projectSlug:
   assertScope(principal, 'secrets:meta');
   const project = scopeProject(ctx, principal, projectSlug);
   return publicSecret(mustGet(ctx, project?.id ?? null, name));
+}
+
+/**
+ * Recent audit rows for one secret, for the secret page's "recent access" panel. Reuses the
+ * same scope/permission resolution as `getSecretFor` (so a non-admin scoped to another project
+ * still gets NotFoundError rather than leaking existence), and additionally requires the `admin`
+ * scope: the audit log is admin-only, unlike secret metadata.
+ */
+export function recentSecretAccessFor(ctx: AppContext, principal: Principal, projectSlug: string | null, name: string, limit = 5): AuditRow[] {
+  assertScope(principal, 'secrets:meta');
+  const project = scopeProject(ctx, principal, projectSlug);
+  const secret = mustGet(ctx, project?.id ?? null, name);
+  assertScope(principal, 'admin');
+  return listAuditForTarget(ctx.db, 'secret', secret.id, limit);
 }
 
 export function revealFieldFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, key: string): string {

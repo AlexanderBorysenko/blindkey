@@ -45,6 +45,12 @@ export interface AuditQuery {
   actorType?: string;
 }
 
+type RawAuditRow = Omit<AuditRow, 'meta'> & { meta: string | null };
+
+function mapAuditRow(r: RawAuditRow): AuditRow {
+  return { ...r, meta: r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : null };
+}
+
 export function listAudit(db: Db, q: AuditQuery): AuditRow[] {
   const where: string[] = [];
   const params: unknown[] = [];
@@ -54,6 +60,18 @@ export function listAudit(db: Db, q: AuditQuery): AuditRow[] {
   const limit = Math.min(Math.max(q.limit ?? 100, 1), 1000);
   const sql = `SELECT id, ts, actor_type, actor_id, action, target_type, target_id, field_key, ip, user_agent, meta FROM audit_log
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ts DESC, id DESC LIMIT ?`;
-  const rows = db.prepare(sql).all(...params, limit) as (Omit<AuditRow, 'meta'> & { meta: string | null })[];
-  return rows.map((r) => ({ ...r, meta: r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : null }));
+  const rows = db.prepare(sql).all(...params, limit) as RawAuditRow[];
+  return rows.map(mapAuditRow);
+}
+
+/** Recent audit rows for one target (e.g. a secret), newest first. Used by the secret page's "recent access" panel. */
+export function listAuditForTarget(db: Db, targetType: string, targetId: number, limit = 5): AuditRow[] {
+  const lim = Math.min(Math.max(limit, 1), 50);
+  const rows = db
+    .prepare(
+      `SELECT id, ts, actor_type, actor_id, action, target_type, target_id, field_key, ip, user_agent, meta
+       FROM audit_log WHERE target_type = ? AND target_id = ? ORDER BY ts DESC, id DESC LIMIT ?`,
+    )
+    .all(targetType, targetId, lim) as RawAuditRow[];
+  return rows.map(mapAuditRow);
 }
