@@ -342,6 +342,14 @@ input[type='submit'].primary {
   background: var(--lock-soft);
 }
 
+.chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.muted { color: var(--muted); }
+
 .count {
   display: inline-block;
   font-size: 11px;
@@ -455,6 +463,18 @@ input[type='submit'].primary {
   justify-content: space-between;
   gap: 8px;
 }
+.toolbar.filters {
+  justify-content: flex-start;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.toolbar.filters label { margin-bottom: 0; }
+
+/* ---------- Audit action rows ---------- */
+tr.act-reveal td { background: var(--lock-soft); }
+tr.act-reveal td:nth-child(4) { color: var(--lock); font-weight: 500; }
+tr.act-delete td:nth-child(4) { color: var(--danger); font-weight: 500; }
+tr.act-auth td:nth-child(4) { color: var(--muted); }
 
 .field-rows { min-width: 36rem; table-layout: fixed; }
 .field-rows :is(input, select, textarea) { margin-bottom: 0; }
@@ -484,6 +504,11 @@ input[type='submit'].primary {
   text-transform: uppercase;
   color: var(--muted);
 }
+.panel.lock {
+  background: var(--lock-soft);
+  border-color: var(--lock);
+}
+.panel.lock h3 { color: var(--lock); }
 
 .kv {
   background: var(--surface);
@@ -632,6 +657,41 @@ input[type='submit'].primary {
   margin: 0 auto;
   padding: 48px 28px;
   padding-block: 48px;
+}
+
+.auth-card {
+  max-width: 360px;
+  margin: 10vh auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 28px;
+  display: grid;
+  gap: 16px;
+}
+.auth-card .brand { justify-content: center; }
+.auth-card .lede {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12.5px;
+  margin: -8px 0 0;
+}
+.auth-card form {
+  display: grid;
+  gap: 14px;
+}
+.auth-card form button[type='submit'] {
+  width: 100%;
+  justify-content: center;
+}
+.auth-card .code {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+  margin: 0;
 }
 
 .brand {

@@ -70,7 +70,7 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     assertCsrf(ctx, req);
     requireAdmin(req);
     revokeTokenFor(ctx, adminActor(req), Number.parseInt(req.params.id, 10));
-    return reply.redirect('/tokens', 302);
+    return reply.redirect('/tokens?done=revoked', 302);
   });
 
   type AuditQs = { Querystring: { limit?: string; before?: string; action?: string; actor?: string } };

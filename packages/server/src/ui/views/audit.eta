@@ -1,6 +1,10 @@
-<h1>Audit log</h1>
+<div class="page-head">
+  <div>
+    <h1>Audit log</h1>
+  </div>
+</div>
 
-<form method="get" action="/audit">
+<form method="get" action="/audit" class="toolbar filters">
   <label>Action <input name="action" value="<%= it.action %>" placeholder="e.g. auth.login" /></label>
   <label>Actor
     <select name="actor">
@@ -10,27 +14,38 @@
     </select>
   </label>
   <label>Rows <input name="limit" type="number" min="1" max="200" value="<%= it.limit %>" /></label>
-  <button type="submit">Filter</button>
+  <button class="btn primary" type="submit">Filter</button>
+  <a class="btn ghost" href="/audit">Reset</a>
 </form>
 
-<table>
-  <thead><tr><th>ID</th><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Field</th><th>IP</th></tr></thead>
-  <tbody>
-    <% it.rows.forEach(function (r) { %>
-    <tr>
-      <td><%= r.id %></td>
-      <td><%= new Date(r.ts).toISOString().slice(0, 19) %>Z</td>
-      <td><%= r.actor_type %><%= r.actor_id === null ? '' : ' #' + r.actor_id %></td>
-      <td><%= r.action %></td>
-      <td><%= r.target_type === null ? '' : r.target_type + ' #' + r.target_id %></td>
-      <td><%= r.field_key === null ? '' : r.field_key %></td>
-      <td><%= r.ip %></td>
-    </tr>
-    <% }) %>
-  </tbody>
-</table>
+<% if (it.rows.length === 0) { %>
+<div class="empty">
+  <p>No audit entries match these filters.</p>
+</div>
+<% } else { %>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>ID</th><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Field</th><th>IP</th></tr></thead>
+    <tbody>
+      <% it.rows.forEach(function (r) { %>
+      <% var actClass = ''; %>
+      <% if (/reveal(_all)?$/.test(r.action)) { actClass = 'act-reveal'; } else if (/(\.delete|revoke)$/.test(r.action)) { actClass = 'act-delete'; } else if (r.action.indexOf('auth.') === 0) { actClass = 'act-auth'; } %>
+      <tr<%~ actClass ? ' class="' + actClass + '"' : '' %>>
+        <td><%= r.id %></td>
+        <td><time datetime="<%= it.fmt.iso(r.ts) %>" title="<%= it.fmt.iso(r.ts) %>"><%= it.fmt.ago(r.ts) %></time></td>
+        <td><%= r.actor_type %><%= r.actor_id === null ? '' : ' #' + r.actor_id %></td>
+        <td><%= r.action %></td>
+        <td class="mono"><%= r.target_type === null ? '' : r.target_type + ' #' + r.target_id %></td>
+        <td><%= r.field_key === null ? '' : r.field_key %></td>
+        <td><%= r.ip %></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
 
-<p>
-  <a href="<%= it.resetHref %>">Newest</a>
-  <% if (it.olderHref) { %> · <a href="<%= it.olderHref %>">Older →</a><% } %>
+<p class="row-actions">
+  <a class="btn ghost" href="<%= it.resetHref %>">Newest</a>
+  <% if (it.olderHref) { %><a class="btn sm" href="<%= it.olderHref %>">Older →</a><% } %>
 </p>

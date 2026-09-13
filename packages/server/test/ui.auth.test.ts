@@ -32,6 +32,12 @@ describe('ui auth', () => {
     expect(res.body).toContain('name="password"');
   });
 
+  it('renders the login page without a sidebar', async () => {
+    const res = await t.app.inject({ method: 'GET', url: '/login' });
+    expect(res.body).not.toContain('class="sidebar"');
+    expect(res.body).toContain('name="username"');
+  });
+
   it('redirects an anonymous visitor from a page to /login', async () => {
     const res = await t.app.inject({ method: 'GET', url: '/' });
     expect(res.statusCode).toBe(302);

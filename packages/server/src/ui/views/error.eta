@@ -1,5 +1,5 @@
-<article>
-  <header><strong><%= it.code %></strong></header>
+<div class="auth-card">
+  <p class="code"><%= it.code %></p>
   <p><%= it.message %></p>
-  <a href="/">Back to projects</a>
-</article>
+  <a class="btn primary" href="/">Back to projects</a>
+</div>

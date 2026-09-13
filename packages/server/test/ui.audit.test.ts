@@ -51,6 +51,12 @@ describe('ui audit', () => {
     expect(second.body).not.toContain(`<td>${ids[0]}</td>`);
   });
 
+  it('color-codes a reveal row with act-reveal while keeping the bare action cell', async () => {
+    const res = await page('/audit');
+    expect(res.body).toContain('class="act-reveal"');
+    expect(res.body).toContain('<td>secret.reveal</td>');
+  });
+
   it('never shows a secret value, only the field key', async () => {
     const res = await page('/audit');
     expect(res.body).toContain('password');       // the field key is metadata

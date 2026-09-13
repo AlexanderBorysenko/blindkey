@@ -65,7 +65,7 @@ describe('ui tokens', () => {
     const id = listTokens(t.db).find((r) => r.name === 'to-revoke')!.id;
     const res = await post(`/tokens/${id}/revoke`, { csrf });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/tokens');
+    expect(res.headers.location).toBe('/tokens?done=revoked');
     expect(listTokens(t.db).find((r) => r.id === id)!.revoked_at).not.toBeNull();
   });
 
@@ -88,6 +88,16 @@ describe('ui tokens', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body).toContain('Expiry');
     expect(listTokens(t.db).some((r) => r.name === 'bad-days-nan')).toBe(false);
+  });
+
+  it('renders active tokens with the active pill and revoked tokens with the archived pill', async () => {
+    await post('/tokens', { csrf, name: 'style-active', scopes: 'docs:read' });
+    await post('/tokens', { csrf, name: 'style-revoked', scopes: 'docs:read' });
+    const revokedId = listTokens(t.db).find((r) => r.name === 'style-revoked')!.id;
+    await post(`/tokens/${revokedId}/revoke`, { csrf });
+    const res = await page('/tokens');
+    expect(res.body).toContain('class="pill status-active"');
+    expect(res.body).toContain('class="pill status-archived"');
   });
 
   it('rejects create and revoke without a CSRF token', async () => {
