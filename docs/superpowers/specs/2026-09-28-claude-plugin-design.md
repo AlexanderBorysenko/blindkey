@@ -36,7 +36,7 @@ Give Claude Code a stable, safe working context for pidb: it knows the bound pro
 - Rate limit 60/min per token-less IP bucket as other secret routes (reuse existing config if any; else `{max: 120, timeWindow: '1 minute'}`).
 
 ### 1.3 Device flow (`pidb connect`)
-- Migration 4 also creates:
+- Migration 5 creates:
   ```sql
   CREATE TABLE connect_requests (
     id INTEGER PRIMARY KEY,
