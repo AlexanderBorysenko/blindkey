@@ -6,7 +6,7 @@ import * as readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { loadConfig } from './config.js';
 import { openDb } from './db/connection.js';
-import { runBackup, runInit, runPasswordReset, runRotateKey, runTotpReset, startServer } from './ops.js';
+import { runBackup, runInit, runKeyVersions, runPasswordReset, runRotateKey, runTotpReset, startServer } from './ops.js';
 
 const CTRL_C = '\u0003';
 const BACKSPACE = '\u007f';
@@ -115,6 +115,22 @@ program
       console.log(`rewrapped ${r.secrets} secrets to key version ${config.keyRing.current}`);
       console.log(`rewrapped ${r.totp} 2FA secrets`);
       db.close();
+    } catch (err) {
+      fatal(err);
+    }
+  });
+
+program
+  .command('key-versions')
+  .description('Show how many rows sit on each master key version, and whether they decrypt')
+  .action(() => {
+    try {
+      const config = loadConfig();
+      const db = openDb(config.dbPath);
+      const r = runKeyVersions(db, config.keyRing);
+      for (const line of r.lines) console.log(line);
+      db.close();
+      if (!r.ok) process.exit(1);
     } catch (err) {
       fatal(err);
     }

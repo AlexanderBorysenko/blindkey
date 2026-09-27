@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { openDb } from '../src/db/connection.js';
-import { runInit, runRotateKey, runBackup, runTotpReset, runPasswordReset } from '../src/ops.js';
+import { runInit, runRotateKey, runKeyVersions, runBackup, runTotpReset, runPasswordReset } from '../src/ops.js';
 import { getAdmin, createAdmin, createSession } from '../src/repos/admin.js';
 import { getDocument } from '../src/repos/documents.js';
 import { createSecret, revealField } from '../src/repos/secrets.js';
@@ -49,6 +49,64 @@ describe('ops', () => {
 
     const raw = db.prepare(`SELECT key_version FROM secrets WHERE id = ?`).get(s.id) as { key_version: number };
     expect(raw.key_version).toBe(1);
+  });
+  it('rotate-key probes rows already on the current version and fails on a wrong current key, instead of reporting "rewrapped 0" (Review Focus 4)', () => {
+    const db = openDb(':memory:');
+    const keyA = randomBytes(32);
+    const ringA: KeyRing = { current: 2, keys: new Map([[2, keyA]]) };
+    const s = createSecret(db, ringA, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+
+    const keyB = randomBytes(32);
+    const wrongRing: KeyRing = { current: 2, keys: new Map([[2, keyB]]) };
+    expect(() => runRotateKey(db, wrongRing)).toThrow(
+      `key version 2 does not decrypt secret ${s.id} — PIDB_MASTER_KEY is not the version 2 key`,
+    );
+
+    const raw = db.prepare(`SELECT key_version FROM secrets WHERE id = ?`).get(s.id) as { key_version: number };
+    expect(raw.key_version).toBe(2);
+    expect(revealField(db, ringA, s.id, 'k')).toBe('v');
+  });
+  it('key-versions reports "no encrypted rows" on an empty db, is ok', () => {
+    const db = openDb(':memory:');
+    const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
+    expect(runKeyVersions(db, ring)).toEqual({ lines: ['no encrypted rows'], ok: true });
+  });
+  it('key-versions reports one line per (kind, version), ok when both decrypt', () => {
+    const db = openDb(':memory:');
+    const k1 = randomBytes(32);
+    const k2 = randomBytes(32);
+    const ring1: KeyRing = { current: 1, keys: new Map([[1, k1]]) };
+    createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const admin = createAdmin(db, 'alex', 'hash');
+    savePendingTotp(db, ring1, admin.id, randomBytes(20));
+
+    const ring2: KeyRing = { current: 2, keys: new Map([[1, k1], [2, k2]]) };
+    expect(runKeyVersions(db, ring2)).toEqual({
+      lines: ['secrets v1: 1 rows, ok', '2fa v1: 1 rows, ok'],
+      ok: true,
+    });
+  });
+  it('key-versions reports "no key configured" for a missing previous key, and is not ok', () => {
+    const db = openDb(':memory:');
+    const k1 = randomBytes(32);
+    const ring1: KeyRing = { current: 1, keys: new Map([[1, k1]]) };
+    createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const ring2: KeyRing = { current: 2, keys: new Map([[2, randomBytes(32)]]) };
+    expect(runKeyVersions(db, ring2)).toEqual({
+      lines: ['secrets v1: 1 rows, no key configured'],
+      ok: false,
+    });
+  });
+  it('key-versions reports "WRONG KEY (k of n fail)" and is not ok', () => {
+    const db = openDb(':memory:');
+    const k1 = randomBytes(32);
+    const ring1: KeyRing = { current: 1, keys: new Map([[1, k1]]) };
+    createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const wrongRing: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
+    expect(runKeyVersions(db, wrongRing)).toEqual({
+      lines: ['secrets v1: 1 rows, WRONG KEY (1 of 1 fail)'],
+      ok: false,
+    });
   });
   it('2fa reset deletes the admin_totp row and audits auth.totp_reset via shell', async () => {
     const db = openDb(':memory:');
@@ -110,6 +168,44 @@ describe('ops', () => {
     const copy = new Database(join(out, files[1]!), { readonly: true });
     expect(copy.prepare(`SELECT COUNT(*) AS c FROM projects`).get()).toEqual({ c: 1 });
     copy.close();
+    db.close();
+  });
+  it('backup passes integrity_check, and leaves no .tmp file behind', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));
+    const db = openDb(join(dir, 'pidb.sqlite'));
+    const out = join(dir, 'backups');
+    const file = runBackup(db, out, 14, new Date(Date.UTC(2001, 0, 1)));
+    const copy = new Database(file, { readonly: true, fileMustExist: true });
+    expect(copy.pragma('integrity_check', { simple: true })).toBe('ok');
+    copy.close();
+    expect(readdirSync(out).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    db.close();
+  });
+  it('backup removes a stale .tmp from a crashed run first, and it does not count toward keep (Review Focus 5)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));
+    const db = openDb(join(dir, 'pidb.sqlite'));
+    const out = join(dir, 'backups');
+    mkdirSync(out, { recursive: true });
+    const stale = join(out, 'pidb-2020-01-01T00-00-00.sqlite.tmp');
+    writeFileSync(stale, 'garbage from a crashed run');
+
+    const file = runBackup(db, out, 2, new Date(Date.UTC(2001, 0, 1)));
+
+    expect(existsSync(stale)).toBe(false);
+    const files = readdirSync(out).sort();
+    expect(files).toEqual(['pidb-2001-01-01T00-00-00.sqlite']);
+    expect(file).toBe(join(out, 'pidb-2001-01-01T00-00-00.sqlite'));
+    db.close();
+  });
+  it('backup deletes the temp file and throws when the integrity check fails, leaving no final file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));
+    const db = openDb(join(dir, 'pidb.sqlite'));
+    const out = join(dir, 'backups');
+    const failingVerify = () => {
+      throw new Error('backup integrity check failed: corrupt');
+    };
+    expect(() => runBackup(db, out, 14, new Date(Date.UTC(2001, 0, 1)), failingVerify)).toThrow(/integrity check failed/);
+    expect(readdirSync(out)).toEqual([]);
     db.close();
   });
 });

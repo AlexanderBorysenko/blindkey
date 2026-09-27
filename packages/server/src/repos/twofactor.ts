@@ -149,7 +149,25 @@ export function purgeExpiredChallenges(db: Db, nowTs: number = now()): number {
   return db.prepare(`DELETE FROM login_challenges WHERE expires_at <= ?`).run(nowTs).changes;
 }
 
+/**
+ * Every row already on the current version must decrypt with the current key before anything is
+ * rewrapped — otherwise a wrong `PIDB_MASTER_KEY` (right version, wrong bytes) with nothing left
+ * on an old version would rewrap 0 rows and look like a no-op success (spec §4, Review Focus 4).
+ */
+function probeCurrentVersionTotp(db: Db, ring: KeyRing): void {
+  const rows = db.prepare(`SELECT admin_id, secret_enc, key_version, enabled_at, last_used_step, created_at FROM admin_totp WHERE key_version = ?`).all(ring.current) as TotpRow[];
+  for (const row of rows) {
+    try {
+      openTotpSecret(ring, row);
+    } catch (e) {
+      if (!(e instanceof CryptoError)) throw e;
+      throw new Error(`key version ${ring.current} does not decrypt 2FA secret of admin ${row.admin_id} — PIDB_MASTER_KEY is not the version ${ring.current} key`);
+    }
+  }
+}
+
 export function rewrapTotpSecrets(db: Db, ring: KeyRing): number {
+  probeCurrentVersionTotp(db, ring);
   const rows = db.prepare(`SELECT admin_id, secret_enc, key_version, enabled_at, last_used_step, created_at FROM admin_totp WHERE key_version != ?`).all(ring.current) as TotpRow[];
   const upd = db.prepare(`UPDATE admin_totp SET secret_enc = ?, key_version = ? WHERE admin_id = ?`);
   return db.transaction(() => {
@@ -159,4 +177,39 @@ export function rewrapTotpSecrets(db: Db, ring: KeyRing): number {
     }
     return rows.length;
   })();
+}
+
+export interface KeyVersionStatus {
+  version: number;
+  rows: number;
+  status: string;
+  ok: boolean;
+}
+
+/** One status per key_version present in `admin_totp`, for `pidb-server key-versions` (spec §4). */
+export function totpKeyVersionReport(db: Db, ring: KeyRing): KeyVersionStatus[] {
+  const rows = db.prepare(`SELECT admin_id, secret_enc, key_version, enabled_at, last_used_step, created_at FROM admin_totp ORDER BY key_version`).all() as TotpRow[];
+  const byVersion = new Map<number, TotpRow[]>();
+  for (const row of rows) {
+    const group = byVersion.get(row.key_version);
+    if (group) group.push(row);
+    else byVersion.set(row.key_version, [row]);
+  }
+  return [...byVersion.keys()].sort((a, b) => a - b).map((version) => {
+    const group = byVersion.get(version)!;
+    const key = ring.keys.get(version);
+    if (!key) return { version, rows: group.length, status: 'no key configured', ok: false };
+    let fails = 0;
+    for (const row of group) {
+      try {
+        open(key, row.secret_enc, aad(row.admin_id));
+      } catch (e) {
+        if (!(e instanceof CryptoError)) throw e;
+        fails += 1;
+      }
+    }
+    return fails === 0
+      ? { version, rows: group.length, status: 'ok', ok: true }
+      : { version, rows: group.length, status: `WRONG KEY (${fails} of ${group.length} fail)`, ok: false };
+  });
 }

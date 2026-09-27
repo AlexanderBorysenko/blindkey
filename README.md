@@ -173,7 +173,7 @@ Then open `https://$PIDB_DOMAIN/login`. Point the CLI at the same host with `pid
 
 ### Backups and restore
 
-The `backup` service writes `pidb-<timestamp>.sqlite` into the `pidb-data` volume under `/data/backups` every `PIDB_BACKUP_INTERVAL` seconds and prunes to the newest `PIDB_BACKUP_KEEP` copies. A backup is the database only — **it does not contain the master key**, so keep the key somewhere else or the copies are worthless.
+The `backup` service writes `pidb-<timestamp>.sqlite` into the `pidb-data` volume under `/data/backups` every `PIDB_BACKUP_INTERVAL` seconds and prunes to the newest `PIDB_BACKUP_KEEP` copies. Each backup is written to a temporary file and passed through `PRAGMA integrity_check` before being kept; a failed check deletes the temporary file and leaves no backup behind. A backup is the database only — **it does not contain the master key**, so keep the key somewhere else or the copies are worthless.
 
 Backups live on the same `pidb-data` volume as the database itself, so `docker compose down -v` deletes them along with everything else. Copy them off the host regularly — this needs the stack up:
 
@@ -256,13 +256,10 @@ docker compose stop server backup
 Ask the database which key versions its secrets are wrapped with. This is the source of truth; `docker/.env` is only what you *think* is loaded:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint node server -e '
-  const db = new (require("better-sqlite3"))("/data/pidb.sqlite", { readonly: true });
-  console.table(db.prepare("SELECT key_version, count(*) AS secrets FROM secrets GROUP BY key_version").all());
-'
+docker compose run --rm --no-deps server key-versions
 ```
 
-All rows should show one `key_version`: that number is **N**, and N+1 is the version you are rotating to. It should match the `PIDB_MASTER_KEY_VERSION` line in `docker/.env` (no line means 1). Write down the `secrets` count too. If the table shows more than one version, or a version that disagrees with `.env`, stop and sort that out first — a restored pre-rotation backup is the usual cause, see [the end of this section](#restoring-a-pre-rotation-backup). An empty table means there are no secrets yet, and N is whatever `.env` says.
+A `secrets vN: <count> rows, ok` line means every secret is wrapped with version **N**, and N+1 is the version you are rotating to; N should match the `PIDB_MASTER_KEY_VERSION` line in `docker/.env` (no line means 1). Write down the `<count>` too. A `2fa vN: <count> rows, ok` line appears alongside it if any admin has 2FA enabled, and must show the same N. `no encrypted rows` means there are no secrets yet, and N is whatever `.env` says. Any status other than `ok`, a second version line, or a non-zero exit code means stop and sort that out first — a restored pre-rotation backup is the usual cause, see [the end of this section](#restoring-a-pre-rotation-backup).
 
 Put N in your shell for the blocks below. On the first rotation it is `N=1`, on the second `N=2`, and so on — use the number from the table, never one copied from an example. If your SSH session drops, set it again before continuing:
 
@@ -363,7 +360,7 @@ A backup taken before a rotation is wrapped with the old key version, so after r
 1. Follow [Backups and restore](#backups-and-restore), but leave the trailing ` && docker compose up -d` off the swap block, so neither the server nor the backup service starts on data wrapped with the old key. (If the stack does start, the backup service immediately writes a new backup that is still wrapped with version M — keep key M until that backup is gone too.)
 2. Make sure the stack is stopped (`docker compose stop server backup`) and run the version query from the start of this section. The rows show the backup's version, call it **M**; it is lower than your current `PIDB_MASTER_KEY_VERSION`.
 3. Edit `docker/.env`: leave `PIDB_MASTER_KEY_VERSION` at the current version and add `M:<the version M key from your password manager>` to `PIDB_MASTER_KEY_PREVIOUS` (comma-separated if the line already has entries).
-4. Run `docker compose run --rm --no-deps server rotate-key` and read its output exactly as above: expect `rewrapped <count> secrets to key version <current>`; on an error nothing changed, so fix the `PREVIOUS` entry and try again.
+4. Run `docker compose run --rm --no-deps server rotate-key` and read its output exactly as above: expect `rewrapped <count> secrets to key version <current>`; on an error nothing changed, so fix the `PREVIOUS` entry and try again. Then run `docker compose run --rm --no-deps server key-versions` — it should now show only the current version, ok.
 5. `docker compose up -d`, reveal one secret field, then remove the `PREVIOUS` line as above.
 
 ### Upgrading

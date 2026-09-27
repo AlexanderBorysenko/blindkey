@@ -4,6 +4,7 @@ import { openDb } from '../src/db/connection.js';
 import { createProject } from '../src/repos/projects.js';
 import {
   createSecret, getSecretMeta, listSecrets, revealField, revealAllFields, updateSecret, deleteSecret, searchSecretNames, rewrapAllSecrets,
+  secretKeyVersionReport,
 } from '../src/repos/secrets.js';
 import { ConflictError, CryptoError } from '../src/errors.js';
 import type { KeyRing } from '../src/config.js';
@@ -99,5 +100,50 @@ describe('secrets repo', () => {
     const ringOnlyNew: KeyRing = { current: 2, keys: new Map([[2, ring2.keys.get(2)!]]) };
     expect(revealField(db, ringOnlyNew, s.id, 'password')).toBe('pw-1');
     expect(() => revealField(db, ring, s.id, 'password')).toThrow(CryptoError);
+  });
+  it('rewrapAllSecrets probes rows already on the current version before rewrapping, and refuses a wrong current key without writing anything', () => {
+    const { db, p } = setup();
+    const keyA = randomBytes(32);
+    const ringA: KeyRing = { current: 2, keys: new Map([[2, keyA]]) };
+    const s = createSecret(db, ringA, { projectId: p.id, ...staging });
+    const keyB = randomBytes(32);
+    const wrongRing: KeyRing = { current: 2, keys: new Map([[2, keyB]]) };
+    expect(() => rewrapAllSecrets(db, wrongRing)).toThrow(
+      `key version 2 does not decrypt secret ${s.id} — PIDB_MASTER_KEY is not the version 2 key`,
+    );
+    // Nothing was written: the row is untouched and still decrypts with the real key.
+    const raw = db.prepare(`SELECT key_version FROM secrets WHERE id = ?`).get(s.id) as { key_version: number };
+    expect(raw.key_version).toBe(2);
+    expect(rewrapAllSecrets(db, ringA)).toBe(0);
+    expect(revealField(db, ringA, s.id, 'password')).toBe('pw-1');
+  });
+  it('secretKeyVersionReport: empty, mixed versions, missing key, wrong key', () => {
+    const { db, ring, p } = setup();
+    expect(secretKeyVersionReport(db, ring)).toEqual([]);
+
+    const s1 = createSecret(db, ring, { projectId: p.id, ...staging });
+    const keyB = randomBytes(32);
+    const ring2: KeyRing = { current: 2, keys: new Map([[1, ring.keys.get(1)!], [2, keyB]]) };
+    const s2 = createSecret(db, ring2, { projectId: null, name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
+    void s1; void s2;
+
+    expect(secretKeyVersionReport(db, ring2)).toEqual([
+      { version: 1, rows: 1, status: 'ok', ok: true },
+      { version: 2, rows: 1, status: 'ok', ok: true },
+    ]);
+
+    // Missing key for version 1.
+    const missingV1: KeyRing = { current: 2, keys: new Map([[2, keyB]]) };
+    expect(secretKeyVersionReport(db, missingV1)).toEqual([
+      { version: 1, rows: 1, status: 'no key configured', ok: false },
+      { version: 2, rows: 1, status: 'ok', ok: true },
+    ]);
+
+    // Wrong key for version 1.
+    const wrongV1: KeyRing = { current: 2, keys: new Map([[1, randomBytes(32)], [2, keyB]]) };
+    expect(secretKeyVersionReport(db, wrongV1)).toEqual([
+      { version: 1, rows: 1, status: 'WRONG KEY (1 of 1 fail)', ok: false },
+      { version: 2, rows: 1, status: 'ok', ok: true },
+    ]);
   });
 });

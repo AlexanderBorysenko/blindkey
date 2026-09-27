@@ -6,7 +6,7 @@ import {
   getTotp, openTotpSecret, savePendingTotp, enableTotp, claimTotpStep, deleteTwoFactor,
   replaceRecoveryCodes, listUnusedRecoveryCodes, markRecoveryCodeUsed,
   createChallenge, getChallenge, claimChallengeAttempt, deleteChallenge, purgeExpiredChallenges,
-  rewrapTotpSecrets,
+  rewrapTotpSecrets, totpKeyVersionReport,
 } from '../src/repos/twofactor.js';
 import type { KeyRing } from '../src/config.js';
 
@@ -101,6 +101,55 @@ describe('twofactor repo', () => {
     expect(openTotpSecret(ringOnlyK2, row).equals(secret)).toBe(true);
 
     expect(rewrapTotpSecrets(db, ring2)).toBe(0);
+  });
+
+  it('rewrapTotpSecrets probes rows already on the current version before rewrapping, and refuses a wrong current key without writing anything', () => {
+    const db = openDb(':memory:');
+    const admin = createAdmin(db, 'alex', 'hash');
+    const keyA = randomBytes(32);
+    const ringA: KeyRing = { current: 2, keys: new Map([[2, keyA]]) };
+    savePendingTotp(db, ringA, admin.id, randomBytes(20));
+    const keyB = randomBytes(32);
+    const wrongRing: KeyRing = { current: 2, keys: new Map([[2, keyB]]) };
+    expect(() => rewrapTotpSecrets(db, wrongRing)).toThrow(
+      `key version 2 does not decrypt 2FA secret of admin ${admin.id} — PIDB_MASTER_KEY is not the version 2 key`,
+    );
+    const row = getTotp(db, admin.id)!;
+    expect(row.key_version).toBe(2);
+    expect(rewrapTotpSecrets(db, ringA)).toBe(0);
+  });
+
+  it('totpKeyVersionReport: empty, mixed versions, missing key, wrong key', () => {
+    const db = openDb(':memory:');
+    expect(totpKeyVersionReport(db, { current: 1, keys: new Map([[1, randomBytes(32)]]) })).toEqual([]);
+
+    const k1 = randomBytes(32);
+    const k2 = randomBytes(32);
+    const ring1: KeyRing = { current: 1, keys: new Map([[1, k1]]) };
+    const admin1 = createAdmin(db, 'alex', 'hash');
+    savePendingTotp(db, ring1, admin1.id, randomBytes(20));
+    // The app only ever has one admin (createAdmin enforces that), but the grouping logic under
+    // test just needs a second admin_totp row on a different key version — insert it directly.
+    const admin2Id = Number(db.prepare(`INSERT INTO admin (username, password_hash, created_at) VALUES (?, ?, ?)`).run('sam', 'hash', 0).lastInsertRowid);
+    const ring2: KeyRing = { current: 2, keys: new Map([[1, k1], [2, k2]]) };
+    savePendingTotp(db, ring2, admin2Id, randomBytes(20));
+
+    expect(totpKeyVersionReport(db, ring2)).toEqual([
+      { version: 1, rows: 1, status: 'ok', ok: true },
+      { version: 2, rows: 1, status: 'ok', ok: true },
+    ]);
+
+    const missingV1: KeyRing = { current: 2, keys: new Map([[2, k2]]) };
+    expect(totpKeyVersionReport(db, missingV1)).toEqual([
+      { version: 1, rows: 1, status: 'no key configured', ok: false },
+      { version: 2, rows: 1, status: 'ok', ok: true },
+    ]);
+
+    const wrongV1: KeyRing = { current: 2, keys: new Map([[1, randomBytes(32)], [2, k2]]) };
+    expect(totpKeyVersionReport(db, wrongV1)).toEqual([
+      { version: 1, rows: 1, status: 'WRONG KEY (1 of 1 fail)', ok: false },
+      { version: 2, rows: 1, status: 'ok', ok: true },
+    ]);
   });
 
   it('deleteTwoFactor removes totp, recovery and challenge rows for that admin', () => {

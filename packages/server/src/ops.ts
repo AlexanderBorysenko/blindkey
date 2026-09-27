@@ -1,12 +1,13 @@
-import { mkdirSync, readdirSync, unlinkSync } from 'node:fs';
+import { mkdirSync, readdirSync, unlinkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { openDb, type Db } from './db/connection.js';
 import type { KeyRing, Config } from './config.js';
 import { createAdmin, deleteAllSessions, getAdmin, setAdminPasswordHash } from './repos/admin.js';
 import { getDocument, upsertDocument } from './repos/documents.js';
-import { rewrapAllSecrets } from './repos/secrets.js';
-import { deleteChallengesFor, deleteTwoFactor, resetFactorFailures, rewrapTotpSecrets } from './repos/twofactor.js';
+import { rewrapAllSecrets, secretKeyVersionReport } from './repos/secrets.js';
+import { deleteChallengesFor, deleteTwoFactor, resetFactorFailures, rewrapTotpSecrets, totpKeyVersionReport } from './repos/twofactor.js';
 import { writeAudit } from './repos/audit.js';
 import { hashPassword } from './crypto/passwords.js';
 import { validateNewPassword } from './services/password.js';
@@ -31,6 +32,24 @@ export function runRotateKey(db: Db, ring: KeyRing): { secrets: number; totp: nu
   // One outer transaction: either every secret and every 2FA secret is rewrapped, or nothing is
   // (the README runbook relies on this). Rows already on the current version are skipped, so it is safe to re-run.
   return db.transaction(() => ({ secrets: rewrapAllSecrets(db, ring), totp: rewrapTotpSecrets(db, ring) }))();
+}
+
+/** `pidb-server key-versions` (spec §4): how many rows sit on each key version, and whether they decrypt. */
+export function runKeyVersions(db: Db, ring: KeyRing): { lines: string[]; ok: boolean } {
+  const secrets = secretKeyVersionReport(db, ring);
+  const totp = totpKeyVersionReport(db, ring);
+  if (secrets.length === 0 && totp.length === 0) return { lines: ['no encrypted rows'], ok: true };
+  const lines: string[] = [];
+  let ok = true;
+  for (const r of secrets) {
+    lines.push(`secrets v${r.version}: ${r.rows} rows, ${r.status}`);
+    if (!r.ok) ok = false;
+  }
+  for (const r of totp) {
+    lines.push(`2fa v${r.version}: ${r.rows} rows, ${r.status}`);
+    if (!r.ok) ok = false;
+  }
+  return { lines, ok };
 }
 
 export function runTotpReset(db: Db): string {
@@ -67,12 +86,37 @@ export async function runPasswordReset(db: Db, password: string): Promise<{ user
 }
 
 const BACKUP_RE = /^pidb-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/;
+const STALE_TMP_RE = /^pidb-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite\.tmp$/;
 
-export function runBackup(db: Db, dir: string, keep = 14, now: Date = new Date()): string {
+/** Real integrity check for a just-written backup (spec §4). Overridable in tests via `runBackup`'s `verify` parameter. */
+function verifyBackup(file: string): void {
+  const copy = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    const result = copy.pragma('integrity_check', { simple: true });
+    if (result !== 'ok') throw new Error(`backup integrity check failed: ${result}`);
+  } finally {
+    copy.close();
+  }
+}
+
+export function runBackup(db: Db, dir: string, keep = 14, now: Date = new Date(), verify: (file: string) => void = verifyBackup): string {
   mkdirSync(dir, { recursive: true });
+  // A crashed prior run can leave a temp file behind; it never matches BACKUP_RE, so it would
+  // otherwise sit there forever without counting toward `keep` or getting pruned (Review Focus 5).
+  for (const f of readdirSync(dir)) {
+    if (STALE_TMP_RE.test(f)) unlinkSync(join(dir, f));
+  }
   const stamp = now.toISOString().replace(/\.\d{3}Z$/, '').replace(/:/g, '-');
+  const tmp = join(dir, `pidb-${stamp}.sqlite.tmp`);
   const file = join(dir, `pidb-${stamp}.sqlite`);
-  db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  try {
+    verify(tmp);
+  } catch (err) {
+    unlinkSync(tmp);
+    throw err;
+  }
+  renameSync(tmp, file);
   const existing = readdirSync(dir).filter((f) => BACKUP_RE.test(f)).sort();
   for (const old of existing.slice(0, Math.max(0, existing.length - keep))) unlinkSync(join(dir, old));
   return file;
