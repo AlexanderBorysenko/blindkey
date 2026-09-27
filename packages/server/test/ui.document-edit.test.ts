@@ -99,6 +99,10 @@ describe('ui document editor', () => {
       body_md: '# Hostile\n\n<script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">click</a><p style="color:red">styled</p>\n',
     });
     expect(res.statusCode).toBe(200);
+    // /preview is an htmx partial (no <main>): scope the positive check to the preview container.
+    const preview = res.body.split('<div class="preview doc">')[1]!.split('</div>')[0]!;
+    expect(preview).toContain('<h1>Hostile</h1>');
+    expect(preview).toContain('styled');
     expect(res.body).not.toContain('alert(1)</script>');
     expect(res.body).not.toMatch(/onerror/i);
     expect(res.body).not.toMatch(/javascript:/i);

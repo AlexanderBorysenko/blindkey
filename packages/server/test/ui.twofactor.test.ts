@@ -51,8 +51,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await t.app.close();
-  // eslint-disable-next-line no-console
-  console.log(`ui.twofactor.test.ts: POST /login x${loginCount}, POST /login/2fa x${login2faCount} (per-instance limit 10/min each)`);
+  // R4: the main instance stays within 10/min on each rate-limited route.
+  expect(loginCount).toBeLessThanOrEqual(10);
+  expect(login2faCount).toBeLessThanOrEqual(10);
 });
 
 describe('ui two-factor', () => {

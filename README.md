@@ -238,6 +238,8 @@ docker compose exec server rm -r "/data/pre-restore-<timestamp>"
 
 Every stack start also runs a backup and prunes the oldest by count, so repeated restore attempts push old backups out — copy the ones you care about off the host first.
 
+**Two-factor and restores:** restoring a backup taken before 2FA was enabled brings the server back without 2FA — the enrollment banner reappears, so enroll again. Running an older pidb binary against a 2FA-enabled database ignores 2FA.
+
 ### Rotating the master key
 
 Rotation rewraps every secret's DEK from the old key to a new one, so it needs the whole stack stopped — a server or backup process running against a live database while the key underneath it changes can wrap new secrets with the wrong version, or read the new key labelled as the old one. Secrets created in that window are lost once the old key is discarded, so don't skip the "stop" step:

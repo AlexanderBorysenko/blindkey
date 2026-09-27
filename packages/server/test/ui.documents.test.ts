@@ -73,6 +73,10 @@ describe('ui document view', () => {
   it('strips <script>, on* handlers, style attributes and javascript: links from rendered Markdown', async () => {
     const res = await page('/p/acme/docs/hostile');
     expect(res.statusCode).toBe(200);
+    const main = res.body.split('<main')[1]!.split('</main>')[0]!;
+    const article = main.split('<article class="doc">')[1]!.split('</article>')[0]!;
+    expect(article).toContain('<h1>Hostile</h1>');
+    expect(article).toContain('styled');
     expect(res.body).not.toContain('alert(1)</script>');
     expect(res.body).not.toMatch(/onerror/i);
     expect(res.body).not.toMatch(/javascript:/i);

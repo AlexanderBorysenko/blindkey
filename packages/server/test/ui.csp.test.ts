@@ -81,41 +81,69 @@ describe('strict CSP', () => {
     // 2FA pages, on a separate app instance so the rest of this file keeps a plain,
     // never-enrolled login (existing UI tests log in with a password only).
     const t2 = await makeTestApp();
-    createAdmin(t2.db, 'bob', await hashPassword('pw'));
-    const bobLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
-    const bobSession = bobLogin.cookies.find((c) => c.name === 'pidb_session')!.value;
-    const bobCookies = { pidb_session: bobSession };
-    const bobHome = await t2.app.inject({ method: 'GET', url: '/', cookies: bobCookies });
-    const bobCsrf = /name="csrf" value="([^"]+)"/.exec(bobHome.body)![1]!;
+    try {
+      createAdmin(t2.db, 'bob', await hashPassword('pw'));
+      const bobLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
+      const bobSession = bobLogin.cookies.find((c) => c.name === 'pidb_session')!.value;
+      const bobCookies = { pidb_session: bobSession };
+      const bobHome = await t2.app.inject({ method: 'GET', url: '/', cookies: bobCookies });
+      const bobCsrf = /name="csrf" value="([^"]+)"/.exec(bobHome.body)![1]!;
 
-    assertNoInlineCode((await t2.app.inject({ method: 'GET', url: '/settings/2fa', cookies: bobCookies })).body, '/settings/2fa (off)');
+      assertNoInlineCode((await t2.app.inject({ method: 'GET', url: '/settings/2fa', cookies: bobCookies })).body, '/settings/2fa (off)');
 
-    const startRes = await t2.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: bobCookies, payload: { csrf: bobCsrf } });
-    assertNoInlineCode(startRes.body, 'POST /settings/2fa/start');
+      const startRes = await t2.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: bobCookies, payload: { csrf: bobCsrf } });
+      assertNoInlineCode(startRes.body, 'POST /settings/2fa/start');
 
-    const bobTotp = getTotp(t2.db, 1)!;
-    const bobCode = hotp(openTotpSecret(t2.ring, bobTotp), stepAt(Date.now()));
-    const confirmRes = await t2.app.inject({
-      method: 'POST',
-      url: '/settings/2fa/confirm',
-      cookies: bobCookies,
-      payload: { csrf: bobCsrf, code: bobCode },
-    });
-    assertNoInlineCode(confirmRes.body, 'recovery codes page');
+      const bobTotp = getTotp(t2.db, 1)!;
+      const bobCode = hotp(openTotpSecret(t2.ring, bobTotp), stepAt(Date.now()));
+      const confirmRes = await t2.app.inject({
+        method: 'POST',
+        url: '/settings/2fa/confirm',
+        cookies: bobCookies,
+        payload: { csrf: bobCsrf, code: bobCode },
+      });
+      assertNoInlineCode(confirmRes.body, 'recovery codes page');
 
-    const secondLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
-    const bobChallenge = secondLogin.cookies.find((c) => c.name === 'pidb_2fa')!.value;
-    const challengeRes = await t2.app.inject({ method: 'GET', url: '/login/2fa', cookies: { pidb_2fa: bobChallenge } });
-    assertNoInlineCode(challengeRes.body, '/login/2fa with a live challenge');
+      const secondLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
+      const bobChallenge = secondLogin.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+      const challengeRes = await t2.app.inject({ method: 'GET', url: '/login/2fa', cookies: { pidb_2fa: bobChallenge } });
+      assertNoInlineCode(challengeRes.body, '/login/2fa with a live challenge');
 
-    await t2.app.close();
+      // The "on" state, and the settings error re-render (wrong password).
+      const onRes = await t2.app.inject({ method: 'GET', url: '/settings/2fa', cookies: bobCookies });
+      expect(onRes.body).toContain('Enabled since');
+      assertNoInlineCode(onRes.body, '/settings/2fa (on)');
+      const wrongPw = await t2.app.inject({
+        method: 'POST',
+        url: '/settings/2fa/recovery',
+        cookies: bobCookies,
+        payload: { csrf: bobCsrf, password: 'not-the-password', code: '000000' },
+      });
+      expect(wrongPw.statusCode).toBe(400);
+      expect(wrongPw.body).toContain('Invalid password or code.');
+      assertNoInlineCode(wrongPw.body, 'settings error re-render');
+    } finally {
+      await t2.app.close();
+    }
   });
 
   it('strips script, handlers, styles and javascript: links from rendered Markdown', async () => {
-    const main = (await get('/p/acme/docs/evil')).body.split('<main')[1]!.split('</main>')[0]!;
+    const res = await get('/p/acme/docs/evil');
+    expect(res.statusCode).toBe(200);
+    const main = res.body.split('<main')[1]!.split('</main>')[0]!;
+    const article = main.split('<article class="doc">')[1]!.split('</article>')[0]!;
+    expect(article).toContain('<h1>Evil</h1>');
     expect(main).not.toContain('alert(1)</script>');
     expect(main).not.toMatch(/onerror/i);
     expect(main).not.toMatch(/javascript:/i);
     expect(main).not.toMatch(/style=/i);
+  });
+
+  it('validation-error renders auto-open the dialog (data-open-on-load); normal renders do not', async () => {
+    const dialog = (html: string, id: string) => new RegExp(`<dialog[^>]*id="${id}"[^>]*>`).exec(html)![0];
+    expect(dialog((await get('/')).body, 'new-project')).not.toContain('data-open-on-load');
+    expect(dialog((await get('/tokens')).body, 'new-token')).not.toContain('data-open-on-load');
+    expect(dialog((await post('/projects', { csrf, slug: 'Bad Slug', name: '' })).body, 'new-project')).toContain('data-open-on-load');
+    expect(dialog((await post('/tokens', { csrf, name: '' })).body, 'new-token')).toContain('data-open-on-load');
   });
 });
