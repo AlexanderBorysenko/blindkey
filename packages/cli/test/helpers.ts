@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { closeSync, openSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import type { Scope } from '@pidb/shared';
@@ -143,5 +144,32 @@ export function runCliKeepStdinOpen(
     // Deliberately no .end(): the pipe stays open, as it would for a real
     // caller that hasn't (or won't) close its end.
     child.stdin!.write(stdinInput);
+  });
+}
+
+/**
+ * Run the CLI with stdin redirected from a file (or `/dev/null`), like
+ * `pidb login <url> < answers.txt` or a cron/CI job with no controlling
+ * terminal. This exercises `process.stdin` as an `fs.ReadStream` — a
+ * different runtime shape than the pipe `net.Socket` `runCliAsync` and
+ * `runCliKeepStdinOpen` exercise, and the one on which `stdin.ref`/`.unref`
+ * don't exist at runtime despite the type declaring them unconditionally.
+ */
+export function runCliWithFileStdin(args: string[], env: Record<string, string>, repoRoot: string, stdinFilePath: string): Promise<CliRun> {
+  return new Promise((resolve, reject) => {
+    const fd = openSync(stdinFilePath, 'r');
+    const child = spawn(join(repoRoot, 'node_modules/.bin/tsx'), [join(repoRoot, 'packages/cli/src/cli.ts'), ...args], {
+      env,
+      stdio: [fd, 'pipe', 'pipe'],
+    });
+    closeSync(fd); // the child has its own duplicated fd; ours is no longer needed
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (c: string) => (stdout += c));
+    child.stderr.on('data', (c: string) => (stderr += c));
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
   });
 }

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeServer, runCliAsync, runCliKeepStdinOpen } from './helpers.js';
+import { makeServer, runCliAsync, runCliKeepStdinOpen, runCliWithFileStdin } from './helpers.js';
 import { startEnrollment, confirmEnrollment } from '../../server/src/services/twofactor.js';
 import { getTotp, openTotpSecret } from '../../server/src/repos/twofactor.js';
 import { hotp, stepAt } from '../../server/src/auth/totp.js';
@@ -87,4 +87,38 @@ describe('pidb login — piped (non-interactive) stdin', () => {
     },
     8000,
   );
+
+  it('logs in with stdin redirected from a file (not a pipe)', async () => {
+    // Regression: process.stdin is an fs.ReadStream when redirected from a
+    // file (or /dev/null), and unlike a socket/pipe it has no ref()/unref()
+    // at runtime, even though NodeJS.ReadStream's type declares both
+    // unconditionally. Calling them unguarded throws before any request is
+    // sent — this must work exactly like `pidb login <url> < answers.txt`.
+    const s = await makeServer();
+    try {
+      await s.admin('dana', 'correct horse battery');
+      const dir = mkdtempSync(join(tmpdir(), 'pidb-file-stdin-'));
+      const answersFile = join(dir, 'answers.txt');
+      writeFileSync(answersFile, 'dana\ncorrect horse battery\n');
+      const r = await runCliWithFileStdin(['login', s.url], baseEnv(dir), repoRoot, answersFile);
+      expect(r.stderr).not.toContain('TypeError');
+      expect(r.status).toBe(0);
+      const saved = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { token: string };
+      expect(saved.token).toMatch(/^pidb_/);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('fails cleanly (no TypeError) when stdin is /dev/null', async () => {
+    // No server interaction is expected here: an empty password from a
+    // closed stdin must be rejected before any /auth/token request is made,
+    // so this doesn't spend any of the 5/min rate-limit budget on a server.
+    const dir = mkdtempSync(join(tmpdir(), 'pidb-devnull-'));
+    const r = await runCliWithFileStdin(['login', 'http://127.0.0.1:1', '--username', 'alex'], baseEnv(dir), repoRoot, '/dev/null');
+    expect(r.stderr).not.toContain('TypeError');
+    expect(r.stderr).not.toContain('is not a function');
+    expect(r.stderr).toContain('username and password are required');
+    expect(r.status).not.toBe(0);
+  });
 });

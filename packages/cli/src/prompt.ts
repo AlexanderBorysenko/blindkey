@@ -39,13 +39,24 @@ interface NonTtyLineSource {
 
 let sharedSource: NonTtyLineSource | undefined;
 
+/**
+ * `stdin.ref`/`.unref` exist on a socket or pipe (they hold the event loop
+ * open while reading), but not on a plain file — `process.stdin` is an
+ * `fs.ReadStream` when redirected from a file or `/dev/null`, and calling
+ * either there throws `TypeError: stdin.unref is not a function` at runtime
+ * even though `NodeJS.ReadStream`'s type declares both unconditionally. A
+ * file stream reaches its own EOF and never keeps the process alive, so
+ * skipping the call there is exactly correct, not just a crash workaround.
+ */
+type MaybeRefable = { unref?: () => void; ref?: () => void };
+
 function goIdle(source: NonTtyLineSource): void {
   source.rl.pause();
-  stdin.unref();
+  (stdin as unknown as MaybeRefable).unref?.();
 }
 
 function wake(source: NonTtyLineSource): void {
-  stdin.ref();
+  (stdin as unknown as MaybeRefable).ref?.();
   source.rl.resume();
 }
 
