@@ -95,6 +95,13 @@ describe('ui two-factor', () => {
     expect(res.body).toContain('name="code"');
   });
 
+  it('F5c: the confirm form keeps inputmode numeric', async () => {
+    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { pidb_session: session } });
+    const inputs = main(settings.body).match(/<input name="code"[^>]*>/g) ?? [];
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).toContain('inputmode="numeric"');
+  });
+
   it('2. POST /settings/2fa/start without csrf is rejected', async () => {
     const res = await t.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { pidb_session: session }, payload: {} });
     expect(res.statusCode).toBe(403);
@@ -145,6 +152,16 @@ describe('ui two-factor', () => {
     expect(main(settings.body)).toContain('10 unused recovery codes');
     const home = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
     expect(main(home.body)).not.toContain('Two-factor authentication is off');
+  });
+
+  it('F5c: the recovery/disable code inputs use inputmode text (they accept recovery codes)', async () => {
+    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { pidb_session: session } });
+    const inputs = main(settings.body).match(/<input name="code"[^>]*>/g) ?? [];
+    expect(inputs).toHaveLength(2);
+    for (const input of inputs) {
+      expect(input).toContain('inputmode="text"');
+      expect(input).not.toContain('inputmode="numeric"');
+    }
   });
 
   let challengeCookie = '';
@@ -466,6 +483,31 @@ describe('F4: parallel guesses on one challenge', () => {
       expect(getChallenge(t5.db, ch)).toBeNull();
     } finally {
       await t5.app.close();
+    }
+  });
+});
+
+// F5d: every settings POST is rate limited to 10/min. A dedicated instance deliberately sends
+// an 11th request to each route (the same pattern as http.admin.test.ts for /auth/token).
+describe('F5d: settings POSTs are rate limited', () => {
+  it('the 11th POST within a minute to start, confirm, recovery and disable gets 429', async () => {
+    const t6 = await makeTestApp();
+    try {
+      const admin = createAdmin(t6.db, 'gail', await hashPassword('pw'));
+      const s6 = createSession(t6.db, admin.id, SESSION_TTL_MS, '', '');
+      const home = await t6.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: s6 } });
+      const csrf6 = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
+      for (const route of ['start', 'confirm', 'recovery', 'disable']) {
+        const statuses: number[] = [];
+        for (let i = 0; i < 11; i++) {
+          const r = await t6.app.inject({ method: 'POST', url: `/settings/2fa/${route}`, cookies: { pidb_session: s6 }, payload: { csrf: csrf6, code: '000000', password: 'x' } });
+          statuses.push(r.statusCode);
+        }
+        expect(statuses.slice(0, 10), route).not.toContain(429);
+        expect(statuses[10], route).toBe(429);
+      }
+    } finally {
+      await t6.app.close();
     }
   });
 });

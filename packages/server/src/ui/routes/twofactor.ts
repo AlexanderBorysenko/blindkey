@@ -39,18 +39,21 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
     return { state: 'setup', secret: pending.secret.replace(/(.{4})(?=.)/g, '$1 '), qr: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` };
   }
 
+  // F5d: every settings POST is rate limited (spec §2.5).
+  const limited = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
+
   const page = (req: FastifyRequest, reply: FastifyReply, view: View, error: string | null, status = 200) =>
     reply.status(status).type('text/html').send(renderPage('settings-2fa', { ...pageContext(ctx, req, 'Two-factor'), view, error }));
 
   app.get('/settings/2fa', async (req, reply) => page(req, reply, await currentView(req), null));
 
-  app.post('/settings/2fa/start', async (req, reply) => {
+  app.post('/settings/2fa/start', limited, async (req, reply) => {
     assertCsrf(ctx, req);
     startEnrollment(ctx, adminOf(req).id);
     return page(req, reply, await currentView(req), null);
   });
 
-  app.post('/settings/2fa/confirm', async (req, reply) => {
+  app.post('/settings/2fa/confirm', limited, async (req, reply) => {
     assertCsrf(ctx, req);
     const codes = await confirmEnrollment(ctx, adminActor(req), str(body(req), 'code'), uiSessionId(req) ?? '');
     if (!codes) return page(req, reply, await currentView(req), 'Invalid code.', 400);
@@ -73,7 +76,7 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
     return null;
   }
 
-  app.post('/settings/2fa/recovery', async (req, reply) => {
+  app.post('/settings/2fa/recovery', limited, async (req, reply) => {
     assertCsrf(ctx, req);
     if (!isTotpEnabled(ctx, adminOf(req).id)) return reply.redirect('/settings/2fa', 302);
     const failed = await reauth(req);
@@ -81,7 +84,7 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
     return page(req, reply, { state: 'codes', codes: await regenerateRecoveryCodes(ctx, adminActor(req)) }, null);
   });
 
-  app.post('/settings/2fa/disable', async (req, reply) => {
+  app.post('/settings/2fa/disable', limited, async (req, reply) => {
     assertCsrf(ctx, req);
     if (!isTotpEnabled(ctx, adminOf(req).id)) return reply.redirect('/settings/2fa', 302);
     const failed = await reauth(req);

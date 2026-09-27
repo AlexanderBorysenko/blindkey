@@ -71,7 +71,7 @@ export function isSecondFactorLocked(ctx: AppContext, adminId: number): number |
 async function matchSecondFactor(ctx: AppContext, row: TotpRow, input: string): Promise<SecondFactor | null> {
   const adminId = row.admin_id;
   const trimmed = input.trim();
-  const digits = trimmed;
+  const digits = trimmed.replace(/\s+/g, '');
   if (/^\d{6}$/.test(digits)) {
     const step = verifyTotp(openTotpSecret(ctx.ring, row), digits, row.last_used_step);
     return step !== null && claimTotpStep(ctx.db, adminId, step) ? 'totp' : null;
@@ -87,7 +87,7 @@ async function matchSecondFactor(ctx: AppContext, row: TotpRow, input: string): 
 }
 
 /**
- * Accepts a 6-digit TOTP code or a recovery code (case/space/dash-insensitive).
+ * Accepts a 6-digit TOTP code (whitespace ignored, e.g. `123 456`) or a recovery code (case/space/dash-insensitive).
  * Records the used step / marks the recovery code used. Returns which factor matched.
  * While the admin is locked out it returns null without checking the input. Every failure is
  * counted; the MAX_FACTOR_FAILURES-th locks the factor for FACTOR_LOCK_MS (audited as

@@ -219,4 +219,10 @@ describe('twofactor service', () => {
     disableTwoFactor(ctx, actor);
     expect(isSecondFactorLocked(ctx, admin.id)).toBeNull();
   });
+
+  it('F5b: a TOTP code typed with a space is accepted', async () => {
+    const { ctx, admin } = await enrolled();
+    const code = codeForStep(ctx, admin.id, 1);
+    expect(await verifySecondFactor(ctx, admin.id, ` ${code.slice(0, 3)} ${code.slice(3)} `)).toBe('totp');
+  });
 });

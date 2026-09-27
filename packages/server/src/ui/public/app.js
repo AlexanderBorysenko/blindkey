@@ -175,7 +175,12 @@
     },
     'copy-text': function (btn) {
       var el = document.getElementById(btn.getAttribute('data-copy-target') || '');
-      if (el) copyText(el.textContent, btn);
+      if (!el) return;
+      // A list (the recovery codes) copies one item per line; anything else copies its text.
+      var text = el.tagName === 'OL' || el.tagName === 'UL'
+        ? Array.prototype.map.call(el.querySelectorAll('li'), function (li) { return li.textContent.trim(); }).join('\n')
+        : el.textContent;
+      copyText(text, btn);
     },
     'toggle-lock': toggleLock,
     'move-up': function (btn) { moveRow(btn, -1); },
