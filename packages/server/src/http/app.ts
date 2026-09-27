@@ -21,6 +21,8 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
       level: ctx.logLevel ?? 'info',
       // Secret material must never reach a log line (spec §12): credentials in
       // headers, and the value-bearing paths of every secrets request body.
+      // The MCP JSON-RPC surface carries the same fields nested one level
+      // deeper under params.arguments (spec §5).
       redact: [
         'req.headers.authorization',
         'req.headers.cookie',
@@ -30,11 +32,21 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
         'req.body.*.value',
         'req.body.totp',
         'req.body.code',
+        'req.body.params.arguments.value',
+        'req.body.params.arguments.fields',
+        'req.body.params.arguments.password',
+        'req.body.params.arguments.totp',
+        'req.body.params.arguments.code',
         'body.password',
         'body.value',
         'body.fields',
         'body.totp',
         'body.code',
+        'body.params.arguments.value',
+        'body.params.arguments.fields',
+        'body.params.arguments.password',
+        'body.params.arguments.totp',
+        'body.params.arguments.code',
       ],
       ...(ctx.loggerStream ? { stream: ctx.loggerStream } : {}),
     },

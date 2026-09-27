@@ -71,6 +71,43 @@ describe('logging', () => {
     expect(all).not.toContain('abcde-fghjk');
   });
 
+  it('redacts an MCP JSON-RPC tool-call body (params.arguments.*)', async () => {
+    const { stream, lines } = sink();
+    const db = openDb(':memory:');
+    const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
+    const app: FastifyInstance = await buildApp({ db, ring, logLevel: 'trace', loggerStream: stream });
+    app.post('/api/v1/__log-probe', { config: { public: true } }, async (req, reply) => {
+      req.log.info({ body: req.body }, 'probe');
+      req.log.info({ req: { body: req.body } }, 'probe-req');
+      return reply.send({ ok: true });
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/__log-probe',
+      payload: {
+        jsonrpc: '2.0',
+        method: 'tools/call',
+        params: {
+          name: 'create_secret',
+          arguments: {
+            value: SECRET_VALUE,
+            fields: [{ key: 'password', value: SECRET_VALUE }],
+            password: SECRET_VALUE,
+            totp: '918273',
+            code: 'abcde-fghjk',
+          },
+        },
+      },
+    });
+    await app.close();
+    const all = lines.join('\n');
+    expect(all).toContain('probe-req');
+    expect(all).not.toContain(SECRET_VALUE);
+    expect(all).not.toContain('918273');
+    expect(all).not.toContain('abcde-fghjk');
+    expect(all).toContain('[Redacted]');
+  });
+
   it('logs nothing containing a value for a real secrets request', async () => {
     const { stream, lines } = sink();
     const db = openDb(':memory:');

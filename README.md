@@ -112,6 +112,7 @@ open http://localhost:8080/login
 
 - Set up TOTP two-factor at `/settings/2fa` (linked from the sidebar as "Two-factor"): scan the QR code with an authenticator app, or copy the text secret in by hand, then confirm with a 6-digit code. Confirming shows 10 one-time recovery codes — save them now, since each works only once and they are never shown again. Turning 2FA on signs out your other browser sessions; existing API tokens stay valid, so revoke old admin tokens you no longer need (the `never expires` pill marks the risky ones).
 - Once enabled, the login page asks for a code after the username and password — a 6-digit TOTP code or a recovery code — and `pidb login` prompts for `2FA code:` the same way.
+- 10 wrong codes in a row lock code entry for 15 minutes; `pidb-server 2fa reset` or `pidb-server passwd` clears it.
 - "Regenerate recovery codes" and "Turn off two-factor" (both on `/settings/2fa`) each require the current password plus a fresh second factor (a TOTP code or an unused recovery code), so an admin who lost the authenticator but kept a recovery code can still regenerate codes or turn 2FA off.
 - Emergency reset — if both the authenticator and every recovery code are lost — from a shell on the host: `pidb-server 2fa reset` (Docker: `docker compose run --rm --no-deps server 2fa reset`). It turns two-factor off for the admin account; log back in with the password and set it up again.
 
@@ -123,6 +124,8 @@ open http://localhost:8080/login
 ## Deployment (Docker)
 
 The stack is three services: `server` (this image), `caddy` (automatic TLS, reverse proxy) and `backup` (the same image running a 24-hour backup loop). Everything lives in `docker/`.
+
+Caddy sends every response `Strict-Transport-Security: max-age=31536000` (no `includeSubDomains`, since other subdomains on `PIDB_DOMAIN` are not this stack's to speak for) — once a browser has loaded the site over HTTPS, it refuses to retry over plain HTTP for a year, even if a link or a typed URL asks for `http://`.
 
 ### First run
 
@@ -393,10 +396,13 @@ Migrations run on startup, so no separate step is needed.
 | `PIDB_PORT` / `PIDB_HOST` | `8080` / `0.0.0.0` | |
 | `PIDB_LOG_LEVEL` | `info` | |
 | `PIDB_TRUST_PROXY` | `false` | which proxy hops to trust for client IP: false, true, or a comma-separated IP/CIDR list of trusted proxies (set to the reverse-proxy address in Docker) |
+| `PIDB_ADMIN_USERNAME` / `PIDB_ADMIN_PASSWORD` | — | admin credentials for `pidb-server init` (create) and `pidb-server passwd` (reset); prompted interactively when unset |
 
 ## Scripts
 
 `npm test` · `npm run typecheck` · `npm run build`
+
+`pidb-server` ops CLI (see [Admin UI](#admin-ui) and [Deployment](#deployment-docker) for the recovery flows): `init` · `start` · `passwd` · `2fa reset` · `rotate-key` · `key-versions` · `backup`
 
 ### Error codes
 

@@ -1,14 +1,11 @@
 name: pidb
 
-x-image: &image
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile
-  image: pidb-server:local
-
 services:
   server:
-    <<: *image
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: pidb-server:local
     restart: unless-stopped
     env_file:
       - .env
@@ -45,7 +42,8 @@ services:
       - caddy-config:/config
 
   backup:
-    <<: *image
+    image: pidb-server:local
+    pull_policy: never
     restart: unless-stopped
     depends_on:
       server:
