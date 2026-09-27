@@ -30,7 +30,7 @@ Give Claude Code a stable, safe working context for pidb: it knows the bound pro
 - Tokens UI (`/tokens`): shows an `agent` pill for kind agent and the three new scopes in the create form (for user tokens too).
 
 ### 1.2 Secret use endpoint
-- `POST /api/v1/projects/:slug/secrets/:name/use` and `POST /api/v1/global/secrets/:name/use`, body `{ purpose: 'exec' | 'write' | 'env', fields?: string[] }` → `{ name, fields: Record<string,string> }` (all fields, or the listed ones).
+- `POST /api/v1/projects/:slug/secrets/:name/use` and `POST /api/v1/secrets/:name/use` (global base, existing convention), body `{ purpose: 'exec' | 'write' | 'env', fields?: string[] }` → `{ name, fields: Record<string,string> }` (all fields, or the listed ones).
 - Allowed with `secrets:use` or `secrets:reveal`. Audit `secret.used` per request: target secret, meta `{ purpose, fields: [keys], agent: bool }` — never values.
 - The existing reveal endpoints (`GET .../fields`, `GET .../fields/:key` for sensitive fields) keep requiring `secrets:reveal` — so an agent token cannot read a value outside the use endpoint, and `pidb secret get --print` fails server-side for it.
 - Rate limit 60/min per token-less IP bucket as other secret routes (reuse existing config if any; else `{max: 120, timeWindow: '1 minute'}`).
