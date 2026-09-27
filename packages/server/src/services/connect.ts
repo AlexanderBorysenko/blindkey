@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { z } from 'zod';
 import { AGENT_SCOPES, agentScopesSchema, type ConnectStartInput, type Scope } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
 import type { Actor } from '../auth/principal.js';
@@ -25,6 +26,9 @@ const USER_CODE_ALPHABET = 'BCDFGHJKLMNPQRSTVWXZ';
 const DEVICE_CODE_TTL_MS = 10 * 60_000; // expires_in: 600
 const POLL_INTERVAL_S = 3;
 const MAX_CODE_ATTEMPTS = 5;
+
+/** The approve form's `expires_days` field: coerced from the submitted string, same bounds as the start body. */
+const expiresDaysSchema = z.coerce.number().int().min(1).max(365);
 
 function randomUserCodePart(len: number): string {
   let s = '';
@@ -197,32 +201,47 @@ export function viewConnectRequest(ctx: AppContext, code: string): ConnectView {
 }
 
 /**
- * `POST /connect/approve`: requires >=1 valid scope and >=1 known project. Scopes are validated
- * against `AGENT_SCOPES` here regardless of what was originally requested (Review: a tampered
- * form cannot add `admin`/`secrets:reveal`/`secrets:write` — those are not valid members of
- * `agentScopesSchema` and fail parsing outright, so the request is rejected, not silently filtered).
+ * `POST /connect/approve`: requires >=1 valid scope and >=1 known project, and a 1-365 day expiry
+ * (editable by the approver — prefilled with the request's own `expires_days`, but the approver
+ * may shorten or lengthen it before granting). Scopes are validated against `AGENT_SCOPES` here
+ * regardless of what was originally requested (Review: a tampered form cannot add
+ * `admin`/`secrets:reveal`/`secrets:write` — those are not valid members of `agentScopesSchema`
+ * and fail parsing outright, so the request is rejected, not silently filtered). Submitted scopes
+ * and projects are de-duplicated (a repeated checkbox value, tampered or not, is stored once).
  */
-export function approveConnect(ctx: AppContext, actor: Actor, code: string, scopeInputs: string[], projectSlugInputs: string[]): void {
+export function approveConnect(
+  ctx: AppContext,
+  actor: Actor,
+  code: string,
+  scopeInputs: string[],
+  projectSlugInputs: string[],
+  expiresDaysInput: string,
+): void {
   const row = mustPendingConnectRequest(ctx, code);
   const parsedScopes = agentScopesSchema.safeParse(scopeInputs);
   if (!parsedScopes.success) throw new ValidationError(parsedScopes.error.issues);
+  const scopes = Array.from(new Set(parsedScopes.data));
+  const seenProjectIds = new Set<number>();
   const projectIds: number[] = [];
   const matchedSlugs: string[] = [];
   for (const slug of projectSlugInputs) {
     const p = getProjectBySlug(ctx.db, slug);
-    if (p) {
+    if (p && !seenProjectIds.has(p.id)) {
+      seenProjectIds.add(p.id);
       projectIds.push(p.id);
       matchedSlugs.push(slug);
     }
   }
   if (projectIds.length === 0) throw new ValidationError([{ path: ['projects'], message: 'at least one project is required' }]);
-  const ok = approveConnectRequest(ctx.db, row.id, { scopes: parsedScopes.data, projectIds, expiresDays: row.expires_days });
+  const parsedExpiresDays = expiresDaysSchema.safeParse(expiresDaysInput);
+  if (!parsedExpiresDays.success) throw new ValidationError(parsedExpiresDays.error.issues);
+  const ok = approveConnectRequest(ctx.db, row.id, { scopes, projectIds, expiresDays: parsedExpiresDays.data });
   if (!ok) throw new NotFoundError('connect request not found or already decided');
   auditAs(ctx, actor, {
     action: 'connect.approved',
     target_type: 'connect_request',
     target_id: row.id,
-    meta: { name: row.name, scopes: parsedScopes.data, projects: matchedSlugs },
+    meta: { name: row.name, scopes, projects: matchedSlugs, expires_days: parsedExpiresDays.data },
   });
 }
 

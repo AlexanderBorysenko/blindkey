@@ -11,7 +11,8 @@
 <% } else { %>
 <div class="panel">
   <h3><%= it.row.name %></h3>
-  <p class="note">Requested from <%= it.row.ip %> · <%= it.row.user_agent %></p>
+  <p class="note">Code <code class="mono"><%= it.row.user_code %></code> — confirm it matches the code in your terminal.</p>
+  <p class="note">Requested <time datetime="<%= it.fmt.iso(it.row.created_at) %>"><%= it.fmt.ago(it.row.created_at) %></time> from <%= it.row.ip %> · <%= it.row.user_agent %></p>
   <p class="note">A project-scoped token can also see global documents and secrets.</p>
 
   <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
@@ -23,24 +24,24 @@
     <fieldset class="chip-grid">
       <legend>Scopes</legend>
       <% it.allScopes.forEach(function (s) { %>
-      <label class="chip"><input type="checkbox" name="scopes" value="<%= s %>"<%~ it.row.scopes.includes(s) ? ' checked' : '' %> /> <%= s %></label>
+      <label class="chip"><input type="checkbox" name="scopes" value="<%= s %>"<%~ it.selected.scopes.includes(s) ? ' checked' : '' %> /> <%= s %></label>
       <% }) %>
     </fieldset>
 
     <p class="note">
       Requested projects:
-      <% if (it.row.projects.length === 0) { %>(none — all-project scope)<% } %>
+      <% if (it.row.projects.length === 0) { %>(none requested — pick at least one)<% } %>
       <% it.row.projects.forEach(function (slug, i) { %><%= i > 0 ? ', ' : '' %><%= slug %><% if (!it.allProjects.some(function (p) { return p.slug === slug; })) { %> (unknown)<% } %><% }) %>
     </p>
 
     <fieldset class="chip-grid">
       <legend>Projects</legend>
       <% it.allProjects.forEach(function (p) { %>
-      <label class="chip"><input type="checkbox" name="projects" value="<%= p.slug %>"<%~ it.row.projects.includes(p.slug) ? ' checked' : '' %> /> <%= p.slug %></label>
+      <label class="chip"><input type="checkbox" name="projects" value="<%= p.slug %>"<%~ it.selected.projects.includes(p.slug) ? ' checked' : '' %> /> <%= p.slug %></label>
       <% }) %>
     </fieldset>
 
-    <p class="note">Expires in <%= it.row.expires_days %> days.</p>
+    <label>Expires in (days) <input type="number" name="expires_days" min="1" max="365" value="<%= it.selected.expiresDays %>" required /></label>
 
     <div class="actions">
       <button class="btn primary" type="submit">Approve</button>

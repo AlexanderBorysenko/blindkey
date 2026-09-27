@@ -50,7 +50,15 @@ describe('ui connect: GET /connect requires an admin session and preserves next 
   it('a next pointing off-site or to another path is ignored: login lands on / instead', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
-    for (const bad of ['https://evil.example.com/connect', '//evil.example.com', '/\\evil', '/tokens', '/connectXevil']) {
+    for (const bad of [
+      'https://evil.example.com/connect',
+      '//evil.example.com',
+      '/\\evil',
+      '/tokens',
+      '/connectXevil',
+      '/connect?code=A\x7f', // DEL — printable-ASCII check must reject it, not 500 on the redirect
+      '/connect?code=Aÿ', // above 0xff
+    ]) {
       const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw', next: bad } });
       expect(res.statusCode, bad).toBe(302);
       expect(res.headers.location, bad).toBe('/');
@@ -124,5 +132,105 @@ describe('ui connect: the approve page', () => {
     const t = await makeTestApp();
     const res = await t.app.inject({ method: 'GET', url: '/connect?code=ZZZZ-ZZZZ' });
     expect(res.statusCode).toBe(302);
+  });
+
+  it('shows the user_code with a confirmation hint, and the request age', async () => {
+    const t = await makeTestApp();
+    createAdmin(t.db, 'alex', await hashPassword('pw'));
+    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
+    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const { user_code: userCode } = await startConnect(t);
+
+    const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { pidb_session: session } });
+    const body = main(res.body);
+    expect(body).toContain(userCode);
+    expect(body).toContain('confirm it matches the code in your terminal');
+    expect(body).toMatch(/just now|ago/);
+  });
+
+  it('an empty requested-projects list says "pick at least one" rather than "all-project scope"', async () => {
+    const t = await makeTestApp();
+    createAdmin(t.db, 'alex', await hashPassword('pw'));
+    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
+    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const { user_code: userCode } = await startConnect(t, { name: 'x', scopes: ['projects:read'], projects: [] });
+
+    const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { pidb_session: session } });
+    const body = main(res.body);
+    expect(body).toContain('none requested — pick at least one');
+    expect(body).not.toContain('all-project scope');
+  });
+});
+
+describe('ui connect: approve/deny outcomes', () => {
+  async function loginAndStart(t: Awaited<ReturnType<typeof makeTestApp>>) {
+    createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.project('alpha');
+    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
+    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const page = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
+    const { user_code: userCode } = await startConnect(t, { name: 'claude', scopes: ['projects:read'], projects: ['alpha'] });
+    return { session, csrf, userCode };
+  }
+
+  it('approve redirects to /tokens?done=approved and the tokens page shows the flash', async () => {
+    const t = await makeTestApp();
+    const { session, csrf, userCode } = await loginAndStart(t);
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/connect/approve',
+      cookies: { pidb_session: session },
+      payload: { csrf, code: userCode, scopes: ['projects:read'], projects: ['alpha'], expires_days: '90' },
+    });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('/tokens?done=approved');
+    const tokens = await t.app.inject({ method: 'GET', url: res.headers.location as string, cookies: { pidb_session: session } });
+    // The flash toast is rendered by the layout outside <main> (spec: same mechanism as
+    // done=saved/revoked elsewhere), so it's checked against the full body, not the main() slice.
+    expect(tokens.body).toContain('class="toast"');
+    expect(tokens.body).toContain('Approved');
+  });
+
+  it('deny redirects to /tokens?done=denied and the tokens page shows the flash', async () => {
+    const t = await makeTestApp();
+    const { session, csrf, userCode } = await loginAndStart(t);
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/connect/deny',
+      cookies: { pidb_session: session },
+      payload: { csrf, code: userCode },
+    });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('/tokens?done=denied');
+    const tokens = await t.app.inject({ method: 'GET', url: res.headers.location as string, cookies: { pidb_session: session } });
+    expect(tokens.body).toContain('class="toast"');
+    expect(tokens.body).toContain('Denied');
+  });
+
+  it('on a validation error, the re-rendered form keeps what the approver ticked, not the original request', async () => {
+    const t = await makeTestApp();
+    createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.project('alpha');
+    t.project('beta');
+    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
+    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const page = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
+    // Requested only projects:read/alpha, but the approver ticks docs:read/beta and drops all
+    // projects (triggering the "at least one project" validation error).
+    const { user_code: userCode } = await startConnect(t, { name: 'claude', scopes: ['projects:read'], projects: ['alpha'] });
+
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/connect/approve',
+      cookies: { pidb_session: session },
+      payload: { csrf, code: userCode, scopes: ['docs:read'], projects: [], expires_days: '30' },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = main(res.body);
+    expect(body).toContain('value="docs:read" checked');
+    expect(body).not.toContain('value="projects:read" checked');
+    expect(body).toContain('value="30"');
   });
 });

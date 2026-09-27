@@ -31,12 +31,13 @@ async function approve(
   code: string,
   scopes: string[],
   projects: string[],
+  expiresDays: string | number = '90',
 ) {
   return t.app.inject({
     method: 'POST',
     url: '/connect/approve',
     cookies: { pidb_session: session },
-    payload: { csrf, code, scopes, projects },
+    payload: { csrf, code, scopes, projects, expires_days: String(expiresDays) },
   });
 }
 
@@ -56,6 +57,19 @@ describe('device flow: start (spec §1.3)', () => {
     expect(b.verification_url.endsWith(`code=${b.user_code}`)).toBe(true);
     expect(b.expires_in).toBe(600);
     expect(b.interval).toBe(3);
+  });
+
+  it('verification_url keeps the request host including its port (Fastify req.hostname would drop it)', async () => {
+    const t = await makeTestApp();
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/api/v1/connect/start',
+      headers: { host: 'localhost:8080' },
+      payload: { name: 'x', scopes: ['projects:read'] },
+    });
+    expect(res.statusCode).toBe(201);
+    const b = res.json();
+    expect(b.verification_url).toBe(`http://localhost:8080/connect?code=${b.user_code}`);
   });
 
   it('accepts an unknown project slug — kept, not an error', async () => {
@@ -207,6 +221,59 @@ describe('device flow: approve then poll issues a token (spec §1.3)', () => {
     expect(poll1.statusCode).toBe(428); // still only pending — the tampered approve never took effect
   });
 
+  it('a tampered form cannot add secrets:reveal', async () => {
+    const t = await makeTestApp();
+    const { session, csrf, userCode } = await setupApprovedPoll(t);
+    const res = await approve(t, session, csrf, userCode, ['projects:read', 'secrets:reveal'], ['alpha']);
+    expect(res.statusCode).toBe(400);
+    expect(getConnectRequestByUserCode(t.db, userCode)!.status).toBe('pending');
+  });
+
+  it('a tampered form cannot add secrets:write', async () => {
+    const t = await makeTestApp();
+    const { session, csrf, userCode } = await setupApprovedPoll(t);
+    const res = await approve(t, session, csrf, userCode, ['projects:read', 'secrets:write'], ['alpha']);
+    expect(res.statusCode).toBe(400);
+    expect(getConnectRequestByUserCode(t.db, userCode)!.status).toBe('pending');
+  });
+
+  it('approving an already-expired pending request errors and issues no token', async () => {
+    const t = await makeTestApp();
+    const { session, csrf, userCode, deviceCode } = await setupApprovedPoll(t);
+    t.db.prepare(`UPDATE connect_requests SET expires_at = ? WHERE user_code = ?`).run(Date.now() - 1000, userCode);
+    const res = await approve(t, session, csrf, userCode, ['projects:read'], ['alpha']);
+    expect(res.statusCode).toBe(404);
+    const pollRes = await poll(t, deviceCode);
+    expect(pollRes.statusCode).toBe(410); // the row was never approved (still pending) and is expired
+    const tokens = t.db.prepare(`SELECT COUNT(*) as n FROM api_tokens WHERE kind = 'agent'`).get() as { n: number };
+    expect(tokens.n).toBe(0);
+  });
+
+  it('the approver can edit the expiry: an approved expiry different from the requested one is reflected in the issued token', async () => {
+    const t = await makeTestApp();
+    const { session, csrf, userCode, deviceCode } = await setupApprovedPoll(t);
+    const before = Date.now();
+    const approveRes = await approve(t, session, csrf, userCode, ['projects:read'], ['alpha'], 5);
+    expect(approveRes.statusCode).toBe(302);
+    const pollRes = await poll(t, deviceCode);
+    expect(pollRes.statusCode).toBe(200);
+    const expiresAt = pollRes.json().expires_at as number;
+    const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
+    // Well short of the requested 90-day default, and consistent with a ~5 day grant.
+    expect(expiresAt).toBeLessThan(before + fiveDaysMs + 60_000);
+    expect(expiresAt).toBeGreaterThan(before + fiveDaysMs - 60_000);
+  });
+
+  it('an out-of-range edited expiry is rejected with 400 and the request stays pending', async () => {
+    const t = await makeTestApp();
+    const { session, csrf, userCode } = await setupApprovedPoll(t);
+    for (const bad of [0, -1, 366, 100_000]) {
+      const res = await approve(t, session, csrf, userCode, ['projects:read'], ['alpha'], bad);
+      expect(res.statusCode, String(bad)).toBe(400);
+      expect(getConnectRequestByUserCode(t.db, userCode)!.status, String(bad)).toBe('pending');
+    }
+  });
+
   it('approve then poll issues an agent-kind token with the approved scopes/projects/expiry, and deletes the request', async () => {
     const t = await makeTestApp();
     const { session, csrf, userCode, deviceCode } = await setupApprovedPoll(t);
@@ -271,6 +338,18 @@ describe('device flow: approve then poll issues a token (spec §1.3)', () => {
     const tokens = t.db.prepare(`SELECT COUNT(*) as n FROM api_tokens WHERE kind = 'agent'`).get() as { n: number };
     expect(tokens.n).toBe(1);
     expect(listAudit(t.db, { action: 'connect.token_issued' })).toHaveLength(1);
+  });
+
+  it('de-duplicates a repeated scope or project value in the submitted form', async () => {
+    const t = await makeTestApp();
+    const { session, csrf, userCode, deviceCode } = await setupApprovedPoll(t);
+    const res = await approve(t, session, csrf, userCode, ['projects:read', 'projects:read'], ['alpha', 'alpha']);
+    expect(res.statusCode).toBe(302);
+    const pollRes = await poll(t, deviceCode);
+    expect(pollRes.statusCode).toBe(200);
+    const b = pollRes.json();
+    expect(b.scopes).toEqual(['projects:read']);
+    expect(b.projects).toEqual(['alpha']);
   });
 
   it('writes a connect.approved audit row and a connect.token_issued audit row with no device_code or token inside', async () => {

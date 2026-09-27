@@ -48,19 +48,22 @@ export function adminActor(req: FastifyRequest): Actor {
 }
 
 const SAFE_NEXT_RE = /^\/connect(?:[/?]|$)/;
+// Printable ASCII only (0x21-0x7e): excludes every control character (0x00-0x20, including
+// space), DEL (0x7f), and anything above 0xff — a DEL or non-ASCII byte in the Location header
+// otherwise makes Node's http module throw ERR_INVALID_CHAR, turning a bad `next` into a 500.
+const PRINTABLE_ASCII_RE = /^[\x21-\x7e]+$/;
 
 /**
  * A `next` redirect target is accepted only when it is a same-origin relative path that starts
- * with `/connect` (spec §1.3: the only flow that needs to survive the login/2FA redirect).
- * Anything else — an absolute URL, a protocol-relative `//host/...`, a backslash trick like
- * `/\evil`, a path outside `/connect`, or anything carrying a control character (defends against
- * header-injection via the final redirect) — is rejected outright rather than partially
- * sanitized, so a bad `next` is silently dropped instead of guessed at.
+ * with `/connect` (spec §1.3: the only flow that needs to survive the login/2FA redirect) and
+ * contains nothing but printable ASCII. Anything else — an absolute URL, a protocol-relative
+ * `//host/...`, a backslash trick like `/\evil`, a path outside `/connect`, or a control/DEL/
+ * non-ASCII character — is rejected outright rather than partially sanitized, so a bad `next` is
+ * silently dropped instead of guessed at.
  */
 export function safeNext(raw: unknown): string | null {
   if (typeof raw !== 'string' || raw.length === 0 || raw.length > 2000) return null;
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\\]/.test(raw)) return null;
+  if (!PRINTABLE_ASCII_RE.test(raw)) return null;
   return SAFE_NEXT_RE.test(raw) ? raw : null;
 }
 
