@@ -161,7 +161,7 @@ docker compose up -d
 docker compose logs -f server
 ```
 
-`init` prompts for the admin password with hidden input (it is never echoed and never passed as `-e PIDB_ADMIN_PASSWORD=...`, which would land in shell history and the process list).
+`init` prompts for the admin password with hidden input (it is never echoed and never passed as `-e PIDB_ADMIN_PASSWORD=...`, which would land in shell history and the process list). The password must be 12–1024 characters; a shorter one is rejected — just run `init` again.
 
 Then open `https://$PIDB_DOMAIN/login`. Point the CLI at the same host with `pidb login https://$PIDB_DOMAIN`.
 
