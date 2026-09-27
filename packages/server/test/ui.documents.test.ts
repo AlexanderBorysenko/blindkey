@@ -37,6 +37,13 @@ beforeAll(async () => {
     category: 'notes',
     body_md: 'Ref one {{secret:foo)(bar}} and ref two {{secret:foo]bar}}.\n',
   });
+  upsertDocument(t.db, {
+    projectId: id,
+    slug: 'hostile',
+    title: 'Hostile',
+    category: 'notes',
+    body_md: '# Hostile\n\n<script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">click</a><p style="color:red">styled</p>\n',
+  });
 });
 afterAll(async () => {
   await t.app.close();
@@ -58,6 +65,19 @@ describe('ui document view', () => {
   it('sanitizes dangerous Markdown', async () => {
     const res = await page('/p/acme/docs/deploy');
     expect(res.body).not.toContain('onerror');
+  });
+
+  // Regression coverage for spec §3.3: sanitize-html strips <script>, on* handlers, style
+  // attributes and javascript: links from rendered Markdown (verified 2026-09-13; no code change
+  // in this task, but the CSP now depends on this holding for every document, not just this one).
+  it('strips <script>, on* handlers, style attributes and javascript: links from rendered Markdown', async () => {
+    const res = await page('/p/acme/docs/hostile');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('alert(1)</script>');
+    expect(res.body).not.toMatch(/onerror/i);
+    expect(res.body).not.toMatch(/javascript:/i);
+    expect(res.body).not.toMatch(/style=/i);
+    expect(res.body).toContain('<h1>Hostile</h1>');
   });
 
   it('never renders a secret value', async () => {

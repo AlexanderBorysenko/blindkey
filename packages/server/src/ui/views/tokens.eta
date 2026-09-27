@@ -3,7 +3,7 @@
     <h1>API tokens</h1>
   </div>
   <div class="actions">
-    <button class="btn primary" type="button" onclick="document.getElementById('new-token').showModal()">
+    <button class="btn primary" type="button" data-open-dialog="new-token">
       <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New token
     </button>
   </div>
@@ -16,7 +16,7 @@
     <div class="kv-row">
       <div class="mono field-key">Token</div>
       <div><span class="field-value" id="new-token-value"><%= it.created.token %></span></div>
-      <div><button class="btn sm ghost" type="button" onclick="copyNewToken(this)">Copy</button></div>
+      <div><button class="btn sm ghost" type="button" data-action="copy-new-token">Copy</button></div>
     </div>
   </div>
   <p class="note">Copy it now: pidb stores only a hash, so this value cannot be shown again.</p>
@@ -32,7 +32,7 @@
         <td colspan="9">
           <div class="empty">
             <p>No API tokens yet.</p>
-            <button class="btn primary" type="button" onclick="document.getElementById('new-token').showModal()">New token</button>
+            <button class="btn primary" type="button" data-open-dialog="new-token">New token</button>
           </div>
         </td>
       </tr>
@@ -49,14 +49,14 @@
         <td><% if (t.revoked_at === null) { %><span class="pill status-active">active</span><% } else { %><span class="pill status-archived">revoked</span><% } %></td>
         <td>
           <% if (t.revoked_at === null) { %>
-          <button class="btn sm danger" type="button" onclick="document.getElementById('revoke-<%= t.id %>').showModal()">Revoke</button>
+          <button class="btn sm danger" type="button" data-open-dialog="revoke-<%= t.id %>">Revoke</button>
           <dialog class="confirm" id="revoke-<%= t.id %>">
             <h2>Revoke token</h2>
             <p>Revoke <%= t.name %>? Clients using it stop working immediately.</p>
             <form method="post" action="/tokens/<%= t.id %>/revoke">
               <input type="hidden" name="csrf" value="<%= it.csrf %>" />
               <div class="actions">
-                <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+                <button class="btn" type="button" data-close-dialog>Cancel</button>
                 <button class="btn danger solid" type="submit">Revoke</button>
               </div>
             </form>
@@ -69,7 +69,7 @@
   </table>
 </div>
 
-<dialog class="confirm" id="new-token">
+<dialog class="confirm" id="new-token"<%~ it.error ? ' data-open-on-load' : '' %>>
   <h2>New token</h2>
   <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
   <form method="post" action="/tokens" class="form-grid">
@@ -90,29 +90,8 @@
     <label>Expires in (days) <input name="days" type="number" min="1" value="90" /></label>
     <label class="check"><input type="checkbox" name="never" /> Never expires</label>
     <div class="actions">
-      <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn" type="button" data-close-dialog>Cancel</button>
       <button class="btn primary" type="submit">Create token</button>
     </div>
   </form>
 </dialog>
-<% if (it.error) { %>
-<script>
-  (function () {
-    var dlg = document.getElementById('new-token');
-    if (dlg && !dlg.open) dlg.showModal();
-  })();
-</script>
-<% } %>
-<% if (it.created) { %>
-<script>
-  function copyNewToken(btn) {
-    var el = document.getElementById('new-token-value');
-    if (!el) return;
-    navigator.clipboard.writeText(el.textContent).then(function () {
-      var original = btn.textContent;
-      btn.textContent = 'Copied';
-      setTimeout(function () { btn.textContent = original; }, 1500);
-    });
-  }
-</script>
-<% } %>

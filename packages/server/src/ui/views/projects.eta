@@ -3,7 +3,7 @@
     <h1>Projects</h1>
   </div>
   <div class="actions">
-    <button class="btn primary" type="button" onclick="document.getElementById('new-project').showModal()">
+    <button class="btn primary" type="button" data-open-dialog="new-project">
       <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New project
     </button>
   </div>
@@ -19,7 +19,7 @@
 <% if (it.projects.length === 0) { %>
 <div class="empty">
   <p><% if (it.status) { %>No <%= it.status %> projects.<% } else { %>No projects yet.<% } %></p>
-  <button class="btn primary" type="button" onclick="document.getElementById('new-project').showModal()">New project</button>
+  <button class="btn primary" type="button" data-open-dialog="new-project">New project</button>
 </div>
 <% } else { %>
 <div class="table-wrap">
@@ -42,7 +42,7 @@
 </div>
 <% } %>
 
-<dialog class="confirm" id="new-project">
+<dialog class="confirm" id="new-project"<%~ it.error ? ' data-open-on-load' : '' %>>
   <h2>New project</h2>
   <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
   <form method="post" action="/projects" class="form-grid">
@@ -59,16 +59,8 @@
     <label>Tags (comma separated) <input name="tags" value="<%= it.form.tags %>" /></label>
     <label>Summary <textarea name="summary" rows="3"><%= it.form.summary %></textarea></label>
     <div class="actions">
-      <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn" type="button" data-close-dialog>Cancel</button>
       <button class="btn primary" type="submit">Create project</button>
     </div>
   </form>
 </dialog>
-<% if (it.error) { %>
-<script>
-  (function () {
-    var dlg = document.getElementById('new-project');
-    if (dlg && !dlg.open) dlg.showModal();
-  })();
-</script>
-<% } %>

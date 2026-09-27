@@ -20,11 +20,14 @@ function assetRoots(): string[] {
 
 export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise<void> {
   // The UI serves its own scripts and styles only; htmx and the Plex fonts come from /assets.
+  // No inline scripts, handlers or style attributes are ever rendered: all client behaviour
+  // lives in the delegated, CSP-safe /assets/app.js (see src/ui/public/app.js).
   const CSP = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
+    "style-src 'self'",
     "img-src 'self' data:",
+    "object-src 'none'",
     "form-action 'self'",
     "frame-ancestors 'none'",
     "base-uri 'none'",

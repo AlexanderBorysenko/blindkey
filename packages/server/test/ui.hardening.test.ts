@@ -32,6 +32,7 @@ describe('ui hardening', () => {
     const csp = String(res.headers['content-security-policy'] ?? '');
     expect(csp).toContain("default-src 'self'");
     expect(csp).not.toContain('unsafe-eval');
+    expect(csp).not.toContain('unsafe-inline');
     expect(res.headers['x-content-type-options']).toBe('nosniff');
     expect(res.headers['referrer-policy']).toBe('same-origin');
     expect(res.headers['x-frame-options']).toBe('DENY');

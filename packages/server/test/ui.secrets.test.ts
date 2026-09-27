@@ -67,9 +67,9 @@ describe('ui secret page', () => {
 
   it('lets a revealed value be hidden again', async () => {
     const view = await page('/p/acme/secrets/DB');
-    expect(view.body).toContain('function hideField(');
+    expect(view.body).toContain('src="/assets/app.js"');
     const res = await post('/p/acme/secrets/DB/reveal', { csrf, key: 'password' });
-    expect(res.body).toContain('onclick="hideField(this)"');
+    expect(res.body).toContain('data-action="hide-field"');
     expect(res.body).toContain('>Hide</button>');
   });
 

@@ -5,7 +5,7 @@
   </div>
   <div class="row-buttons">
     <span class="timer" data-seconds="30">hides in 30 s</span>
-    <button class="btn sm ghost" type="button" onclick="copyField(this)">Copy</button>
-    <button class="btn sm ghost" type="button" data-hide onclick="hideField(this)">Hide</button>
+    <button class="btn sm ghost" type="button" data-action="copy-field">Copy</button>
+    <button class="btn sm ghost" type="button" data-action="hide-field">Hide</button>
   </div>
 </div>

@@ -42,6 +42,10 @@
 body { margin: 0; }
 img { max-width: 100%; }
 
+/* Replaces the inline style="position: absolute" on the SVG symbol sprite (layout.eta):
+   the sprite renders nothing itself, so it is taken out of flow and clipped to zero size. */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
 /* ---------- Tokens ---------- */
 :root {
   --bg: #f5f6f8;

@@ -86,7 +86,12 @@ describe('secret page: recent access panel', () => {
     expect(res.body).toContain('class="kv-row revealed"');
     expect(res.body).toContain('data-seconds="30"');
     expect(res.body).toContain('>Hide</button>');
-    expect(res.body).toContain('onclick="hideField(this)"');
+    // Not in the brief's enumerated "may change" list, but this assertion checks the same
+    // hide-field markup as ui.secrets.test.ts's "lets a revealed value be hidden again" test
+    // (which the brief DOES list), and Step 4 mandates converting every onclick in
+    // partials/revealed.eta to data-action="hide-field" — this literal string cannot survive
+    // that conversion. Kept its intent: asserting the hide-field hook is present on the button.
+    expect(res.body).toContain('data-action="hide-field"');
   });
 
   it('(f) the secret page has exactly one masked-row template for the sensitive field, none for the non-sensitive one', async () => {
@@ -102,13 +107,13 @@ describe('secret page: recent access panel', () => {
   });
 
   it('(g) hideField calls htmx.process on the restored row (source-level: JS is not executed in these tests)', async () => {
-    const view = await page('/p/acme/secrets/DB');
-    expect(view.body).toContain('htmx.process(clone)');
+    const appJs = await t.app.inject({ method: 'GET', url: '/assets/app.js' });
+    expect(appJs.body).toContain('htmx.process(clone)');
   });
 
   it('(h) copy reads the value element directly, not a container with surrounding whitespace', async () => {
-    const view = await page('/p/acme/secrets/DB');
-    expect(view.body).toContain("row.querySelector('.field-value')");
+    const appJs = await t.app.inject({ method: 'GET', url: '/assets/app.js' });
+    expect(appJs.body).toContain("querySelector('.field-value')");
   });
 
   it('(i) cliRef is a runnable, POSIX single-quoted pidb secret env command', async () => {

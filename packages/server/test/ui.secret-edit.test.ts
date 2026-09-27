@@ -19,7 +19,7 @@ describe('secret-edit view: hint keys are embedded safely', () => {
       error: null,
       form: { name: '', description: '', tags: '', rows: [{ key: '', value: '', sensitive: true }] },
     });
-    expect(html).toContain('a\\u003c/script>b');
+    expect(html).toContain('data-hint-keys="[&quot;a&lt;/script&gt;b&quot;]"');
     expect(html).not.toContain('a</script>b');
   });
 });
@@ -264,8 +264,8 @@ describe('ui secret edit', () => {
     const res = await page('/p/acme/secrets/EditProbe/edit');
     expect(res.body).toMatch(/<textarea name="value"/);
     expect(res.body).not.toMatch(/<input name="value"/);
-    expect(res.body).toContain('moveRow(this, -1)');
-    expect(res.body).toContain('moveRow(this, 1)');
+    expect(res.body).toContain('data-action="move-up"');
+    expect(res.body).toContain('data-action="move-down"');
   });
 
   it('persists the submitted row order even for rows whose value box is empty', async () => {

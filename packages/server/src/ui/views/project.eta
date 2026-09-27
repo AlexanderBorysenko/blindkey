@@ -11,11 +11,11 @@
     </div>
   </div>
   <div class="actions">
-    <button class="btn primary" type="button" onclick="document.getElementById('edit-project').showModal()">Edit project</button>
+    <button class="btn primary" type="button" data-open-dialog="edit-project">Edit project</button>
     <details class="menu">
       <summary class="btn ghost" aria-label="More actions">⋯</summary>
       <div class="menu-list">
-        <button class="btn ghost danger" type="button" onclick="document.getElementById('delete-project').showModal()">Delete project…</button>
+        <button class="btn ghost danger" type="button" data-open-dialog="delete-project">Delete project…</button>
       </div>
     </details>
   </div>
@@ -104,7 +104,7 @@
     <label>Tags (comma separated) <input name="tags" value="<%= it.project.tags.join(', ') %>" /></label>
     <label>Summary <textarea name="summary" rows="3"><%= it.project.summary %></textarea></label>
     <div class="actions">
-      <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn" type="button" data-close-dialog>Cancel</button>
       <button class="btn primary" type="submit">Save</button>
     </div>
   </form>
@@ -116,7 +116,7 @@
   <form method="post" action="/p/<%= encodeURIComponent(it.project.slug) %>/delete">
     <input type="hidden" name="csrf" value="<%= it.csrf %>" />
     <div class="actions">
-      <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn" type="button" data-close-dialog>Cancel</button>
       <button class="btn danger solid" type="submit">Delete project</button>
     </div>
   </form>

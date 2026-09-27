@@ -89,6 +89,22 @@ describe('ui document editor', () => {
     expect(res.body).not.toContain('<!doctype html>');
   });
 
+  // Regression coverage for spec §3.3: /preview renders live, untrusted Markdown, so it must
+  // sanitize exactly like a saved document — <script>, on* handlers, style attributes and
+  // javascript: links are all stripped.
+  it('strips <script>, on* handlers, style attributes and javascript: links from the preview', async () => {
+    const res = await post('/preview', {
+      csrf,
+      scope: '/p/acme',
+      body_md: '# Hostile\n\n<script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">click</a><p style="color:red">styled</p>\n',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('alert(1)</script>');
+    expect(res.body).not.toMatch(/onerror/i);
+    expect(res.body).not.toMatch(/javascript:/i);
+    expect(res.body).not.toMatch(/style=/i);
+  });
+
   it('rejects a save and a preview without a CSRF token', async () => {
     expect((await post('/p/acme/docs/nocsrf', { slug: 'nocsrf', title: 'X', category: 'notes', body_md: 'x' })).statusCode).toBe(403);
     expect((await post('/preview', { body_md: 'x' })).statusCode).toBe(403);
