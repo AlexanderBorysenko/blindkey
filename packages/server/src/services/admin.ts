@@ -8,6 +8,7 @@ import { listAudit, writeAudit, type AuditQuery, type AuditRow } from '../repos/
 import { getAdminByUsername } from '../repos/admin.js';
 import { verifyPassword } from '../crypto/passwords.js';
 import { auditAs } from './common.js';
+import { isTotpEnabled, verifySecondFactor, type SecondFactor } from './twofactor.js';
 
 export interface PublicToken {
   id: number;
@@ -65,19 +66,32 @@ export function listAuditFor(ctx: AppContext, principal: Principal, query: Audit
   return listAudit(ctx.db, query);
 }
 
-export async function exchangePassword(
-  ctx: AppContext,
-  input: AuthTokenRequest,
-  ip: string,
-  userAgent: string,
-): Promise<{ token: string; id: number; name: string; expires_at: number } | null> {
+export type ExchangeResult =
+  | { ok: true; token: string; id: number; name: string; expires_at: number }
+  | { ok: false; reason: 'invalid' | 'totp_required' };
+
+export async function exchangePassword(ctx: AppContext, input: AuthTokenRequest, ip: string, userAgent: string): Promise<ExchangeResult> {
   const admin = getAdminByUsername(ctx.db, input.username);
   const ok = admin ? await verifyPassword(admin.password_hash, input.password) : false;
   if (!admin || !ok) {
     writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin?.id ?? null, action: 'auth.login_failed', ip, user_agent: userAgent, meta: { username: input.username } });
-    return null;
+    return { ok: false, reason: 'invalid' };
+  }
+  let secondFactor: SecondFactor | undefined;
+  if (isTotpEnabled(ctx, admin.id)) {
+    if (input.totp === undefined) return { ok: false, reason: 'totp_required' };
+    const used = await verifySecondFactor(ctx, admin.id, input.totp);
+    if (!used) {
+      writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_failed', ip, user_agent: userAgent, meta: { via: 'api' } });
+      return { ok: false, reason: 'invalid' };
+    }
+    if (used === 'recovery') writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.recovery_used', ip, user_agent: userAgent, meta: { via: 'api' } });
+    secondFactor = used;
   }
   const { token, row } = createToken(ctx.db, { name: input.name, scopes: ['admin'], projectIds: null, expiresAt: Date.now() + input.expires_days * DAY_MS });
-  writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.login', target_type: 'token', target_id: row.id, ip, user_agent: userAgent, meta: { name: row.name } });
-  return { token, id: row.id, name: row.name, expires_at: row.expires_at as number };
+  writeAudit(ctx.db, {
+    actor_type: 'admin', actor_id: admin.id, action: 'auth.login', target_type: 'token', target_id: row.id, ip, user_agent: userAgent,
+    meta: { name: row.name, ...(secondFactor ? { second_factor: secondFactor } : {}) },
+  });
+  return { ok: true, token, id: row.id, name: row.name, expires_at: row.expires_at as number };
 }

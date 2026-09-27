@@ -1,7 +1,7 @@
 import { hostname } from 'node:os';
-import { PidbClient } from '../client.js';
+import { ApiError, PidbClient } from '../client.js';
 import { normalizeUrl, saveConfig } from '../config.js';
-import { CliError } from '../errors.js';
+import { CliError, EXIT_AUTH } from '../errors.js';
 import type { CommandResult } from '../output.js';
 import { prompt as defaultPrompt, promptHidden as defaultPromptHidden } from '../prompt.js';
 
@@ -46,9 +46,16 @@ export async function runLogin(
   // No token yet: the /auth/token route is public, and PidbClient omits the
   // Authorization header for an empty token.
   const client = new PidbClient({ url, token: '' });
-  const res = await client.json<AuthTokenResponse>('POST', '/api/v1/auth/token', {
-    body: { username, password, name, expires_days },
-  });
+  const body = { username, password, name, expires_days };
+  let res: AuthTokenResponse;
+  try {
+    res = await client.json<AuthTokenResponse>('POST', '/api/v1/auth/token', { body });
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 401 && err.body.error === 'totp_required')) throw err;
+    const totp = await io.promptHidden('2FA code: ');
+    if (!totp) throw new CliError('a two-factor code is required', EXIT_AUTH);
+    res = await client.json<AuthTokenResponse>('POST', '/api/v1/auth/token', { body: { ...body, totp } });
+  }
   const path = saveConfig({ url, token: res.token }, env);
   return {
     json: { url, token_id: res.id, token_name: res.name, config: path, expires_at: res.expires_at },

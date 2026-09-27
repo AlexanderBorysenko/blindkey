@@ -117,5 +117,6 @@ export const authTokenRequestSchema = z.strictObject({
   password: z.string().min(1).max(1000),
   name: z.string().min(1).max(100).default('cli'),
   expires_days: z.number().int().min(1).max(365).default(30),
+  totp: z.string().min(1).max(32).optional(),
 });
 export type AuthTokenRequest = z.infer<typeof authTokenRequestSchema>;

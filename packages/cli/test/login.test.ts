@@ -6,6 +6,11 @@ import { runLogin } from '../src/commands/login.js';
 import { configPath } from '../src/config.js';
 import { CliError } from '../src/errors.js';
 import { makeServer, type ServerFixture } from './helpers.js';
+import { startEnrollment, confirmEnrollment } from '../../server/src/services/twofactor.js';
+import { getTotp, openTotpSecret } from '../../server/src/repos/twofactor.js';
+import { hotp, stepAt } from '../../server/src/auth/totp.js';
+import type { Actor } from '../../server/src/auth/principal.js';
+import type { AppContext } from '../../server/src/http/context.js';
 
 let s: ServerFixture;
 let home: string;
@@ -86,5 +91,64 @@ describe('runLogin', () => {
     }
     const countAfter = (s.db.prepare('SELECT COUNT(*) AS n FROM api_tokens').get() as { n: number }).n;
     expect(countAfter).toBe(countBefore);
+  });
+});
+
+describe('with 2FA', () => {
+  // A separate server/admin: the shared `s` fixture above already spends 5 requests
+  // against the 5/min /auth/token rate limit within this test file.
+  let s2: ServerFixture;
+  let home2: string;
+  const env2 = () => ({ PIDB_CONFIG_HOME: home2 }) as NodeJS.ProcessEnv;
+  let adminId: number;
+
+  beforeAll(async () => {
+    s2 = await makeServer();
+    await s2.admin('jo', 'correct horse battery');
+    adminId = (s2.db.prepare('SELECT id FROM admin WHERE username = ?').get('jo') as { id: number }).id;
+    const ctx: AppContext = { db: s2.db, ring: s2.ring };
+    const actor: Actor = { principal: { kind: 'admin', id: adminId, scopes: ['admin'], projectIds: null }, ip: '1.1.1.1', userAgent: 't' };
+    startEnrollment(ctx, adminId);
+    const secret = openTotpSecret(s2.ring, getTotp(s2.db, adminId)!);
+    await confirmEnrollment(ctx, actor, hotp(secret, stepAt(Date.now())));
+  });
+  afterAll(async () => {
+    await s2.close();
+  });
+  beforeEach(() => {
+    home2 = mkdtempSync(join(tmpdir(), 'pidb-login-2fa-'));
+  });
+
+  function codeForNextStep(): string {
+    const secret = openTotpSecret(s2.ring, getTotp(s2.db, adminId)!);
+    return hotp(secret, stepAt(Date.now()) + 1);
+  }
+
+  it('prompts on totp_required and saves the token once the code is accepted', async () => {
+    let promptHiddenCalls: string[] = [];
+    const code = codeForNextStep();
+    const io2 = {
+      prompt: async () => 'jo',
+      promptHidden: async (question: string) => {
+        promptHiddenCalls.push(question);
+        return promptHiddenCalls.length === 1 ? 'correct horse battery' : code;
+      },
+    };
+    const result = await runLogin(s2.url, { name: 'cli-2fa' }, env2(), io2);
+    const saved = JSON.parse(readFileSync(configPath(env2()), 'utf8')) as { token: string };
+    expect(saved.token).toMatch(/^pidb_/);
+    expect(result.text).toContain('cli-2fa');
+    expect(promptHiddenCalls).toEqual(['Admin password: ', '2FA code: ']);
+  });
+
+  it('exits 3 on an empty code and writes no config', async () => {
+    const io2 = {
+      prompt: async () => 'jo',
+      promptHidden: async (question: string) => (question === '2FA code: ' ? '' : 'correct horse battery'),
+    };
+    const err = await runLogin(s2.url, { name: 'cli-2fa-empty' }, env2(), io2).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect((err as CliError).exitCode).toBe(3);
+    expect(() => readFileSync(configPath(env2()), 'utf8')).toThrow();
   });
 });

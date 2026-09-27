@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authTokenRequestSchema, tokenInputSchema } from '@pidb/shared';
 import type { AppContext } from '../context.js';
 import { actorOf, parseBody, principalOf } from '../helpers.js';
-import { UnauthorizedError, ValidationError } from '../../errors.js';
+import { AppError, UnauthorizedError, ValidationError } from '../../errors.js';
 import { createTokenFor, exchangePassword, listAuditFor, listTokensFor, revokeTokenFor } from '../../services/admin.js';
 
 type AuditQs = { Querystring: { limit?: string; before?: string; action?: string; actor?: string } };
@@ -42,8 +42,12 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     async (req, reply) => {
       const input = parseBody(authTokenRequestSchema, req.body);
       const result = await exchangePassword(ctx, input, req.ip, req.headers['user-agent'] ?? '');
-      if (!result) throw new UnauthorizedError('invalid credentials');
-      return reply.status(201).send(result);
+      if (!result.ok) {
+        if (result.reason === 'totp_required') throw new AppError(401, 'totp_required', 'two-factor code required');
+        throw new UnauthorizedError('invalid credentials');
+      }
+      const { ok: _ok, ...body } = result;
+      return reply.status(201).send(body);
     },
   );
 }
