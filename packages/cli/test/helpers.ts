@@ -71,12 +71,16 @@ export interface CliRun {
  * Run the CLI in a child process and await it. Never use spawnSync here: the
  * fixture server runs in this process, and a synchronous wait would block the
  * event loop that has to answer the child's HTTP request.
+ *
+ * `stdinInput`, when given, is written to the child's stdin and the stream is
+ * then ended (simulating `printf '...' | pidb ...`) instead of leaving stdin
+ * unset (`ignore`), which is what non-interactive prompts (login) read from.
  */
-export function runCliAsync(args: string[], env: Record<string, string>, repoRoot: string): Promise<CliRun> {
+export function runCliAsync(args: string[], env: Record<string, string>, repoRoot: string, stdinInput?: string): Promise<CliRun> {
   return new Promise((resolve, reject) => {
     const child = spawn(join(repoRoot, 'node_modules/.bin/tsx'), [join(repoRoot, 'packages/cli/src/cli.ts'), ...args], {
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [stdinInput === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
@@ -86,5 +90,6 @@ export function runCliAsync(args: string[], env: Record<string, string>, repoRoo
     child.stderr.on('data', (c: string) => (stderr += c));
     child.on('error', reject);
     child.on('close', (status) => resolve({ status, stdout, stderr }));
+    if (stdinInput !== undefined) child.stdin!.end(stdinInput);
   });
 }
