@@ -186,6 +186,28 @@ describe('secrets routes', () => {
       });
       expect(removeNonSensitive.statusCode).toBe(200);
     });
+    it('rejects a patch that lists the same key in both removeFields and fields (remove+re-add bypass)', async () => {
+      const t = await makeTestApp();
+      t.project('alpha');
+      const w = auth(t.token(['secrets:write', 'secrets:meta'], ['alpha']));
+      await t.app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/alpha/secrets',
+        headers: w,
+        payload: { name: 'Config', fields: [{ key: 'password', value: 'x', sensitive: false }] },
+      });
+      const mw = auth(t.token(['secrets:meta-write', 'secrets:meta', 'secrets:reveal'], ['alpha']));
+      const r = await t.app.inject({
+        method: 'PATCH',
+        url: '/api/v1/projects/alpha/secrets/Config',
+        headers: mw,
+        payload: { removeFields: ['password'], fields: [{ key: 'password', value: 'attacker' }] },
+      });
+      expect(r.statusCode).toBe(403);
+      expect(r.json()).toMatchObject({ error: 'forbidden', message: 'sensitive fields need secrets:write' });
+      const stored = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Config/fields/password', headers: mw });
+      expect(stored.json()).toEqual({ key: 'password', value: 'x' });
+    });
     it('never allows DELETE with only secrets:meta-write', async () => {
       const t = await makeTestApp();
       t.project('alpha');

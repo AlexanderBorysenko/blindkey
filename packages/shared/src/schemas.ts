@@ -19,7 +19,7 @@ export type Scope = (typeof SCOPES)[number];
  * never hold `admin`, `secrets:reveal` or `secrets:write` — enforced server-side where agent
  * tokens are minted (the device-connect flow, spec §1.3), not by this list alone.
  */
-export const AGENT_SCOPES: Scope[] = [
+export const AGENT_SCOPES = [
   'projects:read',
   'projects:write',
   'docs:read',
@@ -27,7 +27,7 @@ export const AGENT_SCOPES: Scope[] = [
   'secrets:meta',
   'secrets:meta-write',
   'secrets:use',
-];
+] as const satisfies readonly Scope[];
 
 export const PROJECT_STATUSES = ['active', 'paused', 'archived'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];

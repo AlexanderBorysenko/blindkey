@@ -93,21 +93,33 @@ function assertMetaWriteCreateAllowed(input: SecretInput): void {
  * only for keys that are non-sensitive both before and after the patch (Review Focus 2: flipping
  * a field from non-sensitive to sensitive, or touching/adding/removing a sensitive field, is
  * refused — that always needs `secrets:write`).
+ *
+ * A key listed in both `removeFields` and `fields` is rejected outright: the repo runs the
+ * delete before the upsert (`updateSecret` in repos/secrets.ts), so by the time it resolves the
+ * re-added field's default sensitivity, the row is already gone and `defaultSensitive` decides
+ * alone — a meta-write patch could otherwise "remove" a sensitive field and immediately
+ * "re-add" it with an attacker-chosen value, silently overwriting a secret it can't read. Guarded
+ * two ways: the explicit overlap check below, and (mirroring that same delete-then-upsert order)
+ * a re-added key's `willBeSensitive` never falls back to its pre-patch sensitivity.
  */
 function assertMetaWritePatchAllowed(existing: SecretMeta, patch: SecretPatch): void {
   const priorSensitive = new Map(existing.fields.map((f) => [f.key, f.sensitive]));
+  const removed = new Set(patch.removeFields ?? []);
   for (const f of patch.fields ?? []) {
+    if (removed.has(f.key)) throw SENSITIVE_FORBIDDEN();
     const wasSensitive = priorSensitive.get(f.key) ?? false;
-    const willBeSensitive = f.sensitive ?? priorSensitive.get(f.key) ?? defaultSensitive(f.key);
+    const priorForDefault = removed.has(f.key) ? undefined : priorSensitive.get(f.key);
+    const willBeSensitive = f.sensitive ?? priorForDefault ?? defaultSensitive(f.key);
     if (wasSensitive || willBeSensitive) throw SENSITIVE_FORBIDDEN();
   }
-  for (const k of patch.removeFields ?? []) {
+  for (const k of removed) {
     if (priorSensitive.get(k)) throw SENSITIVE_FORBIDDEN();
   }
 }
 
 export function createSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, input: SecretInput): PublicSecret {
-  if (!hasScope(actor.principal, 'secrets:write')) {
+  const metaOnly = !hasScope(actor.principal, 'secrets:write');
+  if (metaOnly) {
     assertScope(actor.principal, 'secrets:meta-write');
     assertMetaWriteCreateAllowed(input);
   }
@@ -118,14 +130,11 @@ export function createSecretFor(ctx: AppContext, actor: Actor, projectSlug: stri
 }
 
 export function updateSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, patch: SecretPatch): PublicSecret {
-  if (!hasScope(actor.principal, 'secrets:write')) {
-    assertScope(actor.principal, 'secrets:meta-write');
-  }
+  const metaOnly = !hasScope(actor.principal, 'secrets:write');
+  if (metaOnly) assertScope(actor.principal, 'secrets:meta-write');
   const project = scopeProject(ctx, actor.principal, projectSlug);
   const existing = mustGet(ctx, project?.id ?? null, name);
-  if (!hasScope(actor.principal, 'secrets:write')) {
-    assertMetaWritePatchAllowed(existing, patch);
-  }
+  if (metaOnly) assertMetaWritePatchAllowed(existing, patch);
   const s = updateSecret(ctx.db, ctx.ring, existing.id, patch);
   auditAs(ctx, actor, {
     action: 'secret.update',
