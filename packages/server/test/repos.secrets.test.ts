@@ -121,11 +121,10 @@ describe('secrets repo', () => {
     const { db, ring, p } = setup();
     expect(secretKeyVersionReport(db, ring)).toEqual([]);
 
-    const s1 = createSecret(db, ring, { projectId: p.id, ...staging });
+    createSecret(db, ring, { projectId: p.id, ...staging });
     const keyB = randomBytes(32);
     const ring2: KeyRing = { current: 2, keys: new Map([[1, ring.keys.get(1)!], [2, keyB]]) };
-    const s2 = createSecret(db, ring2, { projectId: null, name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
-    void s1; void s2;
+    createSecret(db, ring2, { projectId: null, name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
 
     expect(secretKeyVersionReport(db, ring2)).toEqual([
       { version: 1, rows: 1, status: 'ok', ok: true },

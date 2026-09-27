@@ -3,7 +3,10 @@ import type { Db } from '../db/connection.js';
 import type { KeyRing } from '../config.js';
 import { decryptField, encryptField, generateDek, unwrapDek, wrapDek } from '../crypto/envelope.js';
 import { ConflictError, CryptoError, NotFoundError } from '../errors.js';
+import { keyVersionReport, probeCurrentVersion, type KeyVersionStatus } from './keyversions.js';
 import { inList, isUniqueViolation, now, parseJsonArray } from './util.js';
+
+export type { KeyVersionStatus };
 
 export interface SecretFieldMeta {
   key: string;
@@ -224,25 +227,9 @@ export function searchSecretNames(db: Db, q: string, projectIds: number[] | null
   return rows.map((r) => ({ ...r, tags: parseJsonArray<string>(r.tags) }));
 }
 
-/**
- * Every row already on the current version must decrypt with the current key before anything is
- * rewrapped — otherwise a wrong `PIDB_MASTER_KEY` (right version, wrong bytes) with nothing left
- * on an old version would rewrap 0 rows and look like a no-op success (spec §4, Review Focus 4).
- */
-function probeCurrentVersionSecrets(db: Db, ring: KeyRing): void {
-  const rows = db.prepare(`SELECT ${COLS} FROM secrets WHERE key_version = ?`).all(ring.current) as RawSecret[];
-  for (const row of rows) {
-    try {
-      loadDek(ring, row);
-    } catch (e) {
-      if (!(e instanceof CryptoError)) throw e;
-      throw new Error(`key version ${ring.current} does not decrypt secret ${row.id} — PIDB_MASTER_KEY is not the version ${ring.current} key`);
-    }
-  }
-}
-
 export function rewrapAllSecrets(db: Db, ring: KeyRing): number {
-  probeCurrentVersionSecrets(db, ring);
+  const currentRows = db.prepare(`SELECT ${COLS} FROM secrets WHERE key_version = ?`).all(ring.current) as RawSecret[];
+  probeCurrentVersion(currentRows, ring, (row) => loadDek(ring, row), (row) => `secret ${row.id}`);
   const current = masterKey(ring, ring.current);
   const rows = db.prepare(`SELECT ${COLS} FROM secrets WHERE key_version != ?`).all(ring.current) as RawSecret[];
   const upd = db.prepare(`UPDATE secrets SET dek_wrapped = ?, key_version = ? WHERE id = ?`);
@@ -255,37 +242,8 @@ export function rewrapAllSecrets(db: Db, ring: KeyRing): number {
   })();
 }
 
-export interface KeyVersionStatus {
-  version: number;
-  rows: number;
-  status: string;
-  ok: boolean;
-}
-
 /** One status per key_version present in `secrets`, for `pidb-server key-versions` (spec §4). */
 export function secretKeyVersionReport(db: Db, ring: KeyRing): KeyVersionStatus[] {
   const rows = db.prepare(`SELECT ${COLS} FROM secrets ORDER BY key_version`).all() as RawSecret[];
-  const byVersion = new Map<number, RawSecret[]>();
-  for (const row of rows) {
-    const group = byVersion.get(row.key_version);
-    if (group) group.push(row);
-    else byVersion.set(row.key_version, [row]);
-  }
-  return [...byVersion.keys()].sort((a, b) => a - b).map((version) => {
-    const group = byVersion.get(version)!;
-    const key = ring.keys.get(version);
-    if (!key) return { version, rows: group.length, status: 'no key configured', ok: false };
-    let fails = 0;
-    for (const row of group) {
-      try {
-        unwrapDek(key, row.dek_wrapped);
-      } catch (e) {
-        if (!(e instanceof CryptoError)) throw e;
-        fails += 1;
-      }
-    }
-    return fails === 0
-      ? { version, rows: group.length, status: 'ok', ok: true }
-      : { version, rows: group.length, status: `WRONG KEY (${fails} of ${group.length} fail)`, ok: false };
-  });
+  return keyVersionReport(rows, (row) => row.key_version, ring, (row, key) => unwrapDek(key, row.dek_wrapped));
 }

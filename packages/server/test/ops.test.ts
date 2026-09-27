@@ -221,4 +221,27 @@ describe('pidb-server cli', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('PIDB_MASTER_KEY');
   });
+  it('key-versions (spawned): exits 0 when the current key decrypts everything, 1 when it does not', () => {
+    const root = fileURLToPath(new URL('../../..', import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), 'pidb-key-versions-'));
+    const dbPath = join(dir, 'pidb.sqlite');
+    const keyBuf = randomBytes(32);
+
+    const db = openDb(dbPath);
+    const ring: KeyRing = { current: 1, keys: new Map([[1, keyBuf]]) };
+    createSecret(db, ring, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    db.close();
+
+    const tsx = join(root, 'node_modules/.bin/tsx');
+    const cli = join(root, 'packages/server/src/cli.ts');
+    const baseEnv = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_DB_PATH: dbPath, PIDB_DATA_DIR: dir };
+
+    const ok = spawnSync(tsx, [cli, 'key-versions'], { env: { ...baseEnv, PIDB_MASTER_KEY: keyBuf.toString('base64') }, encoding: 'utf8' });
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toContain('secrets v1: 1 rows, ok');
+
+    const bad = spawnSync(tsx, [cli, 'key-versions'], { env: { ...baseEnv, PIDB_MASTER_KEY: randomBytes(32).toString('base64') }, encoding: 'utf8' });
+    expect(bad.status).toBe(1);
+    expect(bad.stdout).toContain('WRONG KEY');
+  });
 });

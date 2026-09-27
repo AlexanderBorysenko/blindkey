@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, unlinkSync, renameSync } from 'node:fs';
+import { mkdirSync, readdirSync, unlinkSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
@@ -103,20 +103,23 @@ export function runBackup(db: Db, dir: string, keep = 14, now: Date = new Date()
   mkdirSync(dir, { recursive: true });
   // A crashed prior run can leave a temp file behind; it never matches BACKUP_RE, so it would
   // otherwise sit there forever without counting toward `keep` or getting pruned (Review Focus 5).
+  // This could in principle delete a *concurrent* run's still-in-progress temp file, but that run
+  // then simply fails at VACUUM INTO or verify (the file it expects is gone) and throws — it never
+  // produces or keeps a bad backup, so this is safe even though backups aren't meant to overlap.
   for (const f of readdirSync(dir)) {
     if (STALE_TMP_RE.test(f)) unlinkSync(join(dir, f));
   }
   const stamp = now.toISOString().replace(/\.\d{3}Z$/, '').replace(/:/g, '-');
   const tmp = join(dir, `pidb-${stamp}.sqlite.tmp`);
   const file = join(dir, `pidb-${stamp}.sqlite`);
-  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
   try {
+    db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
     verify(tmp);
+    renameSync(tmp, file);
   } catch (err) {
-    unlinkSync(tmp);
+    rmSync(tmp, { force: true });
     throw err;
   }
-  renameSync(tmp, file);
   const existing = readdirSync(dir).filter((f) => BACKUP_RE.test(f)).sort();
   for (const old of existing.slice(0, Math.max(0, existing.length - keep))) unlinkSync(join(dir, old));
   return file;
