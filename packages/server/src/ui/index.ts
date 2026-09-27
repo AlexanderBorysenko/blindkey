@@ -40,16 +40,11 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
     reply.header('x-content-type-options', 'nosniff');
     reply.header('referrer-policy', 'same-origin');
     reply.header('x-frame-options', 'DENY');
-    // Pages that can show secret material must never sit in a shared cache.
+    // Every UI page can show session-specific or sensitive content, so none of them may sit
+    // in a shared cache; only the static assets under /assets/ (fonts, CSS, htmx, app.js) are
+    // safe to cache and keep their own cache-control set by @fastify/static above.
     const path = req.url.split('?')[0] ?? '';
-    if (
-      path.includes('/secrets') ||
-      path === '/tokens' ||
-      path === '/audit' ||
-      path.startsWith('/settings/2fa') ||
-      path === '/login/2fa'
-    )
-      reply.header('cache-control', 'no-store');
+    if (!path.startsWith('/assets/')) reply.header('cache-control', 'no-store');
     return payload;
   });
 

@@ -38,7 +38,11 @@ export function loadNav(db: Db): NavData {
   const projects = db.prepare(PROJECTS_SQL).all() as RawNavProject[];
   const globalDocs = (db.prepare(`SELECT COUNT(*) AS n FROM documents WHERE project_id IS NULL`).get() as { n: number }).n;
   const globalSecrets = (db.prepare(`SELECT COUNT(*) AS n FROM secrets WHERE project_id IS NULL`).get() as { n: number }).n;
-  const tokens = (db.prepare(`SELECT COUNT(*) AS n FROM api_tokens WHERE revoked_at IS NULL`).get() as { n: number }).n;
+  const tokens = (
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM api_tokens WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`)
+      .get(Date.now()) as { n: number }
+  ).n;
   return {
     projects: projects.map((p) => ({ slug: p.slug, name: p.name, status: p.status as NavProject['status'], docs: p.docs, secrets: p.secrets })),
     globalDocs,

@@ -4,6 +4,19 @@
 (function () {
   'use strict';
 
+  // The flash for ?done=... is rendered server-side (it must survive a no-JS request), so this
+  // only cleans the URL afterwards: without it, reloading or navigating back would re-show the
+  // same flash forever. Only the `done` param is removed; every other query param and the hash
+  // are preserved.
+  (function stripDoneParam() {
+    var params = new URLSearchParams(location.search);
+    if (!params.has('done')) return;
+    params.delete('done');
+    var qs = params.toString();
+    var url = location.pathname + (qs ? '?' + qs : '') + location.hash;
+    history.replaceState(history.state, '', url);
+  })();
+
   var timers = new WeakMap();
 
   function flashCopied(btn) {

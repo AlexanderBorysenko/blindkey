@@ -33,12 +33,44 @@ async function copyFrom(target: FakeElement): Promise<string> {
     getElementById: (id: string) => (id === 'target' ? target : null),
   };
   const navigator = { clipboard: { writeText: (s: string) => { copied.push(s); return Promise.resolve(); } } };
-  runInNewContext(source, { document, navigator, Element: FakeElement, WeakMap, setTimeout: () => 0 });
+  const location = { search: '', pathname: '/', hash: '' };
+  const history = { state: null, replaceState: () => {} };
+  runInNewContext(source, { document, navigator, location, history, URLSearchParams, Element: FakeElement, WeakMap, setTimeout: () => 0 });
   const btn = new FakeElement('BUTTON', 'Copy', { 'data-action': 'copy-text', 'data-copy-target': 'target' });
   listeners.click!({ target: btn });
   expect(copied).toHaveLength(1);
   return copied[0]!;
 }
+
+describe('app.js strips ?done= on load', () => {
+  function run(url: string): Array<{ state: unknown; url: string }> {
+    const loc = new URL(url);
+    const location = { search: loc.search, pathname: loc.pathname, hash: loc.hash };
+    const replaced: Array<{ state: unknown; url: string }> = [];
+    const history = {
+      state: { some: 1 },
+      replaceState: (state: unknown, _title: string, next: string) => { replaced.push({ state, url: next }); },
+    };
+    const document = { addEventListener: () => {} };
+    runInNewContext(source, { document, location, history, URLSearchParams, navigator: {}, Element: FakeElement, WeakMap, setTimeout: () => 0 });
+    return replaced;
+  }
+
+  it('removes only the done param, keeping other params and the hash', () => {
+    const replaced = run('http://x/p/acme?tab=secrets&done=saved#frag');
+    expect(replaced).toEqual([{ state: { some: 1 }, url: '/p/acme?tab=secrets#frag' }]);
+  });
+
+  it('collapses to a bare path when done was the only param', () => {
+    const replaced = run('http://x/tokens?done=revoked');
+    expect(replaced).toEqual([{ state: { some: 1 }, url: '/tokens' }]);
+  });
+
+  it('leaves the URL alone when there is no done param', () => {
+    expect(run('http://x/tokens?tab=secrets')).toHaveLength(0);
+    expect(run('http://x/tokens')).toHaveLength(0);
+  });
+});
 
 describe('app.js copy-text', () => {
   it('copies a list (OL/UL) as its items, one per line', async () => {
