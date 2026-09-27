@@ -11,7 +11,7 @@ import {
   CHALLENGE_COOKIE,
 } from '../session.js';
 import {
-  bumpChallengeAttempts, createChallenge, deleteChallenge, getChallenge, purgeExpiredChallenges,
+  claimChallengeAttempt, createChallenge, deleteChallenge, getChallenge, purgeExpiredChallenges,
 } from '../../repos/twofactor.js';
 import {
   CHALLENGE_TTL_MS, MAX_CHALLENGE_ATTEMPTS, isSecondFactorLocked, isTotpEnabled, verifySecondFactor,
@@ -96,14 +96,18 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
       }
       const lockedUntil = isSecondFactorLocked(ctx, challenge.admin_id);
       if (lockedUntil !== null) return codePage(reply, 429, factorLockedMessage(lockedUntil));
+      const exhausted = () => {
+        deleteChallenge(ctx.db, challenge.id);
+        clearChallengeCookie(reply);
+        return loginPage(reply, 401, 'Too many attempts — log in again.');
+      };
+      // Claim the attempt before checking the code, so parallel guesses cannot exceed the cap.
+      const attempt = claimChallengeAttempt(ctx.db, challenge.id, MAX_CHALLENGE_ATTEMPTS, Date.now());
+      if (attempt === null) return exhausted();
       const used = await verifySecondFactor(ctx, challenge.admin_id, str(body(req), 'code'));
       if (!used) {
         writeAudit(ctx.db, { actor_type: 'admin', actor_id: challenge.admin_id, action: 'auth.totp_failed', ip: req.ip, user_agent: ua, meta: { via: 'ui' } });
-        if (bumpChallengeAttempts(ctx.db, challenge.id) >= MAX_CHALLENGE_ATTEMPTS) {
-          deleteChallenge(ctx.db, challenge.id);
-          clearChallengeCookie(reply);
-          return loginPage(reply, 401, 'Too many attempts — log in again.');
-        }
+        if (attempt >= MAX_CHALLENGE_ATTEMPTS) return exhausted();
         return codePage(reply, 401, 'Invalid code.');
       }
       deleteChallenge(ctx.db, challenge.id);

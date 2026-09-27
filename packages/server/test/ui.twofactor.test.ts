@@ -432,3 +432,40 @@ describe('F2: enrolling revokes the other sessions', () => {
     }
   });
 });
+
+// F4: the attempt is claimed atomically before the code is checked, so parallel guesses cannot
+// exceed MAX_CHALLENGE_ATTEMPTS. R4: this instance sends POST /login x1 and POST /login/2fa x9.
+describe('F4: parallel guesses on one challenge', () => {
+  it('9 parallel wrong recovery-format guesses: at most 5 are checked, the rest are rejected as exhausted', async () => {
+    const t5 = await makeTestApp();
+    try {
+      const admin = createAdmin(t5.db, 'fran', await hashPassword('pw'));
+      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null }, ip: '', userAgent: '' };
+      startEnrollment(t5.ctx, admin.id);
+      await confirmEnrollment(t5.ctx, actor, hotp(openTotpSecret(t5.ring, getTotp(t5.db, admin.id)!), stepAt(Date.now())));
+
+      const loginRes = await t5.app.inject({ method: 'POST', url: '/login', payload: { username: 'fran', password: 'pw' } });
+      const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+      const results = await Promise.all(
+        Array.from({ length: 9 }, () =>
+          t5.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: ch }, payload: { code: 'zzzzz-zzzzz' } })),
+      );
+      // Exactly 5 attempts get claimed and checked (each writes auth.totp_failed).
+      expect(listAudit(t5.db, { action: 'auth.totp_failed' }).length).toBe(5);
+      const invalid = results.filter((r) => r.statusCode === 401 && main(r.body).includes('Invalid code'));
+      expect(invalid.length).toBe(4);
+      // The 5th claimant and the 4 unclaimed requests are all rejected as exhausted
+      // (or, if their handler ran after the challenge was deleted, sent back to /login).
+      for (const r of results.filter((x) => !invalid.includes(x))) {
+        if (r.statusCode === 302) expect(r.headers.location).toBe('/login');
+        else {
+          expect(r.statusCode).toBe(401);
+          expect(main(r.body)).toContain('Too many attempts');
+        }
+      }
+      expect(getChallenge(t5.db, ch)).toBeNull();
+    } finally {
+      await t5.app.close();
+    }
+  });
+});

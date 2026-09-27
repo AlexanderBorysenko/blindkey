@@ -124,10 +124,15 @@ export function getChallenge(db: Db, id: string, nowTs: number = now()): Challen
   return r;
 }
 
-export function bumpChallengeAttempts(db: Db, id: string): number {
-  db.prepare(`UPDATE login_challenges SET attempts = attempts + 1 WHERE id = ?`).run(id);
-  const r = db.prepare(`SELECT attempts FROM login_challenges WHERE id = ?`).get(id) as { attempts: number } | undefined;
-  return r?.attempts ?? 0;
+/**
+ * Atomically claims one attempt on a live challenge. Returns the new attempt count, or null
+ * when the challenge is missing, expired, or already has `max` attempts.
+ */
+export function claimChallengeAttempt(db: Db, id: string, max: number, nowTs: number = now()): number | null {
+  const r = db.prepare(
+    `UPDATE login_challenges SET attempts = attempts + 1 WHERE id = ? AND attempts < ? AND expires_at > ? RETURNING attempts`,
+  ).get(id, max, nowTs) as { attempts: number } | undefined;
+  return r?.attempts ?? null;
 }
 
 export function deleteChallenge(db: Db, id: string): void {

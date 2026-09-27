@@ -5,7 +5,7 @@ import { createAdmin } from '../src/repos/admin.js';
 import {
   getTotp, openTotpSecret, savePendingTotp, enableTotp, claimTotpStep, deleteTwoFactor,
   replaceRecoveryCodes, listUnusedRecoveryCodes, markRecoveryCodeUsed,
-  createChallenge, getChallenge, bumpChallengeAttempts, deleteChallenge, purgeExpiredChallenges,
+  createChallenge, getChallenge, claimChallengeAttempt, deleteChallenge, purgeExpiredChallenges,
   rewrapTotpSecrets,
 } from '../src/repos/twofactor.js';
 import type { KeyRing } from '../src/config.js';
@@ -57,7 +57,7 @@ describe('twofactor repo', () => {
     expect(listUnusedRecoveryCodes(db, admin.id).length).toBe(1);
   });
 
-  it('challenges: create, expire, bump attempts, purge', () => {
+  it('challenges: create, expire, claim attempts, purge', () => {
     const { db, admin } = setup();
     const now = 10_000;
     const id = createChallenge(db, admin.id, 1000, '127.0.0.1', 'ua');
@@ -66,8 +66,13 @@ describe('twofactor repo', () => {
     const row = db.prepare(`SELECT expires_at FROM login_challenges WHERE id = ?`).get(id) as { expires_at: number };
     expect(getChallenge(db, id, row.expires_at - 1)).not.toBeNull();
     expect(getChallenge(db, id, row.expires_at + 1)).toBeNull();
-    expect(bumpChallengeAttempts(db, id)).toBe(1);
-    expect(bumpChallengeAttempts(db, id)).toBe(2);
+    expect(claimChallengeAttempt(db, id, 3, row.expires_at - 1)).toBe(1);
+    expect(claimChallengeAttempt(db, id, 3, row.expires_at - 1)).toBe(2);
+    expect(claimChallengeAttempt(db, id, 3, row.expires_at - 1)).toBe(3);
+    expect(claimChallengeAttempt(db, id, 3, row.expires_at - 1)).toBeNull(); // exhausted
+    expect(getChallenge(db, id, row.expires_at - 1)?.attempts).toBe(3);
+    expect(claimChallengeAttempt(db, id, 5, row.expires_at + 1)).toBeNull(); // expired
+    expect(claimChallengeAttempt(db, 'no-such-challenge', 5, row.expires_at - 1)).toBeNull();
     expect(purgeExpiredChallenges(db, row.expires_at + 1)).toBe(1);
     void now;
   });
