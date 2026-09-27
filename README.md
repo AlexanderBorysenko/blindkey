@@ -118,7 +118,7 @@ open http://localhost:8080/login
 ### Changing the password
 
 - `/settings/password` (linked from the sidebar as "Password") asks for the current password, the new one twice, and — when two-factor is on — a fresh code (TOTP or recovery). On success every OTHER browser session is signed out; the one used to change the password stays logged in. API tokens are separate credentials and are not revoked.
-- Shell recovery — if the password itself is lost — from a shell on the host: `pidb-server passwd` (Docker: `docker compose run --rm --no-deps server passwd`). It reads the new password from `PIDB_ADMIN_PASSWORD`, or prompts for it (twice, to catch typos, when run interactively). Unlike the UI form it does not need the old password, so it signs out **every** session, including any 2FA lockout; two-factor itself is left as is — pair it with `2fa reset` if that is also lost.
+- Shell recovery — if the password itself is lost — from a shell on the host: `pidb-server passwd` (Docker: `docker compose run --rm --no-deps server passwd`). It reads the new password from `PIDB_ADMIN_PASSWORD`, or prompts for it (twice, to catch typos, when run interactively). Unlike the UI form it does not need the old password, so it signs out every session and clears any 2FA lockout; two-factor itself is left as is — pair it with `2fa reset` if that is also lost.
 
 ## Deployment (Docker)
 

@@ -24,13 +24,17 @@ export type ChangePasswordResult = { ok: true; sessionsRevoked: number } | { ok:
 
 /**
  * Re-authenticates with the current password (and, when 2FA is on, a fresh code) before
- * accepting a new one. Order matches spec §1.2:
- *   1. locked second factor → 429, before the password is even checked (no password oracle
+ * accepting a new one. Order (spec §1.2, reordered per fix-round-1 controller ruling):
+ *   1. locked second factor → 429, before anything else is checked (no password oracle
  *      during a lock — Review Focus 2).
- *   2. wrong password, or (with 2FA on) a wrong/missing code → 400, one generic message so the
- *      form never reveals which half was wrong (Review Focus 1: an empty code is a wrong code,
- *      never skipped).
- *   3. new-password validation, only reachable once step 2 has passed.
+ *   2. form validation — `next !== confirm`, `validateNewPassword`, `next === current` — each
+ *      → 400 with its message. These compare only the fields the caller submitted (no lookup,
+ *      no oracle), so running them before re-auth means a typo in `confirm` never spends a TOTP
+ *      step or a recovery code.
+ *   3. re-auth: wrong password, or (with 2FA on) a wrong/missing code → 400, one generic message
+ *      so the form never reveals which half was wrong (Review Focus 1: an empty code is a wrong
+ *      code, never skipped).
+ *   4. success.
  * On success, every OTHER session of the admin is revoked; `keepSessionId` (the caller's own
  * session) survives. API tokens are independent credentials and are never touched here.
  */
@@ -50,6 +54,11 @@ export async function changePassword(
     if (lockedUntil !== null) return { ok: false, status: 429, error: factorLockedMessage(lockedUntil) };
   }
 
+  if (input.next !== input.confirm) return { ok: false, status: 400, error: 'New passwords do not match.' };
+  const validationError = validateNewPassword(input.next);
+  if (validationError) return { ok: false, status: 400, error: validationError };
+  if (input.next === input.current) return { ok: false, status: 400, error: 'New password must differ from the current one.' };
+
   const passwordOk = await verifyPassword(admin.password_hash, input.current);
   const factorOk = totpOn ? (passwordOk && (await verifySecondFactor(ctx, adminId, input.code)) !== null) : true;
   if (!passwordOk || !factorOk) {
@@ -57,14 +66,12 @@ export async function changePassword(
     return { ok: false, status: 400, error: 'Current password or code is incorrect.' };
   }
 
-  if (input.next !== input.confirm) return { ok: false, status: 400, error: 'New passwords do not match.' };
-  const validationError = validateNewPassword(input.next);
-  if (validationError) return { ok: false, status: 400, error: validationError };
-  if (input.next === input.current) return { ok: false, status: 400, error: 'New password must differ from the current one.' };
-
   const hash = await hashPassword(input.next);
-  setAdminPasswordHash(ctx.db, adminId, hash);
-  const sessionsRevoked = deleteOtherSessions(ctx.db, adminId, keepSessionId);
-  auditAs(ctx, actor, { action: 'auth.password_changed', meta: { via: 'ui', sessions_revoked: sessionsRevoked } });
+  const sessionsRevoked = ctx.db.transaction(() => {
+    setAdminPasswordHash(ctx.db, adminId, hash);
+    const revoked = deleteOtherSessions(ctx.db, adminId, keepSessionId);
+    auditAs(ctx, actor, { action: 'auth.password_changed', meta: { via: 'ui', sessions_revoked: revoked } });
+    return revoked;
+  })();
   return { ok: true, sessionsRevoked };
 }

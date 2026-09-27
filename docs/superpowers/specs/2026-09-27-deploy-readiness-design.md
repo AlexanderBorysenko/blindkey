@@ -18,11 +18,11 @@ Someone who knows the password can re-lock 2FA every 15 minutes indefinitely.
 - `GET /settings/password` — form: `current` (password), `next` (password), `confirm` (password), and `code` (text, `autocomplete="one-time-code"`) shown only when 2FA is on. Nav: new "Password" link in the Admin group, after "Two-factor".
 - `POST /settings/password` — CSRF, rate limit 10/min. Order:
   1. If 2FA is on and the admin is locked → 429 with `factorLockedMessage`.
-  2. `current` must verify, and when 2FA is on `code` must pass `verifySecondFactor` (TOTP or recovery). Either wrong → 400 `Current password or code is incorrect.`, audit `auth.password_change_failed` (meta `{via:'ui'}`).
-  3. `next !== confirm` → 400 `New passwords do not match.`; `validateNewPassword` error → 400 with its message; `next === current` → 400 `New password must differ from the current one.`
+  2. `next !== confirm` → 400 `New passwords do not match.`; `validateNewPassword` error → 400 with its message; `next === current` → 400 `New password must differ from the current one.`
+  3. `current` must verify, and when 2FA is on `code` must pass `verifySecondFactor` (TOTP or recovery). Either wrong → 400 `Current password or code is incorrect.`, audit `auth.password_change_failed` (meta `{via:'ui'}`).
   4. Success: store argon2id hash, delete every OTHER session of the admin (current stays), audit `auth.password_changed` (meta `{via:'ui', sessions_revoked:n}`), redirect `303 /settings/password?done=saved`.
 - API tokens are NOT revoked (they are independent credentials, listed on `/tokens`); the page says so in one line.
-- Validation (step 3) runs only after re-auth (step 2) so the form cannot be used to probe anything without the password.
+- Step 2 runs before step 3 (re-auth) because it compares only the submitted fields — no lookup, no oracle — so a typo in `confirm` is rejected without ever spending a TOTP step or a recovery code on step 3's `verifySecondFactor` call.
 
 ### 1.3 Shell: `pidb-server passwd`
 - Reads the new password from `PIDB_ADMIN_PASSWORD`, else hidden prompt `New admin password: `; when stdin is a TTY, asks again `Repeat new admin password: ` and fails `passwords do not match` on mismatch.

@@ -172,6 +172,20 @@ describe('ui password change — with 2FA enabled', () => {
     expect(main(res.body)).toContain('Current password or code is incorrect.');
   });
 
+  it('fix round 1: correct password, wrong non-empty code → 400 and the factor failure counter is +1', async () => {
+    const before = (t.db.prepare(`SELECT failed_count FROM admin_totp WHERE admin_id = ?`).get(1) as { failed_count: number }).failed_count;
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/settings/password',
+      cookies: { pidb_session: session },
+      payload: { csrf, current: 'correct-password1', next: 'brand-new-pass1', confirm: 'brand-new-pass1', code: '000000' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(main(res.body)).toContain('Current password or code is incorrect.');
+    const after = (t.db.prepare(`SELECT failed_count FROM admin_totp WHERE admin_id = ?`).get(1) as { failed_count: number }).failed_count;
+    expect(after).toBe(before + 1);
+  });
+
   it('4. a locked admin gets 429 even with the correct password (Review Focus 2: no password oracle)', async () => {
     for (let i = 0; i < MAX_FACTOR_FAILURES; i++) recordFactorFailure(t.db, 1, MAX_FACTOR_FAILURES, FACTOR_LOCK_MS);
     expect(factorLockedUntil(t.db, 1)).not.toBeNull();
@@ -189,15 +203,31 @@ describe('ui password change — with 2FA enabled', () => {
     t.db.prepare(`UPDATE admin_totp SET locked_until = NULL, failed_count = 0 WHERE admin_id = ?`).run(1);
   });
 
-  it('6. success with a valid TOTP code redirects 303', async () => {
-    const res = await t.app.inject({
+  it('fix round 1 (RULING): a mismatched confirm does not consume the TOTP code — the same code then succeeds', async () => {
+    // A fresh, not-yet-claimed step: the empty and "000000" codes in the two tests above never
+    // matched, so no step has been claimed since enrollment — this is the first genuine TOTP
+    // value generated for this admin.
+    const code = codeFor(1);
+
+    const mismatched = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
       cookies: { pidb_session: session },
-      payload: { csrf, current: 'correct-password1', next: 'brand-new-pass2', confirm: 'brand-new-pass2', code: codeFor(1) },
+      payload: { csrf, current: 'correct-password1', next: 'brand-new-pass1', confirm: 'different-pass1', code },
     });
-    expect(res.statusCode).toBe(303);
-    expect(res.headers.location).toBe('/settings/password?done=saved');
+    expect(mismatched.statusCode).toBe(400);
+    expect(main(mismatched.body)).toContain('New passwords do not match.');
+
+    // Reusing the exact same code proves the mismatched attempt above never reached
+    // verifySecondFactor (a claimed TOTP step cannot be reused).
+    const success = await t.app.inject({
+      method: 'POST',
+      url: '/settings/password',
+      cookies: { pidb_session: session },
+      payload: { csrf, current: 'correct-password1', next: 'brand-new-pass1', confirm: 'brand-new-pass1', code },
+    });
+    expect(success.statusCode).toBe(303);
+    expect(success.headers.location).toBe('/settings/password?done=saved');
     const rows = listAudit(t.db, { action: 'auth.password_changed', limit: 1 });
     expect(rows[0]!.meta).toMatchObject({ via: 'ui' });
   });
