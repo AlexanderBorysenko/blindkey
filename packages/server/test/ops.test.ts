@@ -19,13 +19,22 @@ import type { KeyRing } from '../src/config.js';
 describe('ops', () => {
   it('init creates admin and seeds guidelines once', async () => {
     const db = openDb(':memory:');
-    const first = await runInit(db, { username: 'alex', password: 'pw' });
+    const first = await runInit(db, { username: 'alex', password: 'first-password!' });
     expect(first).toEqual({ adminCreated: true, guidelinesSeeded: true });
-    expect(await verifyPassword(getAdmin(db)!.password_hash, 'pw')).toBe(true);
+    expect(await verifyPassword(getAdmin(db)!.password_hash, 'first-password!')).toBe(true);
     expect(getDocument(db, null, 'guidelines')?.category).toBe('guidelines');
+    // The admin already exists, so this is a no-op — a short password here must not throw
+    // (F1: the validator only runs when an admin is actually being created).
     const second = await runInit(db, { username: 'other', password: 'x' });
     expect(second).toEqual({ adminCreated: false, guidelinesSeeded: false });
     expect(getAdmin(db)!.username).toBe('alex');
+  });
+  it('init throws the validator message for a too-short password and creates no admin (F1)', async () => {
+    const db = openDb(':memory:');
+    await expect(runInit(db, { username: 'alex', password: 'elevenchars' })).rejects.toThrow(
+      'Password must be at least 12 characters.',
+    );
+    expect(getAdmin(db)).toBeNull();
   });
   it('rotate-key rewraps secrets', () => {
     const db = openDb(':memory:');
@@ -110,7 +119,7 @@ describe('ops', () => {
   });
   it('2fa reset deletes the admin_totp row and audits auth.totp_reset via shell', async () => {
     const db = openDb(':memory:');
-    await runInit(db, { username: 'alex', password: 'pw' });
+    await runInit(db, { username: 'alex', password: 'first-password!' });
     const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
     const admin = getAdmin(db)!;
     savePendingTotp(db, ring, admin.id, randomBytes(20));
@@ -181,19 +190,28 @@ describe('ops', () => {
     expect(readdirSync(out).filter((f) => f.endsWith('.tmp'))).toEqual([]);
     db.close();
   });
-  it('backup removes a stale .tmp from a crashed run first, and it does not count toward keep (Review Focus 5)', () => {
+  it('backup removes a stale .tmp from a crashed run, prunes to `keep`, and keeps the newest ones (Review Focus 5)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));
     const db = openDb(join(dir, 'pidb.sqlite'));
     const out = join(dir, 'backups');
     mkdirSync(out, { recursive: true });
+    const keep = 2;
+    // Pre-seed `keep` real backups with older stamps, so pruning has something to do, plus a
+    // stale .tmp from a crashed run that must never count toward `keep` or survive.
+    for (let i = 0; i < keep; i++) {
+      writeFileSync(join(out, `pidb-2000-01-0${i + 1}T00-00-00.sqlite`), 'old backup');
+    }
     const stale = join(out, 'pidb-2020-01-01T00-00-00.sqlite.tmp');
     writeFileSync(stale, 'garbage from a crashed run');
 
-    const file = runBackup(db, out, 2, new Date(Date.UTC(2001, 0, 1)));
+    const file = runBackup(db, out, keep, new Date(Date.UTC(2001, 0, 1)));
 
     expect(existsSync(stale)).toBe(false);
-    const files = readdirSync(out).sort();
-    expect(files).toEqual(['pidb-2001-01-01T00-00-00.sqlite']);
+    const files = readdirSync(out).filter((f) => f.endsWith('.sqlite')).sort();
+    // Exactly `keep` remain: the oldest pre-seeded backup (2000-01-01) is pruned; its
+    // successor (2000-01-02) and the just-written one (2001-01-01) are the newest `keep` and survive.
+    expect(files).toEqual(['pidb-2000-01-02T00-00-00.sqlite', 'pidb-2001-01-01T00-00-00.sqlite']);
+    expect(files).toHaveLength(keep);
     expect(file).toBe(join(out, 'pidb-2001-01-01T00-00-00.sqlite'));
     db.close();
   });
@@ -243,5 +261,24 @@ describe('pidb-server cli', () => {
     const bad = spawnSync(tsx, [cli, 'key-versions'], { env: { ...baseEnv, PIDB_MASTER_KEY: randomBytes(32).toString('base64') }, encoding: 'utf8' });
     expect(bad.status).toBe(1);
     expect(bad.stdout).toContain('WRONG KEY');
+  });
+  it('key-versions (spawned): exits 1 with "no database" and creates no file when the db is missing (F2)', () => {
+    const root = fileURLToPath(new URL('../../..', import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), 'pidb-no-db-'));
+    const dbPath = join(dir, 'pidb.sqlite');
+    const tsx = join(root, 'node_modules/.bin/tsx');
+    const cli = join(root, 'packages/server/src/cli.ts');
+    const env = {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      PIDB_DATA_DIR: dir,
+      PIDB_DB_PATH: dbPath,
+      PIDB_MASTER_KEY: randomBytes(32).toString('base64'),
+    };
+
+    const r = spawnSync(tsx, [cli, 'key-versions'], { env, encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`error: no database at ${dbPath} — run init first (or check PIDB_DATA_DIR / the restore)`);
+    expect(existsSync(dbPath)).toBe(false);
   });
 });

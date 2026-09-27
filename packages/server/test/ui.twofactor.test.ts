@@ -261,7 +261,7 @@ describe('ui two-factor', () => {
     expect(main(res.body)).toContain('Invalid password or code.');
   });
 
-  it('10. regenerate with the right password and a fresh code issues 10 new codes', async () => {
+  it('10. regenerate with the right password and a fresh code issues 10 new codes, and audits auth.recovery_used (F5, meta {via:"settings"})', async () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/2fa/recovery',
@@ -271,6 +271,11 @@ describe('ui two-factor', () => {
     expect(res.statusCode).toBe(200);
     newRecoveryCodes = main(res.body).match(/[a-hjkmnp-z2-9]{5}-[a-hjkmnp-z2-9]{5}/g) ?? [];
     expect(newRecoveryCodes).toHaveLength(10);
+    // The reauth's recovery-code use is audited distinctly from the login flow's (`via:'ui'`,
+    // written earlier by test 7 on this same admin/instance) and from the action itself
+    // (`auth.recovery_regenerated`, written after this by `regenerateRecoveryCodes`).
+    const rows = listAudit(t.db, { action: 'auth.recovery_used', limit: 1 });
+    expect(rows[0]!.meta).toEqual({ via: 'settings' });
   });
 
   it('10. an old recovery code no longer works after regeneration', async () => {

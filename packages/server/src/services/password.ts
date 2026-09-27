@@ -2,7 +2,8 @@ import type { AppContext } from '../http/context.js';
 import type { Actor } from '../auth/principal.js';
 import { getAdminById, setAdminPasswordHash, deleteOtherSessions } from '../repos/admin.js';
 import { hashPassword, verifyPassword } from '../crypto/passwords.js';
-import { isSecondFactorLocked, isTotpEnabled, verifySecondFactor } from './twofactor.js';
+import { isSecondFactorLocked, isTotpEnabled, verifySecondFactor, type SecondFactor } from './twofactor.js';
+import { deleteChallengesFor } from '../repos/twofactor.js';
 import { factorLockedMessage } from '../ui/routes/auth.js';
 import { auditAs } from './common.js';
 
@@ -36,7 +37,11 @@ export type ChangePasswordResult = { ok: true; sessionsRevoked: number } | { ok:
  *      code, never skipped).
  *   4. success.
  * On success, every OTHER session of the admin is revoked; `keepSessionId` (the caller's own
- * session) survives. API tokens are independent credentials and are never touched here.
+ * session) survives. API tokens are independent credentials and are never touched here. The
+ * admin's pending login challenges are also dropped (F4) — they were issued under the old
+ * password and would otherwise let a stale in-flight login attempt finish under the new one.
+ * When the second factor that verified was a recovery code, `auth.recovery_used` is written
+ * (F5, meta `{via:'password_change'}`) the same way the login flows record it.
  */
 export async function changePassword(
   ctx: AppContext,
@@ -60,7 +65,8 @@ export async function changePassword(
   if (input.next === input.current) return { ok: false, status: 400, error: 'New password must differ from the current one.' };
 
   const passwordOk = await verifyPassword(admin.password_hash, input.current);
-  const factorOk = totpOn ? (passwordOk && (await verifySecondFactor(ctx, adminId, input.code)) !== null) : true;
+  const usedFactor: SecondFactor | null = totpOn && passwordOk ? await verifySecondFactor(ctx, adminId, input.code) : null;
+  const factorOk = totpOn ? usedFactor !== null : true;
   if (!passwordOk || !factorOk) {
     auditAs(ctx, actor, { action: 'auth.password_change_failed', meta: { via: 'ui' } });
     return { ok: false, status: 400, error: 'Current password or code is incorrect.' };
@@ -70,6 +76,8 @@ export async function changePassword(
   const sessionsRevoked = ctx.db.transaction(() => {
     setAdminPasswordHash(ctx.db, adminId, hash);
     const revoked = deleteOtherSessions(ctx.db, adminId, keepSessionId);
+    deleteChallengesFor(ctx.db, adminId);
+    if (usedFactor === 'recovery') auditAs(ctx, actor, { action: 'auth.recovery_used', meta: { via: 'password_change' } });
     auditAs(ctx, actor, { action: 'auth.password_changed', meta: { via: 'ui', sessions_revoked: revoked } });
     return revoked;
   })();

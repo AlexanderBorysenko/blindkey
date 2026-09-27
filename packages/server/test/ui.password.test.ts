@@ -4,7 +4,7 @@ import { createAdmin, createSession, getAdmin } from '../src/repos/admin.js';
 import { SESSION_TTL_MS } from '../src/ui/session.js';
 import { startEnrollment, confirmEnrollment, MAX_FACTOR_FAILURES, FACTOR_LOCK_MS } from '../src/services/twofactor.js';
 import { hashPassword } from '../src/crypto/passwords.js';
-import { getTotp, openTotpSecret, recordFactorFailure, factorLockedUntil } from '../src/repos/twofactor.js';
+import { getTotp, openTotpSecret, recordFactorFailure, factorLockedUntil, createChallenge, getChallenge } from '../src/repos/twofactor.js';
 import { hotp, stepAt } from '../src/auth/totp.js';
 import { listAudit } from '../src/repos/audit.js';
 
@@ -128,12 +128,28 @@ describe('ui password change — no 2FA', () => {
     expect(metaText).not.toContain('old-password!!');
     expect(metaText).not.toContain('brand-new-pass1');
   });
+
+  it('F4: a pending login challenge for the admin is deleted on a successful password change', async () => {
+    const admin = getAdmin(t.db)!;
+    const challenge = createChallenge(t.db, admin.id, 60_000, '', '');
+    expect(getChallenge(t.db, challenge)).not.toBeNull();
+
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/settings/password',
+      cookies: { pidb_session: session },
+      payload: { csrf, current: 'brand-new-pass1', next: 'another-new-pass1', confirm: 'another-new-pass1' },
+    });
+    expect(res.statusCode).toBe(303);
+    expect(getChallenge(t.db, challenge)).toBeNull();
+  });
 });
 
 describe('ui password change — with 2FA enabled', () => {
   let t: TestCtx;
   let session = '';
   let csrf = '';
+  let recoveryCodes: string[] = [];
 
   function codeFor(d: number): string {
     const row = getTotp(t.db, 1)!;
@@ -154,6 +170,7 @@ describe('ui password change — with 2FA enabled', () => {
       session,
     );
     expect(codes).not.toBeNull();
+    recoveryCodes = codes!;
   });
 
   it('1. GET shows a code field when 2FA is on', async () => {
@@ -230,5 +247,19 @@ describe('ui password change — with 2FA enabled', () => {
     expect(success.headers.location).toBe('/settings/password?done=saved');
     const rows = listAudit(t.db, { action: 'auth.password_changed', limit: 1 });
     expect(rows[0]!.meta).toMatchObject({ via: 'ui' });
+  });
+
+  it('F5: a password change verified with a recovery code audits auth.recovery_used (meta {via:"password_change"})', async () => {
+    const code = recoveryCodes.pop()!;
+    const res = await t.app.inject({
+      method: 'POST',
+      url: '/settings/password',
+      cookies: { pidb_session: session },
+      payload: { csrf, current: 'brand-new-pass1', next: 'another-new-pass1', confirm: 'another-new-pass1', code },
+    });
+    expect(res.statusCode).toBe(303);
+    const rows = listAudit(t.db, { action: 'auth.recovery_used', limit: 1 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.meta).toEqual({ via: 'password_change' });
   });
 });

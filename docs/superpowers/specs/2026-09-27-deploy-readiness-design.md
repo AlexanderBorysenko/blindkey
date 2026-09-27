@@ -9,10 +9,11 @@ v1 can be deployed and used.
 There is no way to change the admin password today; `init` is the only writer.
 Someone who knows the password can re-lock 2FA every 15 minutes indefinitely.
 
-### 1.1 Password rules (shared by UI and shell)
+### 1.1 Password rules (shared by UI, shell, and `init`)
 - New password: 12–1024 characters (JS string length). Not equal to the current one (UI only; the shell cannot know it).
 - One exported validator: `validateNewPassword(pw: string): string | null` — returns the error message or null.
   Messages: `Password must be at least 12 characters.` / `Password must be at most 1024 characters.`
+- `runInit` also applies it, but only when it is actually creating the admin — a rerun against an existing admin is a no-op and must not start rejecting whatever password is passed in. A validation failure throws before `createAdmin` runs (no admin row is created); the CLI prints `error: <message>` and exits 1.
 
 ### 1.2 UI: `/settings/password`
 - `GET /settings/password` — form: `current` (password), `next` (password), `confirm` (password), and `code` (text, `autocomplete="one-time-code"`) shown only when 2FA is on. Nav: new "Password" link in the Admin group, after "Two-factor".
@@ -20,7 +21,7 @@ Someone who knows the password can re-lock 2FA every 15 minutes indefinitely.
   1. If 2FA is on and the admin is locked → 429 with `factorLockedMessage`.
   2. `next !== confirm` → 400 `New passwords do not match.`; `validateNewPassword` error → 400 with its message; `next === current` → 400 `New password must differ from the current one.`
   3. `current` must verify, and when 2FA is on `code` must pass `verifySecondFactor` (TOTP or recovery). Either wrong → 400 `Current password or code is incorrect.`, audit `auth.password_change_failed` (meta `{via:'ui'}`).
-  4. Success: store argon2id hash, delete every OTHER session of the admin (current stays), audit `auth.password_changed` (meta `{via:'ui', sessions_revoked:n}`), redirect `303 /settings/password?done=saved`.
+  4. Success: store argon2id hash, delete every OTHER session of the admin (current stays), delete the admin's pending login challenges (`deleteChallengesFor`, same transaction), audit `auth.password_changed` (meta `{via:'ui', sessions_revoked:n}`), redirect `303 /settings/password?done=saved`. When the second factor that verified in step 3 was a recovery code, also audit `auth.recovery_used` (meta `{via:'password_change'}`), mirroring the login flows. The `/settings/2fa` re-auth (`reauth`) does the same for a recovery code, with meta `{via:'settings'}`.
 - API tokens are NOT revoked (they are independent credentials, listed on `/tokens`); the page says so in one line.
 - Step 2 runs before step 3 (re-auth) because it compares only the submitted fields — no lookup, no oracle — so a typo in `confirm` is rejected without ever spending a TOTP step or a recovery code on step 3's `verifySecondFactor` call.
 
@@ -42,6 +43,7 @@ Someone who knows the password can re-lock 2FA every 15 minutes indefinitely.
 - Every UI HTML response (anything `isUiRequest` covers except `/assets/`) gets `cache-control: no-store` (covers `/p/:slug?tab=secrets` and future pages).
 
 ## 4. Key and backup operations
+- Every ops command except `init` and `start` (`rotate-key`, `key-versions`, `passwd`, `2fa reset`, `backup`) requires an existing database: before `openDb`, the CLI checks `existsSync(config.dbPath)` (one shared helper) and fails `error: no database at <dbPath> — run init first (or check PIDB_DATA_DIR / the restore)`, exit 1, when it is missing — `openDb` itself runs migrations unconditionally and would otherwise silently create it.
 - `rotate-key` decrypt probe: before rewrapping, every row already on the current version (secrets DEK and 2FA secret) must decrypt with the current key; otherwise throw `key version <v> does not decrypt secret <id> — PIDB_MASTER_KEY is not the version <v> key` (2FA: `... 2FA secret of admin <id> ...`). Nothing is written (same outer transaction).
 - `pidb-server key-versions` — prints one line per `(kind, version)`: `secrets v<v>: <n> rows, <status>` and `2fa v<v>: <n> rows, <status>`, where status is `ok`, `no key configured` or `WRONG KEY (<k> of <n> fail)`. Prints `no encrypted rows` when both tables are empty. Exit 1 if any status is not `ok`. Replaces the inline `node -e` query in the README rotation runbook and is suggested after a restore.
 - `runBackup`: `VACUUM INTO` a temp file `pidb-<stamp>.sqlite.tmp`, open it read-only, `PRAGMA integrity_check` must return `ok`, close, then `rename` to the final name. On failure the temp file is deleted and the error propagates (backup-loop logs it). Stale `pidb-*.sqlite.tmp` files in the directory are deleted at the start of each run. Pruning is unchanged (the temp name never matches `BACKUP_RE`).

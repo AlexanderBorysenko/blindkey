@@ -17,6 +17,10 @@ import { buildApp } from './http/app.js';
 export async function runInit(db: Db, opts: { username: string; password: string }): Promise<{ adminCreated: boolean; guidelinesSeeded: boolean }> {
   let adminCreated = false;
   if (!getAdmin(db)) {
+    // Only enforced when an admin is actually being created here — a subsequent `init` against
+    // an existing admin is a no-op and must not start rejecting whatever password is passed in.
+    const error = validateNewPassword(opts.password);
+    if (error) throw new Error(error);
     createAdmin(db, opts.username, await hashPassword(opts.password));
     adminCreated = true;
   }

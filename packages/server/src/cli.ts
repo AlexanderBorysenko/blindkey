@@ -1,12 +1,25 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { loadConfig } from './config.js';
-import { openDb } from './db/connection.js';
+import { loadConfig, type Config } from './config.js';
+import { openDb, type Db } from './db/connection.js';
 import { runBackup, runInit, runKeyVersions, runPasswordReset, runRotateKey, runTotpReset, startServer } from './ops.js';
+
+/**
+ * Every ops command except `init`/`start` operates on an existing database — it must never
+ * create one as a side effect of a typo'd path or a not-yet-restored volume (F2). `openDb` runs
+ * migrations unconditionally, so it would silently create `config.dbPath` if it were missing;
+ * this checks first and fails the way the rest of the CLI does.
+ */
+function openExistingDb(config: Config): Db {
+  if (!existsSync(config.dbPath)) {
+    throw new Error(`no database at ${config.dbPath} — run init first (or check PIDB_DATA_DIR / the restore)`);
+  }
+  return openDb(config.dbPath);
+}
 
 const CTRL_C = '\u0003';
 const BACKSPACE = '\u007f';
@@ -110,7 +123,7 @@ program
   .action(() => {
     try {
       const config = loadConfig();
-      const db = openDb(config.dbPath);
+      const db = openExistingDb(config);
       const r = runRotateKey(db, config.keyRing);
       console.log(`rewrapped ${r.secrets} secrets to key version ${config.keyRing.current}`);
       console.log(`rewrapped ${r.totp} 2FA secrets`);
@@ -126,7 +139,7 @@ program
   .action(() => {
     try {
       const config = loadConfig();
-      const db = openDb(config.dbPath);
+      const db = openExistingDb(config);
       const r = runKeyVersions(db, config.keyRing);
       for (const line of r.lines) console.log(line);
       db.close();
@@ -144,7 +157,7 @@ program
   .action((opts: { out?: string; keep: string }) => {
     try {
       const config = loadConfig();
-      const db = openDb(config.dbPath);
+      const db = openExistingDb(config);
       const file = runBackup(db, opts.out ?? join(config.dataDir, 'backups'), Number.parseInt(opts.keep, 10));
       console.log(`backup written: ${file}`);
       db.close();
@@ -159,7 +172,7 @@ program
   .action(async () => {
     try {
       const config = loadConfig();
-      const db = openDb(config.dbPath);
+      const db = openExistingDb(config);
       let password = process.env.PIDB_ADMIN_PASSWORD;
       if (!password) {
         password = await promptHidden('New admin password: ');
@@ -185,7 +198,7 @@ twoFactor
   .action(() => {
     try {
       const config = loadConfig();
-      const db = openDb(config.dbPath);
+      const db = openExistingDb(config);
       console.log(`two-factor disabled for ${runTotpReset(db)}`);
       db.close();
     } catch (err) {

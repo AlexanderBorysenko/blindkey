@@ -17,7 +17,7 @@ npm install
 export PIDB_MASTER_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
 export PIDB_DATA_DIR=./data
 npm run build
-PIDB_ADMIN_USERNAME=alex PIDB_ADMIN_PASSWORD=change-me node packages/server/dist/cli.js init
+PIDB_ADMIN_USERNAME=alex PIDB_ADMIN_PASSWORD=change-me-please node packages/server/dist/cli.js init
 node packages/server/dist/cli.js start
 ```
 
@@ -25,7 +25,7 @@ Get an admin token:
 
 ```bash
 curl -s -XPOST localhost:8080/api/v1/auth/token -H 'content-type: application/json' \
-  -d '{"username":"alex","password":"change-me","name":"cli"}'
+  -d '{"username":"alex","password":"change-me-please","name":"cli"}'
 ```
 
 `GET /api/v1/audit` accepts `before=<audit row id>` as an exclusive cursor (not a timestamp).
@@ -95,7 +95,7 @@ The server renders an admin UI at `/` — the same Fastify process, no separate 
 
 ```bash
 npm run build
-PIDB_ADMIN_USERNAME=alex PIDB_ADMIN_PASSWORD=change-me node packages/server/dist/cli.js init
+PIDB_ADMIN_USERNAME=alex PIDB_ADMIN_PASSWORD=change-me-please node packages/server/dist/cli.js init
 node packages/server/dist/cli.js start
 open http://localhost:8080/login
 ```
@@ -119,7 +119,7 @@ open http://localhost:8080/login
 ### Changing the password
 
 - `/settings/password` (linked from the sidebar as "Password") asks for the current password, the new one twice, and — when two-factor is on — a fresh code (TOTP or recovery). On success every OTHER browser session is signed out; the one used to change the password stays logged in. API tokens are separate credentials and are not revoked.
-- Shell recovery — if the password itself is lost — from a shell on the host: `pidb-server passwd` (Docker: `docker compose run --rm --no-deps server passwd`). It reads the new password from `PIDB_ADMIN_PASSWORD`, or prompts for it (twice, to catch typos, when run interactively). Unlike the UI form it does not need the old password, so it signs out every session and clears any 2FA lockout; two-factor itself is left as is — pair it with `2fa reset` if that is also lost.
+- Shell recovery — if the password itself is lost — from a shell on the host: `pidb-server passwd` (Docker: `docker compose run --rm --no-deps server passwd`). Prefer the hidden prompt (it asks twice, to catch typos, when run interactively, and is never echoed); it also reads the new password from `PIDB_ADMIN_PASSWORD` if set, but that lands in shell history and the process list — the same warning as `init`'s first run — so use it only when the prompt isn't an option. Unlike the UI form it does not need the old password, so it signs out every session and clears any 2FA lockout; two-factor itself is left as is — pair it with `2fa reset` if that is also lost. `passwd` does not revoke API tokens; after a suspected compromise, review `/tokens`.
 
 ## Deployment (Docker)
 
@@ -238,7 +238,7 @@ docker compose down && docker compose run --rm --no-deps -e ASIDE="$ASIDE" --ent
 
 (That removes whatever database is in `/data` now — use it only to undo a restore that failed or restored the wrong backup. Like the swap block, it stops the stack first.)
 
-**Verify before trusting the restore:** log in to the admin UI and reveal one secret field, or from a machine with the CLI run `pidb secret get <target> <name> <field> --print`. A decrypt error here means the backup was wrapped with an older master key version than the one currently loaded — see [Restoring a pre-rotation backup](#restoring-a-pre-rotation-backup). Only once you've confirmed the restore is good, remove the old copy (with the stack up), naming the directory exactly:
+**Verify before trusting the restore:** log in to the admin UI and reveal one secret field, or from a machine with the CLI run `pidb secret get <target> <name> <field> --print`. Also run `docker compose run --rm --no-deps server key-versions` — expect every line `ok`. A decrypt error (in the UI, the CLI, or a `key-versions` line that isn't `ok`) means the backup was wrapped with an older master key version than the one currently loaded — see [Restoring a pre-rotation backup](#restoring-a-pre-rotation-backup). Only once you've confirmed the restore is good, remove the old copy (with the stack up), naming the directory exactly:
 
 ```bash
 docker compose exec server rm -r "/data/pre-restore-<timestamp>"
@@ -247,6 +247,8 @@ docker compose exec server rm -r "/data/pre-restore-<timestamp>"
 Every stack start also runs a backup and prunes the oldest by count, so repeated restore attempts push old backups out — copy the ones you care about off the host first.
 
 **Two-factor and restores:** restoring a backup taken before 2FA was enabled brings the server back without 2FA — the enrollment banner reappears, so enroll again. Running an older pidb binary against a 2FA-enabled database ignores 2FA.
+
+**Passwords, sessions and restores:** after a restore, the admin password and every session are as of the backup — anything changed since is gone. If the password changed since the backup (or you are restoring because of a suspected compromise), run `pidb-server passwd` (Docker: `docker compose run --rm --no-deps server passwd`), which also signs out every session. API tokens are as of the backup too — review `/tokens`.
 
 ### Rotating the master key
 

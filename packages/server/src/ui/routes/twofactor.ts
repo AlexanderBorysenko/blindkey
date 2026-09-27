@@ -73,6 +73,10 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
       writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_failed', ip: req.ip, user_agent: req.headers['user-agent'] ?? '', meta: { via: 'settings' } });
       return { status: 400, error: 'Invalid password or code.' };
     }
+    // F5: mirrors how the login flows record a recovery-code use.
+    if (factor === 'recovery') {
+      writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.recovery_used', ip: req.ip, user_agent: req.headers['user-agent'] ?? '', meta: { via: 'settings' } });
+    }
     return null;
   }
 
