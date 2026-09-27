@@ -51,6 +51,12 @@ export function defaultSensitive(key: string): boolean {
 
 export const scopeSchema = z.enum(SCOPES);
 
+/** A single scope an agent token may hold (spec §1.1/§1.3): always a subset of `AGENT_SCOPES`. */
+export const agentScopeSchema = z.enum(AGENT_SCOPES);
+
+/** Non-empty set of agent scopes, reused by the device-connect start body and the approve step. */
+export const agentScopesSchema = z.array(agentScopeSchema).min(1);
+
 export const slugSchema = z
   .string()
   .regex(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/, 'slug must be lowercase letters, digits and dashes');
@@ -145,3 +151,18 @@ export const authTokenRequestSchema = z.strictObject({
   totp: z.string().min(1).max(32).optional(),
 });
 export type AuthTokenRequest = z.infer<typeof authTokenRequestSchema>;
+
+/** Body for `POST /api/v1/connect/start` (spec §1.3): begins the browser device flow. */
+export const connectStartSchema = z.strictObject({
+  name: z.string().min(1).max(100),
+  scopes: agentScopesSchema,
+  projects: z.array(slugSchema).max(200).default([]),
+  expires_days: z.number().int().min(1).max(365).default(90),
+});
+export type ConnectStartInput = z.infer<typeof connectStartSchema>;
+
+/** Body for `POST /api/v1/connect/poll` (spec §1.3). */
+export const connectPollSchema = z.strictObject({
+  device_code: z.string().min(1).max(500),
+});
+export type ConnectPollInput = z.infer<typeof connectPollSchema>;

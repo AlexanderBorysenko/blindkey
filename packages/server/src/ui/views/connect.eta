@@ -1,0 +1,56 @@
+<div class="page-head">
+  <div>
+    <h1>Connect an agent</h1>
+  </div>
+</div>
+
+<% if (it.state === 'error') { %>
+<div class="panel">
+  <p role="alert" class="alert"><%= it.message %></p>
+</div>
+<% } else { %>
+<div class="panel">
+  <h3><%= it.row.name %></h3>
+  <p class="note">Requested from <%= it.row.ip %> · <%= it.row.user_agent %></p>
+  <p class="note">A project-scoped token can also see global documents and secrets.</p>
+
+  <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+
+  <form method="post" action="/connect/approve" class="form-grid">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <input type="hidden" name="code" value="<%= it.code %>" />
+
+    <fieldset class="chip-grid">
+      <legend>Scopes</legend>
+      <% it.allScopes.forEach(function (s) { %>
+      <label class="chip"><input type="checkbox" name="scopes" value="<%= s %>"<%~ it.row.scopes.includes(s) ? ' checked' : '' %> /> <%= s %></label>
+      <% }) %>
+    </fieldset>
+
+    <p class="note">
+      Requested projects:
+      <% if (it.row.projects.length === 0) { %>(none — all-project scope)<% } %>
+      <% it.row.projects.forEach(function (slug, i) { %><%= i > 0 ? ', ' : '' %><%= slug %><% if (!it.allProjects.some(function (p) { return p.slug === slug; })) { %> (unknown)<% } %><% }) %>
+    </p>
+
+    <fieldset class="chip-grid">
+      <legend>Projects</legend>
+      <% it.allProjects.forEach(function (p) { %>
+      <label class="chip"><input type="checkbox" name="projects" value="<%= p.slug %>"<%~ it.row.projects.includes(p.slug) ? ' checked' : '' %> /> <%= p.slug %></label>
+      <% }) %>
+    </fieldset>
+
+    <p class="note">Expires in <%= it.row.expires_days %> days.</p>
+
+    <div class="actions">
+      <button class="btn primary" type="submit">Approve</button>
+    </div>
+  </form>
+
+  <form method="post" action="/connect/deny">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <input type="hidden" name="code" value="<%= it.code %>" />
+    <button class="btn danger solid" type="submit">Deny</button>
+  </form>
+</div>
+<% } %>

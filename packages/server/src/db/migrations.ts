@@ -156,6 +156,28 @@ ALTER TABLE admin_totp ADD COLUMN locked_until INTEGER;
 ALTER TABLE api_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'user';
 `,
   },
+  {
+    id: 5,
+    sql: `
+CREATE TABLE connect_requests (
+  id INTEGER PRIMARY KEY,
+  device_hash TEXT NOT NULL UNIQUE,
+  user_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  scopes TEXT NOT NULL,
+  projects TEXT NOT NULL,
+  expires_days INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  approved_scopes TEXT,
+  approved_project_ids TEXT,
+  approved_expires_days INTEGER,
+  ip TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+`,
+  },
 ];
 
 export function runMigrations(db: Database.Database): number {

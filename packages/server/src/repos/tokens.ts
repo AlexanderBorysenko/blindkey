@@ -93,3 +93,14 @@ export function listTokens(db: Db): TokenRow[] {
 export function revokeToken(db: Db, id: number, ts: number = now()): boolean {
   return db.prepare(`UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`).run(ts, id).changes > 0;
 }
+
+/**
+ * Revokes every still-active `kind='agent'` token with this exact name (spec §1.3): a device-flow
+ * approval for a name that already has a live agent token supersedes it, rather than piling up
+ * agent tokens under the same name every time `pidb connect` is re-run.
+ */
+export function revokeAgentTokensByName(db: Db, name: string, ts: number = now()): number {
+  return db
+    .prepare(`UPDATE api_tokens SET revoked_at = ? WHERE name = ? AND kind = 'agent' AND revoked_at IS NULL`)
+    .run(ts, name).changes;
+}

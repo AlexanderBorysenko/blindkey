@@ -27,9 +27,10 @@ describe('db', () => {
     }
     db.prepare(`INSERT INTO admin (id, username, password_hash, created_at) VALUES (1, 'a', 'h', 0)`).run();
     db.prepare(`INSERT INTO admin_totp (admin_id, secret_enc, key_version, enabled_at, last_used_step, created_at) VALUES (1, x'00', 1, 5, 0, 0)`).run();
-    // Applies migration 3 (this test's subject) and migration 4 (api_tokens.kind, spec §1.1) —
-    // both are pending from this seeded "post-migration-2" state.
-    expect(runMigrations(db)).toBe(2);
+    // Applies migration 3 (this test's subject), migration 4 (api_tokens.kind, spec §1.1) and
+    // migration 5 (connect_requests, spec §1.3) — all three are pending from this seeded
+    // "post-migration-2" state.
+    expect(runMigrations(db)).toBe(3);
     expect(db.prepare(`SELECT failed_count, locked_until FROM admin_totp WHERE admin_id = 1`).get()).toEqual({ failed_count: 0, locked_until: null });
   });
   it('migration 4 adds api_tokens.kind defaulting to user', () => {
@@ -40,8 +41,36 @@ describe('db', () => {
       db.prepare(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, 0)`).run(m.id);
     }
     db.prepare(`INSERT INTO api_tokens (name, prefix, token_hash, scopes, project_ids, expires_at, created_at) VALUES ('t', 'p', 'h', '[]', NULL, NULL, 0)`).run();
-    expect(runMigrations(db)).toBe(1);
+    // Applies migration 4 (this test's subject) and migration 5 (connect_requests, spec §1.3) —
+    // both are pending from this seeded "post-migration-3" state.
+    expect(runMigrations(db)).toBe(2);
     expect(db.prepare(`SELECT kind FROM api_tokens`).get()).toEqual({ kind: 'user' });
+  });
+  it('migration 5 creates connect_requests (spec §1.3)', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`);
+    for (const m of MIGRATIONS.filter((x) => x.id <= 4)) {
+      db.exec(m.sql);
+      db.prepare(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, 0)`).run(m.id);
+    }
+    expect(runMigrations(db)).toBe(1);
+    const cols = db.prepare(`SELECT name FROM pragma_table_info('connect_requests')`).all().map((r) => (r as { name: string }).name);
+    for (const c of [
+      'id', 'device_hash', 'user_code', 'name', 'scopes', 'projects', 'expires_days', 'status',
+      'approved_scopes', 'approved_project_ids', 'approved_expires_days', 'ip', 'user_agent', 'created_at', 'expires_at',
+    ]) {
+      expect(cols, c).toContain(c);
+    }
+    db.prepare(
+      `INSERT INTO connect_requests (device_hash, user_code, name, scopes, projects, expires_days, status, created_at, expires_at)
+       VALUES ('h', 'ABCD-1234', 'n', '[]', '[]', 90, 'pending', 0, 1)`,
+    ).run();
+    expect(() =>
+      db.prepare(
+        `INSERT INTO connect_requests (device_hash, user_code, name, scopes, projects, expires_days, status, created_at, expires_at)
+         VALUES ('h', 'WXYZ-9999', 'n', '[]', '[]', 90, 'pending', 0, 1)`,
+      ).run(),
+    ).toThrow(); // device_hash is UNIQUE
   });
   it('enforces foreign keys with cascade', () => {
     const db = openDb(':memory:');

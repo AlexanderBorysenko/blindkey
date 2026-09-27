@@ -6,6 +6,7 @@
   <p class="lede">Admin sign in</p>
   <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
   <form method="post" action="/login">
+    <% if (it.next) { %><input type="hidden" name="next" value="<%= it.next %>" /><% } %>
     <label>Username <input type="text" name="username" autocomplete="username" required autofocus /></label>
     <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
     <button class="btn primary" type="submit">Log in</button>

@@ -47,6 +47,23 @@ export function adminActor(req: FastifyRequest): Actor {
   return { principal: requireAdmin(req), ip: req.ip, userAgent: req.headers['user-agent'] ?? '' };
 }
 
+const SAFE_NEXT_RE = /^\/connect(?:[/?]|$)/;
+
+/**
+ * A `next` redirect target is accepted only when it is a same-origin relative path that starts
+ * with `/connect` (spec §1.3: the only flow that needs to survive the login/2FA redirect).
+ * Anything else — an absolute URL, a protocol-relative `//host/...`, a backslash trick like
+ * `/\evil`, a path outside `/connect`, or anything carrying a control character (defends against
+ * header-injection via the final redirect) — is rejected outright rather than partially
+ * sanitized, so a bad `next` is silently dropped instead of guessed at.
+ */
+export function safeNext(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 2000) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\\]/.test(raw)) return null;
+  return SAFE_NEXT_RE.test(raw) ? raw : null;
+}
+
 /**
  * Resolves the session cookie into the same Principal the API uses, BEFORE the
  * bearer-token hook runs — that hook returns early when req.principal is set.
@@ -81,6 +98,9 @@ export function registerUiGuard(app: FastifyInstance): void {
     const path = req.url.split('?')[0] ?? '';
     if (path === '/login' || path === '/login/2fa' || path.startsWith('/assets/')) return;
     if (req.principal?.kind === 'admin') return;
-    return reply.redirect('/login', 302);
+    // Preserves a safe `next` (spec §1.3: an anonymous GET /connect?code=... survives the login
+    // — and, when 2FA is on, the 2FA — round trip and lands back where it started).
+    const next = safeNext(req.url);
+    return reply.redirect(next ? `/login?next=${encodeURIComponent(next)}` : '/login', 302);
   });
 }

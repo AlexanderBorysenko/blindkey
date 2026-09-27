@@ -11,6 +11,7 @@ import { registerDocumentRoutes } from './routes/documents.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerSecretRoutes } from './routes/secrets.js';
 import { registerAdminRoutes } from './routes/admin.js';
+import { registerConnectRoutes } from './routes/connect.js';
 import { registerMcpRoutes } from './mcp.js';
 import { registerUi } from '../ui/index.js';
 import { isUiRequest, renderPage } from '../ui/render.js';
@@ -112,6 +113,7 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   registerSearchRoutes(app, ctx);
   registerSecretRoutes(app, ctx);
   registerAdminRoutes(app, ctx);
+  registerConnectRoutes(app, ctx);
   registerMcpRoutes(app, ctx);
   return app;
 }

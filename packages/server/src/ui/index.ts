@@ -7,6 +7,7 @@ import type { AppContext } from '../http/context.js';
 import { PUBLIC_DIR, isUiRequest } from './render.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerConnectRoutes } from './routes/connect.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerPasswordRoutes } from './routes/password.js';
 import { registerProjectRoutes } from './routes/projects.js';
@@ -82,6 +83,7 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
   });
 
   registerAuthRoutes(app, ctx);
+  registerConnectRoutes(app, ctx);
   registerProjectRoutes(app, ctx);
   registerDocumentRoutes(app, ctx);
   registerSecretRoutes(app, ctx);
