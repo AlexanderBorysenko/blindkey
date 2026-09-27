@@ -53,6 +53,24 @@ describe('logging', () => {
     expect(all).toContain('[Redacted]');
   });
 
+  it('redacts the two-factor code fields (totp, code) of a logged body', async () => {
+    const { stream, lines } = sink();
+    const db = openDb(':memory:');
+    const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
+    const app: FastifyInstance = await buildApp({ db, ring, logLevel: 'trace', loggerStream: stream });
+    app.post('/api/v1/__log-probe', { config: { public: true } }, async (req, reply) => {
+      req.log.info({ body: req.body }, 'probe');
+      req.log.info({ req: { body: req.body } }, 'probe-req');
+      return reply.send({ ok: true });
+    });
+    await app.inject({ method: 'POST', url: '/api/v1/__log-probe', payload: { username: 'alex', totp: '918273', code: 'abcde-fghjk' } });
+    await app.close();
+    const all = lines.join('\n');
+    expect(all).toContain('probe-req');
+    expect(all).not.toContain('918273');
+    expect(all).not.toContain('abcde-fghjk');
+  });
+
   it('logs nothing containing a value for a real secrets request', async () => {
     const { stream, lines } = sink();
     const db = openDb(':memory:');
