@@ -301,3 +301,53 @@ describe('ui two-factor', () => {
     expect(res.headers.location).toBe('/login');
   });
 });
+
+// R7: a malformed `code` body (a repeated form field, or a JSON number) must be treated
+// as an ordinary wrong code — 401 "Invalid code.", attempt counted — never a 500. Run on
+// a separate app instance so this doesn't add to the main instance's rate-limit budget.
+describe('R7: malformed code body on POST /login/2fa', () => {
+  it('a repeated form field and a JSON number are both treated as a wrong code', async () => {
+    const t2 = await makeTestApp();
+    createAdmin(t2.db, 'carol', await hashPassword('pw'));
+
+    const login1 = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'carol', password: 'pw' } });
+    const session2 = login1.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const home = await t2.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session2 } });
+    const csrf2 = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
+
+    await t2.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { pidb_session: session2 }, payload: { csrf: csrf2 } });
+    const totpRow = getTotp(t2.db, 1)!;
+    const code = hotp(openTotpSecret(t2.ring, totpRow), stepAt(Date.now()));
+    await t2.app.inject({
+      method: 'POST',
+      url: '/settings/2fa/confirm',
+      cookies: { pidb_session: session2 },
+      payload: { csrf: csrf2, code },
+    });
+
+    // Fresh login (2FA now enabled): 2nd POST /login on this instance.
+    const loginRes = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'carol', password: 'pw' } });
+    const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+
+    // A repeated form field parses `code` as an array — historically threw in `.trim()`.
+    const formRes = await t2.app.inject({
+      method: 'POST',
+      url: '/login/2fa',
+      cookies: { pidb_2fa: ch },
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'code=1&code=2',
+    });
+    expect(formRes.statusCode).toBe(401);
+    expect(main(formRes.body)).toContain('Invalid code.');
+    expect(getChallenge(t2.db, ch)?.attempts).toBe(1);
+
+    // A JSON number for `code` — historically threw the same way.
+    const jsonRes = await t2.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: ch }, payload: { code: 123456 } });
+    expect(jsonRes.statusCode).toBe(401);
+    expect(main(jsonRes.body)).toContain('Invalid code.');
+    expect(getChallenge(t2.db, ch)?.attempts).toBe(2);
+
+    await t2.app.close();
+    // This instance: POST /login x2, POST /login/2fa x2 — both well under 10/min.
+  });
+});

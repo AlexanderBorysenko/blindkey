@@ -5,6 +5,7 @@ import { verifyPassword } from '../../crypto/passwords.js';
 import { writeAudit } from '../../repos/audit.js';
 import { renderPage } from '../render.js';
 import { assertCsrf } from '../csrf.js';
+import { body, str } from '../forms.js';
 import {
   clearChallengeCookie, clearSessionCookie, setChallengeCookie, setSessionCookie, uiSessionId, SESSION_TTL_MS,
   CHALLENGE_COOKIE,
@@ -85,7 +86,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
         clearChallengeCookie(reply);
         return reply.redirect('/login', 302);
       }
-      const used = await verifySecondFactor(ctx, challenge.admin_id, req.body?.code ?? '');
+      const used = await verifySecondFactor(ctx, challenge.admin_id, str(body(req), 'code'));
       if (!used) {
         writeAudit(ctx.db, { actor_type: 'admin', actor_id: challenge.admin_id, action: 'auth.totp_failed', ip: req.ip, user_agent: ua, meta: { via: 'ui' } });
         if (bumpChallengeAttempts(ctx.db, challenge.id) >= MAX_CHALLENGE_ATTEMPTS) {
