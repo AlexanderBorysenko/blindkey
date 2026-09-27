@@ -5,6 +5,8 @@ import { hashPassword } from '../src/crypto/passwords.js';
 import { createSecret } from '../src/repos/secrets.js';
 import { upsertDocument } from '../src/repos/documents.js';
 import { getProjectBySlug } from '../src/repos/projects.js';
+import { getTotp, openTotpSecret } from '../src/repos/twofactor.js';
+import { hotp, stepAt } from '../src/auth/totp.js';
 
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
@@ -75,6 +77,38 @@ describe('strict CSP', () => {
     // htmx partials
     assertNoInlineCode((await post('/p/acme/secrets/DB/reveal', { csrf, key: 'password' })).body, 'reveal partial');
     assertNoInlineCode((await post('/preview', { csrf, body_md: '<p style="x" onclick="y">z</p>', scope: '/p/acme' })).body, 'preview');
+
+    // 2FA pages, on a separate app instance so the rest of this file keeps a plain,
+    // never-enrolled login (existing UI tests log in with a password only).
+    const t2 = await makeTestApp();
+    createAdmin(t2.db, 'bob', await hashPassword('pw'));
+    const bobLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
+    const bobSession = bobLogin.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const bobCookies = { pidb_session: bobSession };
+    const bobHome = await t2.app.inject({ method: 'GET', url: '/', cookies: bobCookies });
+    const bobCsrf = /name="csrf" value="([^"]+)"/.exec(bobHome.body)![1]!;
+
+    assertNoInlineCode((await t2.app.inject({ method: 'GET', url: '/settings/2fa', cookies: bobCookies })).body, '/settings/2fa (off)');
+
+    const startRes = await t2.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: bobCookies, payload: { csrf: bobCsrf } });
+    assertNoInlineCode(startRes.body, 'POST /settings/2fa/start');
+
+    const bobTotp = getTotp(t2.db, 1)!;
+    const bobCode = hotp(openTotpSecret(t2.ring, bobTotp), stepAt(Date.now()));
+    const confirmRes = await t2.app.inject({
+      method: 'POST',
+      url: '/settings/2fa/confirm',
+      cookies: bobCookies,
+      payload: { csrf: bobCsrf, code: bobCode },
+    });
+    assertNoInlineCode(confirmRes.body, 'recovery codes page');
+
+    const secondLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
+    const bobChallenge = secondLogin.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+    const challengeRes = await t2.app.inject({ method: 'GET', url: '/login/2fa', cookies: { pidb_2fa: bobChallenge } });
+    assertNoInlineCode(challengeRes.body, '/login/2fa with a live challenge');
+
+    await t2.app.close();
   });
 
   it('strips script, handlers, styles and javascript: links from rendered Markdown', async () => {

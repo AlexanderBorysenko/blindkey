@@ -587,6 +587,11 @@ tr.act-auth td:nth-child(4) { color: var(--muted); }
   color: var(--lock);
 }
 
+/* ---------- Two-factor ---------- */
+.qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: var(--radius-sm); }
+.secret-text { letter-spacing: .06em; }
+.codes { columns: 2; padding-left: 20px; font-variant-numeric: tabular-nums; }
+
 .findings {
   border-left: 3px solid var(--lock);
   padding-left: 12px;

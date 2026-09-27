@@ -1,0 +1,81 @@
+<div class="page-head">
+  <div>
+    <h1>Two-factor authentication</h1>
+    <p class="lede">Protects the admin UI and the creation of admin API tokens.</p>
+  </div>
+</div>
+
+<% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+
+<% if (it.view.state === 'off') { %>
+<div class="panel">
+  <h3>Set up two-factor</h3>
+  <p class="note">Add an authenticator app (TOTP) as a second factor for logging in and for creating admin API tokens.</p>
+  <form method="post" action="/settings/2fa/start">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <button class="btn primary" type="submit">Set up two-factor</button>
+  </form>
+</div>
+<% } %>
+
+<% if (it.view.state === 'setup') { %>
+<div class="panel">
+  <h3>Scan this QR code</h3>
+  <p class="note">Scan with your authenticator app, or enter the secret manually, then confirm with a 6-digit code.</p>
+  <img class="qr" src="<%= it.view.qr %>" alt="QR code for your authenticator app" width="200" height="200" />
+  <p>
+    <code id="totp-secret" class="mono secret-text"><%= it.view.secret %></code>
+    <button class="btn sm ghost" type="button" data-action="copy-text" data-copy-target="totp-secret">Copy</button>
+  </p>
+  <form method="post" action="/settings/2fa/confirm" class="form-grid">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <label>Code <input name="code" autocomplete="one-time-code" inputmode="numeric" required /></label>
+    <button class="btn primary" type="submit">Turn on</button>
+  </form>
+  <form method="post" action="/settings/2fa/start">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <button class="btn ghost" type="submit">Start over</button>
+  </form>
+</div>
+<% } %>
+
+<% if (it.view.state === 'codes') { %>
+<div class="panel">
+  <h2>Recovery codes</h2>
+  <p class="alert warn">Save these now. Each code works once and they will not be shown again.</p>
+  <ol id="recovery-codes" class="codes mono">
+    <% it.view.codes.forEach(function (c) { %><li><%= c %></li><% }) %>
+  </ol>
+  <button class="btn sm ghost" type="button" data-action="copy-text" data-copy-target="recovery-codes">Copy</button>
+  <p><a href="/settings/2fa">Done</a></p>
+</div>
+<% } %>
+
+<% if (it.view.state === 'on') { %>
+<div class="panel">
+  <h3>Enabled since <time datetime="<%= it.fmt.iso(it.view.enabledAt) %>"><%= it.fmt.ago(it.view.enabledAt) %></time></h3>
+  <p class="note"><%= it.view.unused %> unused recovery codes</p>
+</div>
+
+<div class="panel">
+  <h3>Regenerate recovery codes</h3>
+  <p class="note">Replaces all recovery codes. The old ones stop working immediately.</p>
+  <form method="post" action="/settings/2fa/recovery" class="form-grid">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
+    <label>Code <input name="code" autocomplete="one-time-code" inputmode="numeric" required /></label>
+    <button class="btn primary" type="submit">Regenerate recovery codes</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h3>Turn off two-factor</h3>
+  <p class="note">Removes two-factor authentication from this account.</p>
+  <form method="post" action="/settings/2fa/disable" class="form-grid">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
+    <label>Code <input name="code" autocomplete="one-time-code" inputmode="numeric" required /></label>
+    <button class="btn danger solid" type="submit">Turn off two-factor</button>
+  </form>
+</div>
+<% } %>

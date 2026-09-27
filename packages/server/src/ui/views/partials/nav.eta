@@ -39,6 +39,9 @@
   <a href="/audit" <%~ it.path === '/audit' ? 'aria-current="page"' : '' %>>
     <span>Audit log</span>
   </a>
+  <a href="/settings/2fa" <%~ it.path.startsWith('/settings/2fa') ? 'aria-current="page"' : '' %>>
+    <span>Two-factor</span>
+  </a>
 </div>
 <div class="side-foot">
   <span class="tag">admin</span>

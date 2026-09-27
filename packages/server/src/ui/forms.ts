@@ -1,6 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 import type { AppContext } from '../http/context.js';
 import { loadNav, type NavData } from '../repos/nav.js';
+import { isTotpEnabled } from '../services/twofactor.js';
 import { csrfTokenFor } from './csrf.js';
 import { flashFor } from './format.js';
 import { uiSessionId } from './session.js';
@@ -42,6 +43,7 @@ export interface PageContext {
   path: string;
   activeSlug: string | null;
   flash: string | null;
+  totpEnabled: boolean;
 }
 
 function activeSlugFor(path: string): string | null {
@@ -67,5 +69,6 @@ export function pageContext(ctx: AppContext, req: FastifyRequest, title: string)
     path,
     activeSlug: activeSlugFor(path),
     flash: flashFor(query.done),
+    totpEnabled: req.principal?.kind === 'admin' ? isTotpEnabled(ctx, req.principal.id) : true,
   };
 }

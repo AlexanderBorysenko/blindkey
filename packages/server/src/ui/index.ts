@@ -10,6 +10,7 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerProjectRoutes } from './routes/projects.js';
 import { registerSecretRoutes } from './routes/secrets.js';
+import { registerTwoFactorRoutes } from './routes/twofactor.js';
 
 const require = createRequire(import.meta.url);
 
@@ -41,7 +42,14 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
     reply.header('x-frame-options', 'DENY');
     // Pages that can show secret material must never sit in a shared cache.
     const path = req.url.split('?')[0] ?? '';
-    if (path.includes('/secrets') || path === '/tokens' || path === '/audit') reply.header('cache-control', 'no-store');
+    if (
+      path.includes('/secrets') ||
+      path === '/tokens' ||
+      path === '/audit' ||
+      path.startsWith('/settings/2fa') ||
+      path === '/login/2fa'
+    )
+      reply.header('cache-control', 'no-store');
     return payload;
   });
 
@@ -82,4 +90,5 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
   registerDocumentRoutes(app, ctx);
   registerSecretRoutes(app, ctx);
   registerAdminRoutes(app, ctx);
+  registerTwoFactorRoutes(app, ctx);
 }

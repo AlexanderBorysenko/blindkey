@@ -7,6 +7,8 @@ import { isUiRequest } from './render.js';
 
 export const SESSION_COOKIE = 'pidb_session';
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const CHALLENGE_COOKIE = 'pidb_2fa';
+export const CHALLENGE_TTL_S = 300;
 
 export function uiSessionId(req: FastifyRequest): string | null {
   const raw = req.cookies?.[SESSION_COOKIE];
@@ -25,6 +27,14 @@ export function setSessionCookie(reply: FastifyReply, id: string, secure: boolea
 
 export function clearSessionCookie(reply: FastifyReply): void {
   reply.clearCookie(SESSION_COOKIE, { path: '/' });
+}
+
+export function setChallengeCookie(reply: FastifyReply, id: string, secure: boolean): void {
+  reply.setCookie(CHALLENGE_COOKIE, id, { path: '/login', httpOnly: true, sameSite: 'lax', secure, maxAge: CHALLENGE_TTL_S });
+}
+
+export function clearChallengeCookie(reply: FastifyReply): void {
+  reply.clearCookie(CHALLENGE_COOKIE, { path: '/login' });
 }
 
 export function requireAdmin(req: FastifyRequest): Principal {
@@ -69,7 +79,7 @@ export function registerUiGuard(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
     if (!isUiRequest(req.url)) return;
     const path = req.url.split('?')[0] ?? '';
-    if (path === '/login' || path.startsWith('/assets/')) return;
+    if (path === '/login' || path === '/login/2fa' || path.startsWith('/assets/')) return;
     if (req.principal?.kind === 'admin') return;
     return reply.redirect('/login', 302);
   });

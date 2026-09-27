@@ -1,0 +1,14 @@
+<div class="auth-card">
+  <div class="brand">
+    <span class="mark">pi</span>
+    <span>pidb</span>
+  </div>
+  <p class="lede">Two-factor code</p>
+  <p class="note">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+  <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+  <form method="post" action="/login/2fa">
+    <label>Code <input id="code" name="code" inputmode="text" autocomplete="one-time-code" autofocus required /></label>
+    <button class="btn primary" type="submit">Verify</button>
+  </form>
+  <p><a href="/login">Start over</a></p>
+</div>

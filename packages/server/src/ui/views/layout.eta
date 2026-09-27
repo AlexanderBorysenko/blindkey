@@ -38,6 +38,9 @@
         </details>
       </div>
       <main class="main">
+        <% if (it.totpEnabled === false) { %>
+        <div class="alert warn" role="status">Two-factor authentication is off. <a href="/settings/2fa">Set it up →</a></div>
+        <% } %>
         <%~ it.body %>
       </main>
     </div>
