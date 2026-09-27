@@ -18,6 +18,10 @@ export function getAdminByUsername(db: Db, username: string): AdminRow | null {
   return (db.prepare(`SELECT id, username, password_hash, created_at FROM admin WHERE username = ?`).get(username) as AdminRow | undefined) ?? null;
 }
 
+export function getAdminById(db: Db, id: number): AdminRow | null {
+  return (db.prepare(`SELECT id, username, password_hash, created_at FROM admin WHERE id = ?`).get(id) as AdminRow | undefined) ?? null;
+}
+
 export function createAdmin(db: Db, username: string, passwordHash: string): AdminRow {
   if (getAdmin(db)) throw new ConflictError('admin already exists');
   const info = db.prepare(`INSERT INTO admin (username, password_hash, created_at) VALUES (?, ?, ?)`).run(username, passwordHash, now());

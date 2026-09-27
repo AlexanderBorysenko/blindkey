@@ -4,4 +4,4 @@ export { loadConfig, ConfigError } from './config.js';
 export type { Config, KeyRing } from './config.js';
 export { openDb } from './db/connection.js';
 export type { Db } from './db/connection.js';
-export { runInit, runRotateKey, runBackup, startServer } from './ops.js';
+export { runInit, runRotateKey, runBackup, runTotpReset, startServer } from './ops.js';

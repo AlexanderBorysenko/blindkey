@@ -7,10 +7,12 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { openDb } from '../src/db/connection.js';
-import { runInit, runRotateKey, runBackup } from '../src/ops.js';
+import { runInit, runRotateKey, runBackup, runTotpReset } from '../src/ops.js';
 import { getAdmin } from '../src/repos/admin.js';
 import { getDocument } from '../src/repos/documents.js';
 import { createSecret, revealField } from '../src/repos/secrets.js';
+import { savePendingTotp, getTotp } from '../src/repos/twofactor.js';
+import { listAudit } from '../src/repos/audit.js';
 import { verifyPassword } from '../src/crypto/passwords.js';
 import type { KeyRing } from '../src/config.js';
 
@@ -30,8 +32,24 @@ describe('ops', () => {
     const ring1: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
     const s = createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     const ring2: KeyRing = { current: 2, keys: new Map([[1, ring1.keys.get(1)!], [2, randomBytes(32)]]) };
-    expect(runRotateKey(db, ring2)).toBe(1);
+    expect(runRotateKey(db, ring2)).toEqual({ secrets: 1, totp: 0 });
     expect(revealField(db, { current: 2, keys: new Map([[2, ring2.keys.get(2)!]]) }, s.id, 'k')).toBe('v');
+  });
+  it('2fa reset deletes the admin_totp row and audits auth.totp_reset via shell', async () => {
+    const db = openDb(':memory:');
+    await runInit(db, { username: 'alex', password: 'pw' });
+    const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
+    const admin = getAdmin(db)!;
+    savePendingTotp(db, ring, admin.id, randomBytes(20));
+    expect(runTotpReset(db)).toBe('alex');
+    expect(getTotp(db, admin.id)).toBeNull();
+    const rows = listAudit(db, { action: 'auth.totp_reset' });
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.meta).toEqual({ via: 'shell' });
+  });
+  it('2fa reset throws when there is no admin', () => {
+    const db = openDb(':memory:');
+    expect(() => runTotpReset(db)).toThrow(/no admin user/);
   });
   it('backup writes a consistent copy and prunes old ones', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));

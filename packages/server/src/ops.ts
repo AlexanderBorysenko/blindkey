@@ -6,6 +6,8 @@ import type { KeyRing, Config } from './config.js';
 import { createAdmin, getAdmin } from './repos/admin.js';
 import { getDocument, upsertDocument } from './repos/documents.js';
 import { rewrapAllSecrets } from './repos/secrets.js';
+import { deleteTwoFactor, rewrapTotpSecrets } from './repos/twofactor.js';
+import { writeAudit } from './repos/audit.js';
 import { hashPassword } from './crypto/passwords.js';
 import { GUIDELINES_MD } from './seed/guidelines.js';
 import { buildApp } from './http/app.js';
@@ -24,8 +26,18 @@ export async function runInit(db: Db, opts: { username: string; password: string
   return { adminCreated, guidelinesSeeded };
 }
 
-export function runRotateKey(db: Db, ring: KeyRing): number {
-  return rewrapAllSecrets(db, ring);
+export function runRotateKey(db: Db, ring: KeyRing): { secrets: number; totp: number } {
+  // One transaction per table: a failure in either leaves that table on the old key version,
+  // and rotate-key is safe to run again (rows already on the current version are skipped).
+  return { secrets: rewrapAllSecrets(db, ring), totp: rewrapTotpSecrets(db, ring) };
+}
+
+export function runTotpReset(db: Db): string {
+  const admin = getAdmin(db);
+  if (!admin) throw new Error('no admin user — run init first');
+  deleteTwoFactor(db, admin.id);
+  writeAudit(db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_reset', meta: { via: 'shell' } });
+  return admin.username;
 }
 
 const BACKUP_RE = /^pidb-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/;

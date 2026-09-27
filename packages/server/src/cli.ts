@@ -6,7 +6,7 @@ import * as readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { loadConfig } from './config.js';
 import { openDb } from './db/connection.js';
-import { runBackup, runInit, runRotateKey, startServer } from './ops.js';
+import { runBackup, runInit, runRotateKey, runTotpReset, startServer } from './ops.js';
 
 const CTRL_C = '\u0003';
 const BACKSPACE = '\u007f';
@@ -111,7 +111,9 @@ program
     try {
       const config = loadConfig();
       const db = openDb(config.dbPath);
-      console.log(`rewrapped ${runRotateKey(db, config.keyRing)} secrets to key version ${config.keyRing.current}`);
+      const r = runRotateKey(db, config.keyRing);
+      console.log(`rewrapped ${r.secrets} secrets to key version ${config.keyRing.current}`);
+      console.log(`rewrapped ${r.totp} 2FA secrets`);
       db.close();
     } catch (err) {
       fatal(err);
@@ -129,6 +131,21 @@ program
       const db = openDb(config.dbPath);
       const file = runBackup(db, opts.out ?? join(config.dataDir, 'backups'), Number.parseInt(opts.keep, 10));
       console.log(`backup written: ${file}`);
+      db.close();
+    } catch (err) {
+      fatal(err);
+    }
+  });
+
+const twoFactor = program.command('2fa').description('Two-factor authentication (shell-only recovery)');
+twoFactor
+  .command('reset')
+  .description('Turn off two-factor authentication for the admin (emergency recovery)')
+  .action(() => {
+    try {
+      const config = loadConfig();
+      const db = openDb(config.dbPath);
+      console.log(`two-factor disabled for ${runTotpReset(db)}`);
       db.close();
     } catch (err) {
       fatal(err);

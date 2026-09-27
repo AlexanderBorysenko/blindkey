@@ -113,6 +113,36 @@ CREATE TABLE sessions (
 );
 `,
   },
+  {
+    id: 2,
+    sql: `
+CREATE TABLE admin_totp (
+  admin_id INTEGER PRIMARY KEY REFERENCES admin(id) ON DELETE CASCADE,
+  secret_enc BLOB NOT NULL,
+  key_version INTEGER NOT NULL,
+  enabled_at INTEGER,
+  last_used_step INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE recovery_codes (
+  id INTEGER PRIMARY KEY,
+  admin_id INTEGER NOT NULL REFERENCES admin(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL,
+  used_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX recovery_codes_admin ON recovery_codes(admin_id);
+CREATE TABLE login_challenges (
+  id TEXT PRIMARY KEY,
+  admin_id INTEGER NOT NULL REFERENCES admin(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  ip TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT ''
+);
+`,
+  },
 ];
 
 export function runMigrations(db: Database.Database): number {
