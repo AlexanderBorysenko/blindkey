@@ -4,13 +4,20 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": { "pidb": "./dist/cli.js" },
-  "files": ["dist"],
+  "bin": {
+    "pidb": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@pidb/shared": "0.1.0",
     "commander": "^15.0.0"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "^2.1.0"
   }
 }

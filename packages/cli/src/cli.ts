@@ -3,9 +3,9 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { PidbClient } from './client.js';
-import { loadConfig } from './config.js';
-import { CliError } from './errors.js';
-import { emit } from './output.js';
+import { loadConfig, normalizeUrl } from './config.js';
+import { CliError, EXIT_AUTH, EXIT_NOT_FOUND, EXIT_REFUSED } from './errors.js';
+import { emit, table } from './output.js';
 import { runLogin } from './commands/login.js';
 import { runProjectsGet, runProjectsList, runSearch } from './commands/projects.js';
 import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from './commands/docs.js';
@@ -13,12 +13,46 @@ import { runSecretGet, runSecretSet, runSecretsList } from './commands/secrets.j
 import { runSecretExec } from './commands/exec.js';
 import { runSecretEnv, runSecretWrite } from './commands/files.js';
 import { runTokenCreate, runTokenList, runTokenRevoke } from './commands/tokens.js';
+import { resolveDataDir } from './agent/datadir.js';
+import { resolveAgentConfig } from './agent/context.js';
+import { loadBindings, loadProfiles, repoKey, saveBindings, saveProfiles } from './agent/state.js';
+import { keyringStore, type TokenStore } from './agent/tokenstore.js';
 
 export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
   return new PidbClient(loadConfig(env));
 }
 
-export function buildProgram(): Command {
+/** Not available to the Claude agent (spec §2.3): `login`, `secret get`, `secret set`, `token *`. */
+const AGENT_REFUSED_MESSAGE = 'not available to the Claude agent — ask the user';
+
+export interface ProgramOptions {
+  /** Agent mode (spec §2.3) — also entered when `PIDB_AGENT=1` is set in `env`, see `main()`. */
+  agent?: boolean;
+  env?: NodeJS.ProcessEnv;
+  cwd?: string;
+  /** Overrides the OS credential store (tests must use `memoryStore()`, never the real keychain). */
+  store?: TokenStore;
+  /** Overrides the derived plugin data dir (tests). */
+  dataDir?: string;
+}
+
+export function buildProgram(opts: ProgramOptions = {}): Command {
+  const agent = opts.agent === true;
+  const env = opts.env ?? process.env;
+  const cwd = opts.cwd ?? process.cwd();
+  const dataDir = opts.dataDir ?? resolveDataDir(env);
+  const store = opts.store ?? keyringStore(dataDir);
+
+  const client = async (): Promise<PidbClient> => {
+    if (!agent) return clientFrom(env);
+    const cfg = await resolveAgentConfig({ cwd, env, store, dataDir });
+    return new PidbClient({ url: cfg.url, token: cfg.token });
+  };
+
+  const refuseInAgentMode = (): void => {
+    if (agent) throw new CliError(AGENT_REFUSED_MESSAGE, EXIT_REFUSED);
+  };
+
   const program = new Command()
     .name('pidb')
     .description('Projects Info DB client')
@@ -32,6 +66,7 @@ export function buildProgram(): Command {
     .option('--expires <days>', 'token lifetime in days, 1-365 (default: 30)')
     .description('Exchange admin credentials for an API token and save it')
     .action(async (url: string, opts: { username?: string; name?: string; expires?: string }) => {
+      refuseInAgentMode();
       emit(await runLogin(url, opts), false);
     });
 
@@ -40,24 +75,27 @@ export function buildProgram(): Command {
     .command('list')
     .option('--json', 'raw JSON output')
     .action(async (opts: { json?: boolean }) => {
-      emit(await runProjectsList(clientFrom()), opts.json === true);
+      emit(await runProjectsList(await client()), opts.json === true);
     });
   projects
     .command('get')
     .argument('<slug>')
     .option('--json', 'raw JSON output')
     .action(async (slug: string, opts: { json?: boolean }) => {
-      emit(await runProjectsGet(clientFrom(), slug), opts.json === true);
+      emit(await runProjectsGet(await client(), slug), opts.json === true);
     });
 
-  program
-    .command('search')
-    .argument('<query>')
-    .option('--json', 'raw JSON output')
-    .description('Search projects, documents and secret names (never values)')
-    .action(async (query: string, opts: { json?: boolean }) => {
-      emit(await runSearch(clientFrom(), query), opts.json === true);
-    });
+  // Not part of the agent-mode command set (spec §2.3); simply omitted rather than refused.
+  if (!agent) {
+    program
+      .command('search')
+      .argument('<query>')
+      .option('--json', 'raw JSON output')
+      .description('Search projects, documents and secret names (never values)')
+      .action(async (query: string, opts: { json?: boolean }) => {
+        emit(await runSearch(await client(), query), opts.json === true);
+      });
+  }
 
   const docs = program.command('docs').description('Documents (Markdown)');
   docs
@@ -65,7 +103,7 @@ export function buildProgram(): Command {
     .argument('[target]', 'project slug or "global"', 'global')
     .option('--json', 'raw JSON output')
     .action(async (target: string, opts: { json?: boolean }) => {
-      emit(await runDocsList(clientFrom(), target), opts.json === true);
+      emit(await runDocsList(await client(), target), opts.json === true);
     });
   docs
     .command('get')
@@ -75,7 +113,7 @@ export function buildProgram(): Command {
     .option('--json', 'raw JSON output')
     .action(async (a: string, b: string | undefined, opts: { refs?: boolean; json?: boolean }) => {
       const { target, doc } = resolveDocTarget(a, b);
-      emit(await runDocsGet(clientFrom(), target, doc, { refs: opts.refs }), opts.json === true);
+      emit(await runDocsGet(await client(), target, doc, { refs: opts.refs }), opts.json === true);
     });
   docs
     .command('put')
@@ -93,7 +131,7 @@ export function buildProgram(): Command {
         opts: { file: string; title: string; category: string; force?: boolean; json?: boolean },
       ) => {
         const { target, doc } = resolveDocTarget(a, b);
-        emit(await runDocsPut(clientFrom(), target, doc, opts), opts.json === true);
+        emit(await runDocsPut(await client(), target, doc, opts), opts.json === true);
       },
     );
 
@@ -103,7 +141,7 @@ export function buildProgram(): Command {
     .argument('[target]', 'project slug or "global"', 'global')
     .option('--json', 'raw JSON output')
     .action(async (target: string, opts: { json?: boolean }) => {
-      emit(await runSecretsList(clientFrom(), target), opts.json === true);
+      emit(await runSecretsList(await client(), target), opts.json === true);
     });
 
   const secret = program.command('secret').description('Consume a single secret');
@@ -115,7 +153,8 @@ export function buildProgram(): Command {
     .option('--print', 'print the value to stdout (refused without this flag)')
     .option('--json', 'raw JSON output')
     .action(async (target: string, name: string, field: string, opts: { print?: boolean; json?: boolean }) => {
-      emit(await runSecretGet(clientFrom(), target, name, field, opts), opts.json === true);
+      refuseInAgentMode();
+      emit(await runSecretGet(await client(), target, name, field, opts), opts.json === true);
     });
   secret
     .command('set')
@@ -134,7 +173,8 @@ export function buildProgram(): Command {
         field: string,
         opts: { fromFile?: string; sensitive?: boolean; nonSensitive?: boolean; create?: boolean; json?: boolean },
       ) => {
-        emit(await runSecretSet(clientFrom(), target, name, field, opts), opts.json === true);
+        refuseInAgentMode();
+        emit(await runSecretSet(await client(), target, name, field, opts), opts.json === true);
       },
     );
   secret
@@ -149,7 +189,7 @@ export function buildProgram(): Command {
     .description('Write one field value to a file (never printed)')
     .action(
       async (target: string, name: string, field: string, opts: { out: string; mode?: string; force?: boolean; json?: boolean }) => {
-        emit(await runSecretWrite(clientFrom(), target, name, field, opts), opts.json === true);
+        emit(await runSecretWrite(await client(), target, name, field, opts), opts.json === true);
       },
     );
   secret
@@ -162,7 +202,7 @@ export function buildProgram(): Command {
     .option('--json', 'raw JSON output')
     .description('Write every field as key=value lines to a file (never printed)')
     .action(async (target: string, name: string, opts: { out: string; mode?: string; force?: boolean; json?: boolean }) => {
-      emit(await runSecretEnv(clientFrom(), target, name, opts), opts.json === true);
+      emit(await runSecretEnv(await client(), target, name, opts), opts.json === true);
     });
   secret
     .command('exec')
@@ -171,7 +211,7 @@ export function buildProgram(): Command {
     .argument('<command...>', 'command to run after --')
     .description('Run a command with the secret fields injected as PIDB_<KEY> environment variables')
     .action(async (target: string, name: string, command: string[]) => {
-      process.exitCode = await runSecretExec(clientFrom(), target, name, command);
+      process.exitCode = await runSecretExec(await client(), target, name, command);
     });
 
   const token = program.command('token').description('API tokens (requires an admin token)');
@@ -185,24 +225,140 @@ export function buildProgram(): Command {
     .option('--json', 'raw JSON output')
     .action(
       async (opts: { name: string; scopes: string; projects?: string; expires?: string; expiry?: boolean; json?: boolean }) => {
-        emit(await runTokenCreate(clientFrom(), opts), opts.json === true);
+        refuseInAgentMode();
+        emit(await runTokenCreate(await client(), opts), opts.json === true);
       },
     );
   token
     .command('list')
     .option('--json', 'raw JSON output')
     .action(async (opts: { json?: boolean }) => {
-      emit(await runTokenList(clientFrom()), opts.json === true);
+      refuseInAgentMode();
+      emit(await runTokenList(await client()), opts.json === true);
     });
   token
     .command('revoke')
     .argument('<id>')
     .option('--json', 'raw JSON output')
     .action(async (id: string, opts: { json?: boolean }) => {
-      emit(await runTokenRevoke(clientFrom(), id), opts.json === true);
+      refuseInAgentMode();
+      emit(await runTokenRevoke(await client(), id), opts.json === true);
     });
 
+  if (agent) buildAgentOnlyCommands(program, { cwd, store, dataDir });
+
   return program;
+}
+
+interface AgentOnlyDeps {
+  cwd: string;
+  store: TokenStore;
+  dataDir: string;
+}
+
+/**
+ * Commands that exist only in agent mode (spec §2.3): `profile`, `bind`/
+ * `unbind`, `status`. `connect` is intentionally not registered here (Task 6).
+ */
+function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: AgentOnlyDeps): void {
+  const profile = program.command('profile').description('Server profiles');
+  profile
+    .command('list')
+    .option('--json', 'raw JSON output')
+    .action((opts: { json?: boolean }) => {
+      const profiles = loadProfiles(dataDir);
+      const rows = Object.entries(profiles.profiles).map(([name, p]) => [
+        name,
+        p.url,
+        name === profiles.default ? 'yes' : '',
+      ]);
+      emit({ json: profiles, text: table(['NAME', 'URL', 'DEFAULT'], rows) }, opts.json === true);
+    });
+  profile
+    .command('add')
+    .argument('<name>')
+    .argument('<url>')
+    .action((name: string, url: string) => {
+      const profiles = loadProfiles(dataDir);
+      const normalized = normalizeUrl(url);
+      profiles.profiles[name] = { url: normalized };
+      if (!profiles.default) profiles.default = name;
+      saveProfiles(dataDir, profiles);
+      emit({ json: { name, url: normalized }, text: `added profile "${name}" (${normalized})` }, false);
+    });
+  profile
+    .command('use')
+    .argument('<name>')
+    .action((name: string) => {
+      const profiles = loadProfiles(dataDir);
+      if (!profiles.profiles[name]) throw new CliError(`unknown profile "${name}"`, EXIT_NOT_FOUND);
+      profiles.default = name;
+      saveProfiles(dataDir, profiles);
+      emit({ json: { default: name }, text: `default profile is now "${name}"` }, false);
+    });
+  profile
+    .command('remove')
+    .argument('<name>')
+    .action(async (name: string) => {
+      const profiles = loadProfiles(dataDir);
+      if (!profiles.profiles[name]) throw new CliError(`unknown profile "${name}"`, EXIT_NOT_FOUND);
+      delete profiles.profiles[name];
+      if (profiles.default === name) profiles.default = null;
+      saveProfiles(dataDir, profiles);
+      await store.delete(name);
+      emit({ json: { removed: name }, text: `removed profile "${name}"` }, false);
+    });
+
+  program
+    .command('bind')
+    .argument('<project>', 'project slug to bind this repo to')
+    .option('--profile <name>', 'profile to bind (default: the repo\'s current binding, else the default profile)')
+    .action((project: string, opts: { profile?: string }) => {
+      const profiles = loadProfiles(dataDir);
+      const bindings = loadBindings(dataDir);
+      const key = repoKey(cwd);
+      const profileName = opts.profile ?? bindings[key]?.profile ?? profiles.default;
+      if (!profileName || !profiles.profiles[profileName]) {
+        throw new CliError('no server configured — run `pidb profile add <name> <url>`', EXIT_AUTH);
+      }
+      bindings[key] = { profile: profileName, project };
+      saveBindings(dataDir, bindings);
+      emit(
+        { json: bindings[key], text: `bound this repo to project "${project}" on profile "${profileName}"` },
+        false,
+      );
+    });
+  program.command('unbind').action(() => {
+    const bindings = loadBindings(dataDir);
+    const key = repoKey(cwd);
+    const had = key in bindings;
+    delete bindings[key];
+    saveBindings(dataDir, bindings);
+    emit({ json: { unbound: had }, text: had ? 'unbound this repo' : 'this repo was not bound' }, false);
+  });
+
+  program
+    .command('status')
+    .option('--json', 'raw JSON output')
+    .action(async (opts: { json?: boolean }) => {
+      const profiles = loadProfiles(dataDir);
+      const bindings = loadBindings(dataDir);
+      const binding = bindings[repoKey(cwd)];
+      const profileName = binding?.profile ?? profiles.default;
+      const resolvedProfile = profileName ? profiles.profiles[profileName] : undefined;
+      const url = resolvedProfile?.url ?? null;
+      const token = profileName ? await store.get(profileName) : null;
+      const connected = token !== null;
+      const project = binding?.project ?? null;
+      const json = { profile: profileName ?? null, url, project, connected };
+      const text = [
+        `profile: ${profileName ?? '(none)'}`,
+        `url: ${url ?? '(none)'}`,
+        `project: ${project ?? '(none)'}`,
+        `connected: ${connected ? 'yes' : 'no'}`,
+      ].join('\n');
+      emit({ json, text }, opts.json === true);
+    });
 }
 
 export function exitCodeOf(err: unknown): number {
@@ -211,7 +367,9 @@ export function exitCodeOf(err: unknown): number {
 
 export async function main(argv: string[] = process.argv): Promise<void> {
   try {
-    await buildProgram().parseAsync(argv);
+    // Agent mode (spec §2.3) is entered via `PIDB_AGENT=1` (set by the plugin's bin shim) or by
+    // running the dedicated agent entry (agent/cli.ts), which always passes `{ agent: true }`.
+    await buildProgram({ agent: process.env.PIDB_AGENT === '1' }).parseAsync(argv);
   } catch (err) {
     console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
     // process.exit() can truncate a long console.error write when stderr is a pipe (exactly how
