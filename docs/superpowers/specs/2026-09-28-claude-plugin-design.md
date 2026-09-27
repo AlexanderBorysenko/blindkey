@@ -62,6 +62,7 @@ Give Claude Code a stable, safe working context for pidb: it knows the bound pro
 
 ### 1.4 Prefilled secret form
 - `GET /p/:slug/secrets/new` and `/global/secrets/new` accept `name`, `description`, `tags` (comma-separated), `keys` (comma-separated field keys; a key ending in `!` is non-sensitive, e.g. `host!,password`) and prefill the form (sensitive = default checked unless `!`). Values are never accepted from the query. Nothing is created until the user submits.
+- `GET .../secrets/:name/edit` accepts the same `keys` param: any key not already on the secret gets an appended empty row (sensitive per the same `!` rule); a key already present is left untouched (existing value/sensitivity wins, never duplicated or reset). This is how `secret_request_link` (1.5) points at an existing secret instead of `/new`.
 
 ### 1.5 MCP tools (server `/mcp`)
 - `update_project(slug, name?, status?, tags?, summary?)` — `projects:write`.

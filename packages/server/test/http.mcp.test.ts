@@ -29,6 +29,13 @@ async function connect(token: string): Promise<Client> {
   return client;
 }
 
+/** The address the current test's app is listening on — only valid after at least one `connect()`. */
+function addressOf(): string {
+  const address = listening.get(t.app);
+  if (!address) throw new Error('app is not listening yet — call connect() first');
+  return address;
+}
+
 const textOf = (r: Awaited<ReturnType<Client['callTool']>>): string => {
   const c = (r.content as { type: string; text?: string }[])[0];
   return c?.text ?? '';
@@ -92,6 +99,7 @@ describe('mcp', () => {
   it('update_project requires projects:write (spec §1.1/§1.5)', async () => {
     t = await makeTestApp();
     t.project('alpha');
+    t.project('beta'); // exists, but out of this test's tokens' scope
     const noScope = await connect(t.token(['projects:read'], ['alpha']));
     const denied = await noScope.callTool({ name: 'update_project', arguments: { slug: 'alpha', summary: 'nope' } });
     expect(denied.isError).toBe(true);
@@ -111,6 +119,12 @@ describe('mcp', () => {
     const missing = await client.callTool({ name: 'update_project', arguments: { slug: 'nope', summary: 'x' } });
     expect(missing.isError).toBe(true);
     expect(textOf(missing)).toContain('not_found');
+
+    // "beta" exists, but this token (scoped to ["alpha"]) can't see it — same not_found as a
+    // wholly unknown slug, not a scope error that would confirm beta's existence.
+    const crossProject = await client.callTool({ name: 'update_project', arguments: { slug: 'beta', summary: 'x' } });
+    expect(crossProject.isError).toBe(true);
+    expect(textOf(crossProject)).toContain('not_found');
   });
 
   it('upsert_secret_meta creates non-sensitive fields, patches them, and refuses anything sensitive (spec §1.1/§1.5)', async () => {
@@ -171,11 +185,40 @@ describe('mcp', () => {
       textOf(await client.callTool({ name: 'upsert_secret_meta', arguments: { name: 'GlobalOne', fields: [{ key: 'host', value: 'g' }] } })),
     );
     expect(global.fields).toEqual([{ key: 'host', sensitive: false, value: 'g' }]);
+
+    // Duplicate keys and an empty field list on create are validated the same way the UI form's
+    // schema validates them (secretInputSchema) — a validation error, never "internal error".
+    const dup = await client.callTool({
+      name: 'upsert_secret_meta',
+      arguments: { project: 'alpha', name: 'DupFields', fields: [{ key: 'host', value: 'a' }, { key: 'host', value: 'b' }] },
+    });
+    expect(dup.isError).toBe(true);
+    expect(textOf(dup)).toContain('validation');
+    const emptyFields = await client.callTool({ name: 'upsert_secret_meta', arguments: { project: 'alpha', name: 'EmptyOne' } });
+    expect(emptyFields.isError).toBe(true);
+    expect(textOf(emptyFields)).toContain('validation');
+
+    // "beta" exists, but this token (scoped to ["alpha"]) can't see it — a brand-new name and an
+    // existing secret's name both come back not_found, never leaking which one it was.
+    const beta = t.project('beta');
+    createSecret(t.db, t.ring, { projectId: beta.id, name: 'BetaSecret', description: '', tags: [], fields: [{ key: 'host', value: 'bh' }] });
+    const crossExisting = await client.callTool({
+      name: 'upsert_secret_meta',
+      arguments: { project: 'beta', name: 'BetaSecret', fields: [{ key: 'host', value: 'x' }] },
+    });
+    expect(crossExisting.isError).toBe(true);
+    expect(textOf(crossExisting)).toContain('not_found');
+    const crossMissing = await client.callTool({
+      name: 'upsert_secret_meta',
+      arguments: { project: 'beta', name: 'BrandNew', fields: [{ key: 'host', value: 'x' }] },
+    });
+    expect(crossMissing.isError).toBe(true);
+    expect(textOf(crossMissing)).toContain('not_found');
   });
 
   it('secret_request_link requires any secrets scope and builds a URL from the request origin with encoded params (spec §1.4/§1.5)', async () => {
     t = await makeTestApp();
-    t.project('alpha');
+    const alpha = t.project('alpha');
     const client = await connect(t.token(['secrets:use'], ['alpha']));
     const res = JSON.parse(
       textOf(
@@ -195,7 +238,9 @@ describe('mcp', () => {
       ),
     );
     const url = new URL(res.url);
+    // "SMTP" doesn't exist yet, so this points at the new-secret form...
     expect(url.pathname).toBe('/p/alpha/secrets/new');
+    expect(url.origin).toBe(new URL(addressOf()).origin);
     expect(url.searchParams.get('name')).toBe('SMTP');
     expect(url.searchParams.get('description')).toBe('mailer');
     expect(url.searchParams.get('tags')).toBe('prod');
@@ -210,6 +255,27 @@ describe('mcp', () => {
       ),
     );
     expect(new URL(global.url).pathname).toBe('/global/secrets/new');
+
+    // ...but a name that already exists (project-scoped or global) points at that secret's edit
+    // page instead, with the same query so the edit route can append rows for missing keys only.
+    createSecret(t.db, t.ring, { projectId: alpha.id, name: 'ExistingSecret', description: '', tags: [], fields: [{ key: 'host', value: 'h' }] });
+    const existingLink = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: 'secret_request_link',
+          arguments: { project: 'alpha', name: 'ExistingSecret', keys: [{ key: 'password', sensitive: true }] },
+        }),
+      ),
+    );
+    const existingUrl = new URL(existingLink.url);
+    expect(existingUrl.pathname).toBe('/p/alpha/secrets/ExistingSecret/edit');
+    expect(existingUrl.searchParams.get('keys')).toBe('password');
+
+    createSecret(t.db, t.ring, { projectId: null, name: 'GlobalExisting', description: '', tags: [], fields: [{ key: 'username', value: 'u' }] });
+    const globalExistingLink = JSON.parse(
+      textOf(await client.callTool({ name: 'secret_request_link', arguments: { name: 'GlobalExisting', keys: [{ key: 'password', sensitive: true }] } })),
+    );
+    expect(new URL(globalExistingLink.url).pathname).toBe('/global/secrets/GlobalExisting/edit');
 
     const noScope = await connect(t.token(['projects:read'], ['alpha']));
     const denied = await noScope.callTool({ name: 'secret_request_link', arguments: { name: 'X', keys: [{ key: 'a', sensitive: true }] } });

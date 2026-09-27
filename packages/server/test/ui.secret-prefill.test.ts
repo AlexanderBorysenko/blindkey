@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { makeTestApp, type TestCtx } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
-import { getSecretMeta } from '../src/repos/secrets.js';
+import { createSecret, getSecretMeta } from '../src/repos/secrets.js';
 import { getProjectBySlug } from '../src/repos/projects.js';
 
 let t: TestCtx;
@@ -84,5 +84,41 @@ describe('prefilled secret form (spec §1.4)', () => {
     const res = await page('/p/acme/secrets/new?name=ShouldNotExist&description=d&tags=t&keys=host,password');
     expect(res.statusCode).toBe(200);
     expect(getSecretMeta(t.db, t.ring, acmeId(), 'ShouldNotExist')).toBeNull();
+  });
+
+  it('de-duplicates a repeated key in the same list', async () => {
+    const res = await page('/p/acme/secrets/new?keys=' + encodeURIComponent('host,host,password,password!'));
+    expect(res.statusCode).toBe(200);
+    const rows = rowsSection(res.body);
+    const cardStarts = [...rows.matchAll(/<div class="field-card/g)];
+    expect(cardStarts.length).toBe(2);
+    const keys = [...rows.matchAll(/name="key" value="([^"]*)"/g)].map((m) => m[1]);
+    expect(keys).toEqual(['host', 'password']);
+  });
+});
+
+describe('edit-form prefill via keys (spec §1.4 — how secret_request_link points at an existing secret)', () => {
+  it('appends an empty row only for a key not already on the secret; an existing key is left untouched', async () => {
+    createSecret(t.db, t.ring, { projectId: acmeId(), name: 'EditMe', description: '', tags: [], fields: [{ key: 'host', value: 'h1' }] });
+    const res = await page('/p/acme/secrets/EditMe/edit?keys=' + encodeURIComponent('host!,password'));
+    expect(res.statusCode).toBe(200);
+    const rows = rowsSection(res.body);
+    const cardStarts = [...rows.matchAll(/<div class="field-card/g)];
+    expect(cardStarts.length).toBe(2);
+    const keys = [...rows.matchAll(/name="key" value="([^"]*)"/g)].map((m) => m[1]);
+    expect(keys).toEqual(['host', 'password']);
+    // host's stored (non-sensitive) value survives untouched; password's new row starts empty.
+    const values = [...rows.matchAll(/<textarea name="value"[^>]*>([\s\S]*?)<\/textarea>/g)].map((m) => m[1]);
+    expect(values).toEqual(['h1', '']);
+    const sensitives = [...rows.matchAll(/name="sensitive" value="(\d)"/g)].map((m) => m[1]);
+    expect(sensitives).toEqual(['0', '1']);
+  });
+
+  it('adds nothing when keys is absent — no behavior change for the plain edit form', async () => {
+    const res = await page('/p/acme/secrets/EditMe/edit');
+    expect(res.statusCode).toBe(200);
+    const rows = rowsSection(res.body);
+    const cardStarts = [...rows.matchAll(/<div class="field-card/g)];
+    expect(cardStarts.length).toBe(1);
   });
 });

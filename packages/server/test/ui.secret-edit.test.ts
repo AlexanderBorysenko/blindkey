@@ -133,6 +133,28 @@ describe('ui secret create', () => {
     expect(res.statusCode).toBe(403);
     expect(getSecretMeta(t.db, t.ring, acme(), 'NoCsrf')).toBeNull();
   });
+
+  it('a name collision re-renders the form with a clear error and never echoes the typed-in (possibly sensitive) values', async () => {
+    const res = await post('/p/acme/secrets', {
+      csrf,
+      name: 'DB',
+      description: 'nope',
+      tags: 'x',
+      key: ['password'],
+      value: ['typed-in-secret-value'],
+      sensitive: ['1'],
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toContain('A secret with this name already exists');
+    expect(res.body).not.toContain('typed-in-secret-value');
+    const main = /<main[^>]*>([\s\S]*?)<\/main>/.exec(res.body)![1];
+    expect(main).toContain('value="password"');
+    const values = [...main.matchAll(/<textarea name="value"[^>]*>([\s\S]*?)<\/textarea>/g)].map((m) => m[1]);
+    expect(values).toEqual(['']);
+    // The existing secret's own stored value is untouched by the failed attempt.
+    const meta = getSecretMeta(t.db, t.ring, acme(), 'DB')!;
+    expect(revealField(t.db, t.ring, meta.id, 'password')).toBe('hunter2hunter2');
+  });
 });
 
 describe('ui secret edit', () => {

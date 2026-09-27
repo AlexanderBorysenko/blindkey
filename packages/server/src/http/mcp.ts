@@ -2,9 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { DOC_CATEGORIES, PROJECT_STATUSES, secretKeySchema, secretNameSchema, slugSchema, tagsSchema, type Scope } from '@pidb/shared';
+import { DOC_CATEGORIES, PROJECT_STATUSES, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@pidb/shared';
 import type { AppContext } from './context.js';
-import { actorOf, originOf } from './helpers.js';
+import { actorOf, originOf, parseBody } from './helpers.js';
 import { hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { AppError } from '../errors.js';
 import { getProjectDetailFor, listProjectsFor, updateProjectFor } from '../services/projects.js';
@@ -16,15 +16,16 @@ import { searchFor } from '../services/search.js';
 
 const INSTRUCTIONS = `pidb stores project documentation and named secrets.
 Secret VALUES are never returned through MCP: only names, descriptions, tags and field keys (with a "sensitive" flag).
-To use a secret value without loading it into context, run the pidb CLI:
+Values are consumed ONLY via the pidb CLI — never any other way:
   pidb secret exec <project|global> "<name>" -- <command>   # fields injected as PIDB_<KEY> env vars
   pidb secret write <project|global> "<name>" <field> --out <path> --mode 600
   pidb secret env <project|global> "<name>" --out .env
 Documents reference secrets with {{secret:Name}}, {{secret:global/Name}} or {{secret:<project-slug>/Name}}. Never paste secret values into documents.
 update_project changes name/status/tags/summary (needs projects:write). upsert_secret_meta creates or patches a
 secret's non-sensitive fields (needs secrets:meta-write) — anything sensitive is refused. To get a sensitive value
-in front of the user, call secret_request_link for a prefilled admin-UI link, hand it to them, then call
-list_secrets to confirm once they've submitted it.`;
+in front of the user, call secret_request_link for a prefilled admin-UI link (it points at the new-secret form for a
+name that doesn't exist yet, or the existing secret's edit page otherwise), hand it to them, then call list_secrets
+to confirm once they've submitted it.`;
 
 /** Any scope that touches secrets at all — the minimum bar for `secret_request_link` (spec §1.5: "any secrets scope"). */
 const SECRETS_SCOPES: Scope[] = ['secrets:meta', 'secrets:meta-write', 'secrets:reveal', 'secrets:use', 'secrets:write'];
@@ -154,13 +155,17 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
         const existing = getSecretMeta(ctx.db, ctx.ring, projectRow?.id ?? null, name);
         const fieldInputs = (fields ?? []).map((f) => ({ key: f.key, value: f.value }));
         if (!existing) {
-          return createSecretFor(ctx, actor, project ?? null, { name, description: description ?? '', tags: tags ?? [], fields: fieldInputs });
+          // Validated the same way the UI's create form is (min 1 field, unique keys, size caps):
+          // a duplicate key or an empty field list comes back as a validation error, not "internal error".
+          const input = parseBody(secretInputSchema, { name, description: description ?? '', tags: tags ?? [], fields: fieldInputs });
+          return createSecretFor(ctx, actor, project ?? null, input);
         }
-        return updateSecretFor(ctx, actor, project ?? null, name, {
+        const patch = parseBody(secretPatchSchema, {
           ...(description !== undefined ? { description } : {}),
           ...(tags !== undefined ? { tags } : {}),
           ...(fieldInputs.length ? { fields: fieldInputs } : {}),
         });
+        return updateSecretFor(ctx, actor, project ?? null, name, patch);
       }),
   );
 
@@ -169,7 +174,9 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
     {
       description:
         'Build a prefilled admin-UI link for creating or updating a secret\'s values: give this link to the user; they ' +
-        'type the values; then call list_secrets to confirm. Works with any secrets scope. Never returns or asks for a value.',
+        'type the values; then call list_secrets to confirm. Points at the new-secret form for a name that does not ' +
+        'exist yet, or at that existing secret\'s edit page otherwise (existing fields are left alone; only keys not ' +
+        'already on the secret get an empty row to fill in). Works with any secrets scope. Never returns or asks for a value.',
       inputSchema: {
         project: slugSchema.optional(),
         name: secretNameSchema,
@@ -184,14 +191,16 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
     async ({ project, name, description, tags, keys }) =>
       run(() => {
         assertAnySecretsScope(p);
-        if (project) loadProjectFor(ctx, p, project);
+        const projectRow = project ? loadProjectFor(ctx, p, project) : null;
+        const existing = getSecretMeta(ctx.db, ctx.ring, projectRow?.id ?? null, name);
         const prefix = project ? `/p/${encodeURIComponent(project)}` : '/global';
         const qs = new URLSearchParams();
         qs.set('name', name);
         if (description) qs.set('description', description);
         if (tags && tags.length > 0) qs.set('tags', tags.join(','));
         qs.set('keys', keys.map((k) => (k.sensitive ? k.key : `${k.key}!`)).join(','));
-        return { url: `${origin}${prefix}/secrets/new?${qs.toString()}` };
+        const path = existing ? `${prefix}/secrets/${encodeURIComponent(name)}/edit` : `${prefix}/secrets/new`;
+        return { url: `${origin}${path}?${qs.toString()}` };
       }),
   );
 

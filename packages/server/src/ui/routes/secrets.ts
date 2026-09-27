@@ -10,8 +10,9 @@ import { renderPage, renderPartial } from '../render.js';
 import { scopeOf } from './documents.js';
 
 type SecretParams = { Params: { slug?: string; name: string } };
-/** `GET .../secrets/new` (spec §1.4): a prefill link, so the query is untyped and permissive. */
+/** `GET .../secrets/new` and `.../secrets/:name/edit` (spec §1.4): a prefill link, so the query is untyped and permissive. */
 type SecretNewParams = { Params: { slug?: string }; Querystring: Record<string, unknown> };
+type SecretEditParams = { Params: { slug?: string; name: string }; Querystring: Record<string, unknown> };
 
 interface FieldRow {
   key: string;
@@ -60,20 +61,28 @@ function fieldRows(b: Record<string, unknown>): FieldRow[] {
 /**
  * `keys` query param (spec §1.4, e.g. `host!,password`): one row per comma-separated key, empty
  * value, sensitive unless the key ends with `!` (which is stripped before validating). A key that
- * doesn't match `secretKeySchema` is dropped rather than rejecting the whole request — this is a
- * prefill hint, not a submission. No keys survive → the same single empty sensitive row the plain
- * "new secret" form always started with.
+ * doesn't match `secretKeySchema`, or repeats an earlier key in the same list, is dropped rather
+ * than rejecting the whole request — this is a prefill hint, not a submission.
  */
-function prefillRows(raw: string): FieldRow[] {
+function parseKeyRows(raw: string): FieldRow[] {
   const rows: FieldRow[] = [];
+  const seen = new Set<string>();
   for (const rawKey of raw.split(',')) {
     const trimmed = rawKey.trim();
     if (!trimmed) continue;
     const sensitive = !trimmed.endsWith('!');
     const key = sensitive ? trimmed : trimmed.slice(0, -1);
     if (!secretKeySchema.safeParse(key).success) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
     rows.push({ key, value: '', sensitive });
   }
+  return rows;
+}
+
+/** `GET .../secrets/new?keys=...`: no keys survive parsing → the single empty sensitive row the plain "new secret" form always started with. */
+function prefillRowsForNew(raw: string): FieldRow[] {
+  const rows = parseKeyRows(raw);
   return rows.length > 0 ? rows : [{ key: '', value: '', sensitive: true }];
 }
 
@@ -110,7 +119,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
             name: str(q, 'name'),
             description: str(q, 'description'),
             tags: str(q, 'tags'),
-            rows: prefillRows(str(q, 'keys')),
+            rows: prefillRowsForNew(str(q, 'keys')),
           },
         }),
       );
@@ -143,7 +152,34 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
           }),
         );
       }
-      const created = createSecretFor(ctx, adminActor(req), scope.projectSlug, parsed.data);
+      let created;
+      try {
+        created = createSecretFor(ctx, adminActor(req), scope.projectSlug, parsed.data);
+      } catch (err) {
+        if (!(err instanceof ConflictError)) throw err;
+        // A name collision: the typed-in values (possibly sensitive) are never echoed back into
+        // the re-rendered HTML — only the keys and their sensitivity survive, values blanked —
+        // unlike the edit-form rerender below, which re-echoes because those values are already
+        // the admin's own draft of an existing secret, not a fresh secret about to be duplicated.
+        return reply.status(409).type('text/html').send(
+          renderPage('secret-edit', {
+            ...pageContext(ctx, req, 'New secret'),
+            prefix: scope.prefix,
+            scopeLabel: scope.projectSlug ?? 'global',
+            isNew: true,
+            originalName: null,
+            action: `${scope.prefix}/secrets`,
+            hintKeys: NON_SENSITIVE_KEYS,
+            error: 'A secret with this name already exists — open it to edit.',
+            form: {
+              name: str(b, 'name'),
+              description: str(b, 'description'),
+              tags: str(b, 'tags'),
+              rows: rows.map((r) => ({ key: r.key, value: '', sensitive: r.sensitive })),
+            },
+          }),
+        );
+      }
       return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(created.name)}?done=created`, 302);
     });
   }
@@ -168,10 +204,16 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
       );
     });
 
-    app.get<SecretParams>(`${base}/:name/edit`, async (req, reply) => {
+    app.get<SecretEditParams>(`${base}/:name/edit`, async (req, reply) => {
       const principal = requireAdmin(req);
       const scope = scopeOf(req.params);
       const secret = getSecretFor(ctx, principal, scope.projectSlug, req.params.name);
+      const existingKeys = new Set(secret.fields.map((f) => f.key));
+      // `secret_request_link` (spec §1.5) for a name that already exists points here instead of
+      // `/new`, with the same `keys` param: any key not already on the secret gets an extra empty
+      // row (sensitivity per the `!` rule); an already-present key is left alone, never duplicated
+      // or reset — the stored field (and its sensitivity) wins.
+      const extraRows = parseKeyRows(str(req.query, 'keys')).filter((r) => !existingKeys.has(r.key));
       return reply.type('text/html').send(
         renderPage('secret-edit', {
           ...pageContext(ctx, req, `Edit ${secret.name}`),
@@ -187,7 +229,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
             name: secret.name,
             description: secret.description,
             tags: secret.tags.join(', '),
-            rows: secret.fields.map((f) => ({ key: f.key, value: f.sensitive ? '' : (f.value ?? ''), sensitive: f.sensitive })),
+            rows: [...secret.fields.map((f) => ({ key: f.key, value: f.sensitive ? '' : (f.value ?? ''), sensitive: f.sensitive })), ...extraRows],
           },
         }),
       );
