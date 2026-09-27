@@ -79,6 +79,9 @@ export async function exchangePassword(ctx: AppContext, input: AuthTokenRequest,
   }
   let secondFactor: SecondFactor | undefined;
   if (isTotpEnabled(ctx, admin.id)) {
+    // spec §2: written as soon as the password verifies for a 2FA admin, before the lock and
+    // code checks, so the operator can see the password is known even when every code guess fails.
+    writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.password_ok', ip, user_agent: userAgent, meta: { via: 'api' } });
     if (isSecondFactorLocked(ctx, admin.id) !== null) return { ok: false, reason: 'totp_locked' };
     if (input.totp === undefined) return { ok: false, reason: 'totp_required' };
     const used = await verifySecondFactor(ctx, admin.id, input.totp);

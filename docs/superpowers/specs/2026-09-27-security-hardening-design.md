@@ -157,6 +157,8 @@ The UI guard (`registerUiGuard`) must allow `/login/2fa` anonymously, exactly li
 - **Admin locked out** (§2.4), with a correct password: 429 `totp_locked` ("too many wrong codes — try again later"), whether or not `totp` is present, before any code is checked.
 - **Correct:** the token is minted as in §1.1, and the `auth.login` meta records `second_factor`.
 
+**Update (deploy readiness, 2026-09-27):** both flows above (UI §2.4, API §2.5) now also write `auth.password_ok` (`meta.via: 'ui' | 'api'`) as soon as the password verifies for a 2FA admin, before the lock check and the code check — see `2026-09-27-deploy-readiness-design.md` §2.
+
 **CLI `pidb login`:**
 1. POST without `totp`.
 2. On `ApiError` 401 `totp_required`, prompt `2FA code: ` (hidden input) and POST again with `totp`.

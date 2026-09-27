@@ -72,6 +72,17 @@ describe('expired tokens', () => {
     expect(listAudit(t.db, { action: 'auth.token_expired', limit: 5 }).length).toBeGreaterThan(0);
   });
 
+  it('throttles: 3 uses of one expired token write exactly one auth.token_expired row, all 3 responses 401', async () => {
+    const { token, row } = createToken(t.db, { name: 'old-throttled', scopes: ['projects:read'], projectIds: null, expiresAt: Date.now() - 1 });
+    for (let i = 0; i < 3; i++) {
+      const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth(token) });
+      expect(res.statusCode).toBe(401);
+      expect(res.json().error).toBe('token_expired');
+    }
+    const rows = listAudit(t.db, { action: 'auth.token_expired', limit: 1000 }).filter((r) => r.actor_id === row.id);
+    expect(rows).toHaveLength(1);
+  });
+
   it('keeps unknown tokens generic', async () => {
     const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth('pidb_nope_nope') });
     expect(res.json().error).toBe('unauthorized');

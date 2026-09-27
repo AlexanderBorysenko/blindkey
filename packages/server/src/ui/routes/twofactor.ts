@@ -39,7 +39,7 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
     return { state: 'setup', secret: pending.secret.replace(/(.{4})(?=.)/g, '$1 '), qr: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` };
   }
 
-  // F5d: every settings POST is rate limited (spec §2.5).
+  // F5d: every settings POST is rate limited (spec §2.3).
   const limited = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
   const page = (req: FastifyRequest, reply: FastifyReply, view: View, error: string | null, status = 200) =>

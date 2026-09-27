@@ -57,6 +57,9 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
         return loginPage(reply, 401, 'Invalid username or password.');
       }
       if (isTotpEnabled(ctx, admin.id)) {
+        // spec §2: written as soon as the password verifies for a 2FA admin, before the lock and
+        // code checks, so the operator can see the password is known even when every code guess fails.
+        writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.password_ok', ip: req.ip, user_agent: ua, meta: { via: 'ui' } });
         const challenge = createChallenge(ctx.db, admin.id, CHALLENGE_TTL_MS, req.ip, ua);
         setChallengeCookie(reply, challenge, isSecure(req));
         return reply.redirect('/login/2fa', 302);

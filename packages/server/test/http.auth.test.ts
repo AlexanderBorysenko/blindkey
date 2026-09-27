@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { makeTestApp, auth } from './helpers.js';
 import { listAudit } from '../src/repos/audit.js';
-import { FailureLimiter } from '../src/http/auth.js';
+import { FailureLimiter, ExpiredTokenThrottle } from '../src/http/auth.js';
 
 describe('http auth', () => {
   it('serves /health without auth', async () => {
@@ -79,5 +79,31 @@ describe('FailureLimiter', () => {
     expect(l.size).toBe(1);
     expect(l.isBlocked('a', 2000)).toBe(false);
     expect(l.size).toBe(0);
+  });
+});
+
+describe('ExpiredTokenThrottle', () => {
+  it('allows one write per token per hour, then another once the window elapses', () => {
+    const th = new ExpiredTokenThrottle();
+    expect(th.shouldAudit(1, 0)).toBe(true);
+    expect(th.shouldAudit(1, 1_000)).toBe(false);
+    expect(th.shouldAudit(1, 59 * 60_000)).toBe(false);
+    expect(th.shouldAudit(1, 60 * 60_000)).toBe(true);
+  });
+  it('tracks each token id independently', () => {
+    const th = new ExpiredTokenThrottle();
+    expect(th.shouldAudit(1, 0)).toBe(true);
+    expect(th.shouldAudit(2, 0)).toBe(true);
+    expect(th.shouldAudit(1, 0)).toBe(false);
+    expect(th.shouldAudit(2, 0)).toBe(false);
+  });
+  it('prunes entries older than the window once the map grows past 1000', () => {
+    const th = new ExpiredTokenThrottle();
+    for (let i = 0; i < 1001; i++) th.shouldAudit(i, 0);
+    expect(th.size).toBe(1001);
+    // The next call sees size > 1000 and sweeps every entry whose window has elapsed
+    // before recording its own — only the fresh entry survives.
+    th.shouldAudit(5000, 2 * 60 * 60_000);
+    expect(th.size).toBe(1);
   });
 });

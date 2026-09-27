@@ -512,3 +512,41 @@ describe('F5d: settings POSTs are rate limited', () => {
     }
   });
 });
+
+// auth.password_ok (spec §2): written on POST /login only when the password verifies AND
+// the admin has 2FA on — before any lock check. Its own instance to keep the row counts exact.
+describe('auth.password_ok audit on UI login', () => {
+  it('written once, {via:"ui"}, only when 2FA is on and the password verifies', async () => {
+    const t7 = await makeTestApp();
+    try {
+      const admin = createAdmin(t7.db, 'holly', await hashPassword('pw'));
+
+      // 2FA off: a correct password logs straight in, no password_ok row.
+      const noFactor = await t7.app.inject({ method: 'POST', url: '/login', payload: { username: 'holly', password: 'pw' } });
+      expect(noFactor.statusCode).toBe(302);
+      expect(noFactor.headers.location).toBe('/');
+      expect(listAudit(t7.db, { action: 'auth.password_ok' })).toHaveLength(0);
+
+      // Enroll 2FA.
+      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null }, ip: '', userAgent: '' };
+      startEnrollment(t7.ctx, admin.id);
+      const secret = () => openTotpSecret(t7.ring, getTotp(t7.db, admin.id)!);
+      await confirmEnrollment(t7.ctx, actor, hotp(secret(), stepAt(Date.now())));
+
+      // Wrong password: no password_ok row (the password never verified).
+      const wrong = await t7.app.inject({ method: 'POST', url: '/login', payload: { username: 'holly', password: 'nope' } });
+      expect(wrong.statusCode).toBe(401);
+      expect(listAudit(t7.db, { action: 'auth.password_ok' })).toHaveLength(0);
+
+      // Correct password, 2FA on: exactly one password_ok row, before the 2FA challenge.
+      const right = await t7.app.inject({ method: 'POST', url: '/login', payload: { username: 'holly', password: 'pw' } });
+      expect(right.statusCode).toBe(302);
+      expect(right.headers.location).toBe('/login/2fa');
+      const rows = listAudit(t7.db, { action: 'auth.password_ok' });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.meta).toEqual({ via: 'ui' });
+    } finally {
+      await t7.app.close();
+    }
+  });
+});

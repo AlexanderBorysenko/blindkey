@@ -33,7 +33,7 @@ describe('POST /api/v1/auth/token — 2FA', () => {
     expect(r.json().token).toMatch(/^pidb_/);
   });
 
-  it('enabled, no totp: 401 totp_required, no auth.login_failed or auth.totp_failed audit row', async () => {
+  it('enabled, no totp: 401 totp_required, no auth.login_failed or auth.totp_failed audit row, but auth.password_ok is written', async () => {
     const t = await makeTestApp();
     const admin = createAdmin(t.db, 'alex', await hashPassword('correct horse'));
     await setupEnrolled(t, admin.id);
@@ -43,6 +43,28 @@ describe('POST /api/v1/auth/token — 2FA', () => {
     expect(r.json().error).toBe('totp_required');
     expect(listAudit(t.db, { action: 'auth.login_failed' })).toHaveLength(0);
     expect(listAudit(t.db, { action: 'auth.totp_failed' })).toHaveLength(0);
+    const passwordOk = listAudit(t.db, { action: 'auth.password_ok' });
+    expect(passwordOk).toHaveLength(1);
+    expect(passwordOk[0]?.meta).toEqual({ via: 'api' });
+  });
+
+  it('wrong password: no auth.password_ok row is written (the password never verified)', async () => {
+    const t = await makeTestApp();
+    const admin = createAdmin(t.db, 'alex', await hashPassword('correct horse'));
+    await setupEnrolled(t, admin.id);
+
+    const r = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'wrong' } });
+    expect(r.statusCode).toBe(401);
+    expect(listAudit(t.db, { action: 'auth.password_ok' })).toHaveLength(0);
+  });
+
+  it('2FA off: a correct password writes no auth.password_ok row (only written when 2FA is on)', async () => {
+    const t = await makeTestApp();
+    createAdmin(t.db, 'alex', await hashPassword('correct horse'));
+
+    const r = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse' } });
+    expect(r.statusCode).toBe(201);
+    expect(listAudit(t.db, { action: 'auth.password_ok' })).toHaveLength(0);
   });
 
   it('wrong totp: 401 unauthorized, plus an auth.totp_failed audit row', async () => {
@@ -124,10 +146,17 @@ describe('POST /api/v1/auth/token — 2FA', () => {
       const noCode = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse' } });
       expect(noCode.statusCode).toBe(429);
       expect(noCode.json().error).toBe('totp_locked');
+      // auth.password_ok is written before the lock check runs, so it is written on every one
+      // of these locked-out attempts too — it lets the operator see the password is known even
+      // when every code guess fails.
+      const lockedPasswordOk = listAudit(t.db, { action: 'auth.password_ok' });
+      expect(lockedPasswordOk).toHaveLength(2);
+      for (const row of lockedPasswordOk) expect(row.meta).toEqual({ via: 'api' });
 
       t.db.prepare(`UPDATE admin_totp SET locked_until = ? WHERE admin_id = ?`).run(Date.now() - 1, admin.id);
       const ok = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse', totp: codeForStep(t, admin.id, 1) } });
       expect(ok.statusCode).toBe(201);
+      expect(listAudit(t.db, { action: 'auth.password_ok' })).toHaveLength(3);
       const state = t.db.prepare(`SELECT failed_count FROM admin_totp WHERE admin_id = ?`).get(admin.id) as { failed_count: number };
       expect(state.failed_count).toBe(0);
       // This instance: POST /auth/token x3 (limit 5/min).
