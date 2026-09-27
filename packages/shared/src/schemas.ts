@@ -2,14 +2,32 @@ import { z } from 'zod';
 
 export const SCOPES = [
   'projects:read',
+  'projects:write',
   'docs:read',
   'docs:write',
   'secrets:meta',
+  'secrets:meta-write',
   'secrets:reveal',
+  'secrets:use',
   'secrets:write',
   'admin',
 ] as const;
 export type Scope = (typeof SCOPES)[number];
+
+/**
+ * The scopes an agent token (Claude Code plugin, spec §1.1) may ever carry. An agent token can
+ * never hold `admin`, `secrets:reveal` or `secrets:write` — enforced server-side where agent
+ * tokens are minted (the device-connect flow, spec §1.3), not by this list alone.
+ */
+export const AGENT_SCOPES: Scope[] = [
+  'projects:read',
+  'projects:write',
+  'docs:read',
+  'docs:write',
+  'secrets:meta',
+  'secrets:meta-write',
+  'secrets:use',
+];
 
 export const PROJECT_STATUSES = ['active', 'paused', 'archived'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];

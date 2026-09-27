@@ -2,7 +2,7 @@ import type { AuthTokenRequest, TokenInput } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, type Actor, type Principal } from '../auth/principal.js';
 import { NotFoundError, ValidationError } from '../errors.js';
-import { createToken, listTokens, revokeToken, DAY_MS, type TokenRow } from '../repos/tokens.js';
+import { createToken, listTokens, revokeToken, DAY_MS, type TokenKind, type TokenRow } from '../repos/tokens.js';
 import { getProjectBySlug, listProjects } from '../repos/projects.js';
 import { listAudit, writeAudit, type AuditQuery, type AuditRow } from '../repos/audit.js';
 import { getAdminByUsername } from '../repos/admin.js';
@@ -20,6 +20,7 @@ export interface PublicToken {
   last_used_at: number | null;
   revoked_at: number | null;
   created_at: number;
+  kind: TokenKind;
 }
 
 function publicToken(ctx: AppContext, t: TokenRow): PublicToken {

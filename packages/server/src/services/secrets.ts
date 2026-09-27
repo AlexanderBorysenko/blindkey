@@ -1,7 +1,7 @@
-import type { SecretInput, SecretPatch } from '@pidb/shared';
+import { defaultSensitive, type SecretInput, type SecretPatch } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
-import { ForbiddenError, NotFoundError } from '../errors.js';
+import { AppError, ForbiddenError, NotFoundError } from '../errors.js';
 import type { ProjectRow } from '../repos/projects.js';
 import { createSecret, deleteSecret, getSecretMeta, listSecrets, revealAllFields, revealField, updateSecret, type SecretMeta } from '../repos/secrets.js';
 import { listAuditForTarget, type AuditRow } from '../repos/audit.js';
@@ -75,8 +75,42 @@ export function revealAllFor(ctx: AppContext, actor: Actor, projectSlug: string 
   return { name: secret.name, fields };
 }
 
+/** 403 `forbidden` raised where `secrets:meta-write` is not enough — a sensitive field would be created, touched or removed (spec §1.1). */
+const SENSITIVE_FORBIDDEN = () => new AppError(403, 'forbidden', 'sensitive fields need secrets:write');
+
+/**
+ * `secrets:meta-write` (spec §1.1) may create a secret only when every field resolves to
+ * non-sensitive (explicit `sensitive: false`, or a key outside `NON_SENSITIVE_KEYS` defaulting
+ * to sensitive would fail this).
+ */
+function assertMetaWriteCreateAllowed(input: SecretInput): void {
+  const hasSensitive = input.fields.some((f) => f.sensitive ?? defaultSensitive(f.key));
+  if (hasSensitive) throw SENSITIVE_FORBIDDEN();
+}
+
+/**
+ * `secrets:meta-write` may PATCH name/description/tags/order freely, and `fields`/`removeFields`
+ * only for keys that are non-sensitive both before and after the patch (Review Focus 2: flipping
+ * a field from non-sensitive to sensitive, or touching/adding/removing a sensitive field, is
+ * refused — that always needs `secrets:write`).
+ */
+function assertMetaWritePatchAllowed(existing: SecretMeta, patch: SecretPatch): void {
+  const priorSensitive = new Map(existing.fields.map((f) => [f.key, f.sensitive]));
+  for (const f of patch.fields ?? []) {
+    const wasSensitive = priorSensitive.get(f.key) ?? false;
+    const willBeSensitive = f.sensitive ?? priorSensitive.get(f.key) ?? defaultSensitive(f.key);
+    if (wasSensitive || willBeSensitive) throw SENSITIVE_FORBIDDEN();
+  }
+  for (const k of patch.removeFields ?? []) {
+    if (priorSensitive.get(k)) throw SENSITIVE_FORBIDDEN();
+  }
+}
+
 export function createSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, input: SecretInput): PublicSecret {
-  assertScope(actor.principal, 'secrets:write');
+  if (!hasScope(actor.principal, 'secrets:write')) {
+    assertScope(actor.principal, 'secrets:meta-write');
+    assertMetaWriteCreateAllowed(input);
+  }
   const project = scopeProject(ctx, actor.principal, projectSlug);
   const s = createSecret(ctx.db, ctx.ring, { ...input, projectId: project?.id ?? null });
   auditAs(ctx, actor, { action: 'secret.create', target_type: 'secret', target_id: s.id, meta: { name: s.name, keys: s.fields.map((f) => f.key) } });
@@ -84,9 +118,14 @@ export function createSecretFor(ctx: AppContext, actor: Actor, projectSlug: stri
 }
 
 export function updateSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, patch: SecretPatch): PublicSecret {
-  assertScope(actor.principal, 'secrets:write');
+  if (!hasScope(actor.principal, 'secrets:write')) {
+    assertScope(actor.principal, 'secrets:meta-write');
+  }
   const project = scopeProject(ctx, actor.principal, projectSlug);
   const existing = mustGet(ctx, project?.id ?? null, name);
+  if (!hasScope(actor.principal, 'secrets:write')) {
+    assertMetaWritePatchAllowed(existing, patch);
+  }
   const s = updateSecret(ctx.db, ctx.ring, existing.id, patch);
   auditAs(ctx, actor, {
     action: 'secret.update',

@@ -165,7 +165,7 @@ describe('ui password change — with 2FA enabled', () => {
     startEnrollment(t.ctx, 1);
     const codes = await confirmEnrollment(
       t.ctx,
-      { principal: { kind: 'admin', id: 1, scopes: ['admin'], projectIds: null }, ip: '', userAgent: '' },
+      { principal: { kind: 'admin', id: 1, scopes: ['admin'], projectIds: null, agent: false }, ip: '', userAgent: '' },
       hotp(openTotpSecret(t.ring, getTotp(t.db, 1)!), stepAt(Date.now())),
       session,
     );

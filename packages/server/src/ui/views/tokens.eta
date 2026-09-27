@@ -40,7 +40,7 @@
       <% it.tokens.forEach(function (t) { %>
       <tr<%~ t.revoked_at !== null ? ' class="is-archived"' : '' %>>
         <td><%= t.id %></td>
-        <td><%= t.name %></td>
+        <td><%= t.name %><% if (t.kind === 'agent') { %> <span class="pill kind-agent">agent</span><% } %></td>
         <td class="mono"><%= t.prefix %></td>
         <td><% t.scopes.forEach(function (s) { %><span class="chip"><%= s %></span> <% }) %></td>
         <td><% if (t.projects === null) { %><span class="muted">all</span><% } else { %><% t.projects.forEach(function (p) { %><span class="tag"><%= p %></span> <% }) %><% } %></td>

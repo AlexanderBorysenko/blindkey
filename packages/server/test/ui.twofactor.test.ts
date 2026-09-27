@@ -384,7 +384,7 @@ describe('F1: per-admin second-factor lockout in the UI', () => {
     const t3 = await makeTestApp();
     try {
       const admin = createAdmin(t3.db, 'dave', await hashPassword('pw'));
-      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null }, ip: '', userAgent: '' };
+      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null, agent: false }, ip: '', userAgent: '' };
       startEnrollment(t3.ctx, admin.id);
       const secret = () => openTotpSecret(t3.ring, getTotp(t3.db, admin.id)!);
       await confirmEnrollment(t3.ctx, actor, hotp(secret(), stepAt(Date.now())));
@@ -463,7 +463,7 @@ describe('F4: parallel guesses on one challenge', () => {
     const t5 = await makeTestApp();
     try {
       const admin = createAdmin(t5.db, 'fran', await hashPassword('pw'));
-      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null }, ip: '', userAgent: '' };
+      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null, agent: false }, ip: '', userAgent: '' };
       startEnrollment(t5.ctx, admin.id);
       await confirmEnrollment(t5.ctx, actor, hotp(openTotpSecret(t5.ring, getTotp(t5.db, admin.id)!), stepAt(Date.now())));
 
@@ -533,7 +533,7 @@ describe('auth.password_ok audit on UI login', () => {
       expect(listAudit(t7.db, { action: 'auth.password_ok' })).toHaveLength(0);
 
       // Enroll 2FA.
-      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null }, ip: '', userAgent: '' };
+      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null, agent: false }, ip: '', userAgent: '' };
       startEnrollment(t7.ctx, admin.id);
       const secret = () => openTotpSecret(t7.ring, getTotp(t7.db, admin.id)!);
       await confirmEnrollment(t7.ctx, actor, hotp(secret(), stepAt(Date.now())));

@@ -6,6 +6,8 @@ import {
   secretPatchSchema,
   documentInputSchema,
   tokenInputSchema,
+  SCOPES,
+  AGENT_SCOPES,
 } from '../src/index.js';
 
 describe('slugSchema', () => {
@@ -68,6 +70,19 @@ describe('documentInputSchema', () => {
     const r = documentInputSchema.parse({ title: 'T', category: 'context', body_md: '# hi' });
     expect(r.force).toBe(false);
     expect(documentInputSchema.safeParse({ title: 'T', category: 'blog', body_md: '' }).success).toBe(false);
+  });
+});
+
+describe('SCOPES / AGENT_SCOPES', () => {
+  it('includes the three new write/use scopes', () => {
+    expect(SCOPES).toEqual(expect.arrayContaining(['projects:write', 'secrets:meta-write', 'secrets:use']));
+  });
+  it('AGENT_SCOPES never carries admin, secrets:reveal or secrets:write', () => {
+    for (const s of ['admin', 'secrets:reveal', 'secrets:write']) {
+      expect(AGENT_SCOPES).not.toContain(s);
+    }
+    expect(AGENT_SCOPES).toEqual(['projects:read', 'projects:write', 'docs:read', 'docs:write', 'secrets:meta', 'secrets:meta-write', 'secrets:use']);
+    for (const s of AGENT_SCOPES) expect(SCOPES).toContain(s);
   });
 });
 

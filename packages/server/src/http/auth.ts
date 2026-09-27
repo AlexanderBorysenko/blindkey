@@ -114,6 +114,6 @@ export function registerAuth(app: FastifyInstance, ctx: AppContext): void {
     }
     const row = found.row;
     touchToken(ctx.db, row.id);
-    req.principal = { kind: 'token', id: row.id, scopes: row.scopes, projectIds: row.project_ids };
+    req.principal = { kind: 'token', id: row.id, scopes: row.scopes, projectIds: row.project_ids, agent: row.kind === 'agent' };
   });
 }

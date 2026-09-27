@@ -67,4 +67,38 @@ describe('projects routes', () => {
     const noAdmin = await t.app.inject({ method: 'POST', url: '/api/v1/projects', headers: auth(t.token(['secrets:write'])), payload: { slug: 'z', name: 'z' } });
     expect(noAdmin.statusCode).toBe(403);
   });
+  it('projects:write patches summary/tags/status/name of an accessible project but not the slug, another project, or create/delete', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    t.project('beta');
+    const w = auth(t.token(['projects:write'], ['alpha']));
+    const patched = await t.app.inject({
+      method: 'PATCH',
+      url: '/api/v1/projects/alpha',
+      headers: w,
+      payload: { name: 'Alpha renamed', status: 'paused', tags: ['x'], summary: 'new summary' },
+    });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json()).toMatchObject({ name: 'Alpha renamed', status: 'paused', tags: ['x'], summary: 'new summary' });
+
+    const slugPatch = await t.app.inject({ method: 'PATCH', url: '/api/v1/projects/alpha', headers: w, payload: { slug: 'alpha2' } });
+    expect(slugPatch.statusCode).toBe(403);
+    expect(slugPatch.json().scope).toBe('admin');
+
+    const otherProject = await t.app.inject({ method: 'PATCH', url: '/api/v1/projects/beta', headers: w, payload: { name: 'nope' } });
+    expect(otherProject.statusCode).toBe(404);
+
+    const createAttempt = await t.app.inject({ method: 'POST', url: '/api/v1/projects', headers: w, payload: { slug: 'gamma', name: 'Gamma' } });
+    expect(createAttempt.statusCode).toBe(403);
+
+    const deleteAttempt = await t.app.inject({ method: 'DELETE', url: '/api/v1/projects/alpha', headers: w });
+    expect(deleteAttempt.statusCode).toBe(403);
+  });
+  it('rejects a PATCH without projects:write or admin', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    const r = await t.app.inject({ method: 'PATCH', url: '/api/v1/projects/alpha', headers: auth(t.token(['projects:read'], ['alpha'])), payload: { name: 'x' } });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().scope).toBe('projects:write');
+  });
 });

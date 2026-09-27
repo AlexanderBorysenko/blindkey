@@ -28,7 +28,7 @@ function setup() {
   const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
   const ctx: AppContext = { db, ring, logLevel: 'silent' };
   const admin = createAdmin(db, 'alex', 'hash');
-  const actor: Actor = { principal: { kind: 'admin', id: admin.id, scopes: ['admin'], projectIds: null }, ip: '1.1.1.1', userAgent: 't' };
+  const actor: Actor = { principal: { kind: 'admin', id: admin.id, scopes: ['admin'], projectIds: null, agent: false }, ip: '1.1.1.1', userAgent: 't' };
   return { db, ring, ctx, admin, actor };
 }
 

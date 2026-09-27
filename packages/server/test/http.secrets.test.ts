@@ -109,4 +109,110 @@ describe('secrets routes', () => {
     const r = await t.app.inject({ method: 'GET', url: '/api/v1/projects/beta/secrets', headers: auth(t.token(['secrets:meta'], ['alpha'])) });
     expect(r.statusCode).toBe(404);
   });
+  describe('secrets:meta-write', () => {
+    it('creates a secret when every field is non-sensitive, and rejects one with a sensitive field', async () => {
+      const t = await makeTestApp();
+      t.project('alpha');
+      const mw = auth(t.token(['secrets:meta-write', 'secrets:meta'], ['alpha']));
+      const ok = await t.app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/alpha/secrets',
+        headers: mw,
+        payload: { name: 'Config', fields: [{ key: 'host', value: 'h' }, { key: 'url', value: 'https://x' }] },
+      });
+      expect(ok.statusCode).toBe(201);
+      const rejected = await t.app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/alpha/secrets',
+        headers: mw,
+        payload: { name: 'Bad', fields: [{ key: 'host', value: 'h' }, { key: 'password', value: 'p' }] },
+      });
+      expect(rejected.statusCode).toBe(403);
+      expect(rejected.json()).toMatchObject({ error: 'forbidden', message: 'sensitive fields need secrets:write' });
+      const explicit = await t.app.inject({
+        method: 'POST',
+        url: '/api/v1/projects/alpha/secrets',
+        headers: mw,
+        payload: { name: 'Bad2', fields: [{ key: 'host', value: 'h', sensitive: true }] },
+      });
+      expect(explicit.statusCode).toBe(403);
+    });
+    it('allows adding a new non-sensitive field via PATCH but rejects touching, adding or removing a sensitive one', async () => {
+      const t = await makeTestApp();
+      t.project('alpha');
+      const w = auth(t.token(['secrets:write', 'secrets:meta'], ['alpha']));
+      await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: w, payload: staging });
+      const mw = auth(t.token(['secrets:meta-write', 'secrets:meta'], ['alpha']));
+
+      const addNonSensitive = await t.app.inject({
+        method: 'PATCH',
+        url: '/api/v1/projects/alpha/secrets/Staging%20server',
+        headers: mw,
+        payload: { fields: [{ key: 'region', value: 'us-east-1', sensitive: false }], description: 'updated' },
+      });
+      expect(addNonSensitive.statusCode).toBe(200);
+      expect(addNonSensitive.json().description).toBe('updated');
+
+      const touchSensitive = await t.app.inject({
+        method: 'PATCH',
+        url: '/api/v1/projects/alpha/secrets/Staging%20server',
+        headers: mw,
+        payload: { fields: [{ key: 'password', value: 'new-pw' }] },
+      });
+      expect(touchSensitive.statusCode).toBe(403);
+      expect(touchSensitive.json()).toMatchObject({ error: 'forbidden', message: 'sensitive fields need secrets:write' });
+
+      const flipToSensitive = await t.app.inject({
+        method: 'PATCH',
+        url: '/api/v1/projects/alpha/secrets/Staging%20server',
+        headers: mw,
+        payload: { fields: [{ key: 'host', value: '10.0.0.2', sensitive: true }] },
+      });
+      expect(flipToSensitive.statusCode).toBe(403);
+
+      const removeSensitive = await t.app.inject({
+        method: 'PATCH',
+        url: '/api/v1/projects/alpha/secrets/Staging%20server',
+        headers: mw,
+        payload: { removeFields: ['password'] },
+      });
+      expect(removeSensitive.statusCode).toBe(403);
+
+      const removeNonSensitive = await t.app.inject({
+        method: 'PATCH',
+        url: '/api/v1/projects/alpha/secrets/Staging%20server',
+        headers: mw,
+        payload: { removeFields: ['region'] },
+      });
+      expect(removeNonSensitive.statusCode).toBe(200);
+    });
+    it('never allows DELETE with only secrets:meta-write', async () => {
+      const t = await makeTestApp();
+      t.project('alpha');
+      const w = auth(t.token(['secrets:write', 'secrets:meta'], ['alpha']));
+      await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: w, payload: staging });
+      const mw = auth(t.token(['secrets:meta-write'], ['alpha']));
+      const r = await t.app.inject({ method: 'DELETE', url: '/api/v1/projects/alpha/secrets/Staging%20server', headers: mw });
+      expect(r.statusCode).toBe(403);
+      expect(r.json().scope).toBe('secrets:write');
+    });
+    it('rejects create/update without secrets:write or secrets:meta-write', async () => {
+      const t = await makeTestApp();
+      t.project('alpha');
+      const readOnly = auth(t.token(['secrets:meta'], ['alpha']));
+      const r = await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: readOnly, payload: { name: 'X', fields: [{ key: 'host', value: 'h' }] } });
+      expect(r.statusCode).toBe(403);
+      expect(r.json().scope).toBe('secrets:meta-write');
+    });
+  });
+  it('an agent-shaped secrets:use scope alone still gets 403 from the reveal endpoints (Review Focus 1)', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: auth(t.token(['secrets:write'])), payload: staging });
+    const useOnly = auth(t.token(['secrets:use'], ['alpha']));
+    const fields = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Staging%20server/fields', headers: useOnly });
+    expect(fields.statusCode).toBe(403);
+    const one = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/secrets/Staging%20server/fields/password', headers: useOnly });
+    expect(one.statusCode).toBe(403);
+  });
 });

@@ -27,8 +27,21 @@ describe('db', () => {
     }
     db.prepare(`INSERT INTO admin (id, username, password_hash, created_at) VALUES (1, 'a', 'h', 0)`).run();
     db.prepare(`INSERT INTO admin_totp (admin_id, secret_enc, key_version, enabled_at, last_used_step, created_at) VALUES (1, x'00', 1, 5, 0, 0)`).run();
-    expect(runMigrations(db)).toBe(1);
+    // Applies migration 3 (this test's subject) and migration 4 (api_tokens.kind, spec §1.1) —
+    // both are pending from this seeded "post-migration-2" state.
+    expect(runMigrations(db)).toBe(2);
     expect(db.prepare(`SELECT failed_count, locked_until FROM admin_totp WHERE admin_id = 1`).get()).toEqual({ failed_count: 0, locked_until: null });
+  });
+  it('migration 4 adds api_tokens.kind defaulting to user', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`);
+    for (const m of MIGRATIONS.filter((x) => x.id <= 3)) {
+      db.exec(m.sql);
+      db.prepare(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, 0)`).run(m.id);
+    }
+    db.prepare(`INSERT INTO api_tokens (name, prefix, token_hash, scopes, project_ids, expires_at, created_at) VALUES ('t', 'p', 'h', '[]', NULL, NULL, 0)`).run();
+    expect(runMigrations(db)).toBe(1);
+    expect(db.prepare(`SELECT kind FROM api_tokens`).get()).toEqual({ kind: 'user' });
   });
   it('enforces foreign keys with cascade', () => {
     const db = openDb(':memory:');

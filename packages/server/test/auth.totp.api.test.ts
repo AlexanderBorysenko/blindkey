@@ -9,7 +9,7 @@ import { listAudit } from '../src/repos/audit.js';
 import type { Actor } from '../src/auth/principal.js';
 
 async function setupEnrolled(t: TestCtx, adminId: number): Promise<{ actor: Actor }> {
-  const actor: Actor = { principal: { kind: 'admin', id: adminId, scopes: ['admin'], projectIds: null }, ip: '1.1.1.1', userAgent: 't' };
+  const actor: Actor = { principal: { kind: 'admin', id: adminId, scopes: ['admin'], projectIds: null, agent: false }, ip: '1.1.1.1', userAgent: 't' };
   startEnrollment(t.ctx, adminId);
   const secret = openTotpSecret(t.ring, getTotp(t.db, adminId)!);
   const code = hotp(secret, stepAt(Date.now()));
@@ -106,7 +106,7 @@ describe('POST /api/v1/auth/token — 2FA', () => {
   it('a recovery code: 201 with second_factor recovery', async () => {
     const t = await makeTestApp();
     const admin = createAdmin(t.db, 'alex', await hashPassword('correct horse'));
-    const actor: Actor = { principal: { kind: 'admin', id: admin.id, scopes: ['admin'], projectIds: null }, ip: '1.1.1.1', userAgent: 't' };
+    const actor: Actor = { principal: { kind: 'admin', id: admin.id, scopes: ['admin'], projectIds: null, agent: false }, ip: '1.1.1.1', userAgent: 't' };
     startEnrollment(t.ctx, admin.id);
     const secret = openTotpSecret(t.ring, getTotp(t.db, admin.id)!);
     const codes = (await confirmEnrollment(t.ctx, actor, hotp(secret, stepAt(Date.now()))))!;

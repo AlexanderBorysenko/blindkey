@@ -64,7 +64,7 @@ export function registerSessionResolver(app: FastifyInstance, ctx: AppContext): 
     }
     const session = getSession(ctx.db, id);
     if (!session) return;
-    req.principal = { kind: 'admin', id: session.admin_id, scopes: ['admin'], projectIds: null };
+    req.principal = { kind: 'admin', id: session.admin_id, scopes: ['admin'], projectIds: null, agent: false };
   });
 }
 

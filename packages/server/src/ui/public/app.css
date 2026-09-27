@@ -325,6 +325,7 @@ input[type='submit'].primary {
 .pill.status-active { color: var(--ok); background: var(--ok-soft); }
 .pill.status-paused { color: var(--warn); background: var(--warn-soft); }
 .pill.status-archived { color: var(--off); background: var(--side); }
+.pill.kind-agent { color: var(--accent); background: var(--accent-soft); }
 
 .tag {
   display: inline-block;

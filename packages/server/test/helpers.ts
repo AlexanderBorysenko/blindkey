@@ -5,7 +5,7 @@ import { openDb, type Db } from '../src/db/connection.js';
 import type { KeyRing } from '../src/config.js';
 import type { AppContext } from '../src/http/context.js';
 import { buildApp } from '../src/http/app.js';
-import { createToken } from '../src/repos/tokens.js';
+import { createToken, type TokenKind } from '../src/repos/tokens.js';
 import { createProject, getProjectBySlug, type ProjectRow } from '../src/repos/projects.js';
 
 export interface TestCtx {
@@ -13,7 +13,7 @@ export interface TestCtx {
   db: Db;
   ring: KeyRing;
   ctx: AppContext;
-  token: (scopes: Scope[], projects?: string[] | null) => string;
+  token: (scopes: Scope[], projects?: string[] | null, kind?: TokenKind) => string;
   project: (slug: string) => ProjectRow;
 }
 
@@ -27,9 +27,9 @@ export async function makeTestApp(): Promise<TestCtx> {
     db,
     ring,
     ctx,
-    token: (scopes, projects = null) => {
+    token: (scopes, projects = null, kind = 'user') => {
       const ids = projects === null ? null : projects.map((s) => getProjectBySlug(db, s)!.id);
-      return createToken(db, { name: 'test', scopes, projectIds: ids, expiresAt: null }).token;
+      return createToken(db, { name: 'test', scopes, projectIds: ids, expiresAt: null, kind }).token;
     },
     project: (slug) => createProject(db, { slug, name: slug.toUpperCase(), status: 'active', tags: [], summary: '' }),
   };

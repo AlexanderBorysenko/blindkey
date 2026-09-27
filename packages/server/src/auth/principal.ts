@@ -6,6 +6,8 @@ export interface Principal {
   id: number;
   scopes: Scope[];
   projectIds: number[] | null;
+  /** True for an agent-kind API token (Claude Code plugin, spec §1.1); always false for an admin session. */
+  agent: boolean;
 }
 
 export interface Actor {

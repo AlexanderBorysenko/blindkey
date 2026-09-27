@@ -77,7 +77,7 @@ describe('secret page: recent access panel', () => {
   });
 
   it('(d) a token principal lacking admin scope is forbidden from recentSecretAccessFor', () => {
-    const principal: Principal = { kind: 'token', id: 1, scopes: ['secrets:meta'], projectIds: null };
+    const principal: Principal = { kind: 'token', id: 1, scopes: ['secrets:meta'], projectIds: null, agent: false };
     expect(() => recentSecretAccessFor(t.ctx, principal, 'acme', 'DB')).toThrow(ForbiddenError);
   });
 
@@ -143,7 +143,7 @@ describe('secret page: recent access panel', () => {
       writeAudit(t.db, { actor_type: 'admin', actor_id: 1, action: 'secret.reveal', target_type: 'secret', target_id: secretB.id, field_key: 'k' }, secretB.created_at - 1000);
     }
 
-    const principal: Principal = { kind: 'admin', id: 1, scopes: ['admin'], projectIds: null };
+    const principal: Principal = { kind: 'admin', id: 1, scopes: ['admin'], projectIds: null, agent: false };
     const access = recentSecretAccessFor(t.ctx, principal, null, nameB);
     expect(access.length).toBe(0);
   });

@@ -1,6 +1,7 @@
 import type { ProjectInput, ProjectPatch } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
+import { ForbiddenError } from '../errors.js';
 import { createProject, deleteProject, listProjects, updateProject } from '../repos/projects.js';
 import { listDocuments } from '../repos/documents.js';
 import { listSecrets } from '../repos/secrets.js';
@@ -34,8 +35,16 @@ export function createProjectFor(ctx: AppContext, actor: Actor, input: ProjectIn
   return publicProject(project);
 }
 
+/**
+ * `projects:write` (spec §1.1) covers summary/tags/status/name for a project the token can
+ * access; changing the slug stays `admin`-only, same as create/delete.
+ */
 export function updateProjectFor(ctx: AppContext, actor: Actor, slug: string, patch: ProjectPatch): PublicProject {
-  assertScope(actor.principal, 'admin');
+  if (patch.slug !== undefined) {
+    assertScope(actor.principal, 'admin');
+  } else if (!hasScope(actor.principal, 'admin') && !hasScope(actor.principal, 'projects:write')) {
+    throw new ForbiddenError('projects:write');
+  }
   const project = loadProjectFor(ctx, actor.principal, slug);
   const updated = updateProject(ctx.db, project.id, patch);
   auditAs(ctx, actor, { action: 'project.update', target_type: 'project', target_id: project.id, meta: { fields: Object.keys(patch) } });
