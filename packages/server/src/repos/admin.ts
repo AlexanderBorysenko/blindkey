@@ -51,6 +51,11 @@ export function deleteSession(db: Db, id: string): boolean {
   return db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id).changes > 0;
 }
 
+/** Deletes every session of the admin except `keepId`. Returns how many were deleted. */
+export function deleteOtherSessions(db: Db, adminId: number, keepId: string): number {
+  return db.prepare(`DELETE FROM sessions WHERE admin_id = ? AND id <> ?`).run(adminId, keepId).changes;
+}
+
 export function purgeExpiredSessions(db: Db, nowTs: number = now()): number {
   return db.prepare(`DELETE FROM sessions WHERE expires_at <= ?`).run(nowTs).changes;
 }

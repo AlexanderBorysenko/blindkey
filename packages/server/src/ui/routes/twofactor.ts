@@ -10,7 +10,7 @@ import {
 } from '../../services/twofactor.js';
 import { factorLockedMessage } from './auth.js';
 import { writeAudit } from '../../repos/audit.js';
-import { adminActor, requireAdmin } from '../session.js';
+import { adminActor, requireAdmin, uiSessionId } from '../session.js';
 import { assertCsrf } from '../csrf.js';
 import { body, pageContext, str } from '../forms.js';
 import { renderPage } from '../render.js';
@@ -52,7 +52,7 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
 
   app.post('/settings/2fa/confirm', async (req, reply) => {
     assertCsrf(ctx, req);
-    const codes = await confirmEnrollment(ctx, adminActor(req), str(body(req), 'code'));
+    const codes = await confirmEnrollment(ctx, adminActor(req), str(body(req), 'code'), uiSessionId(req) ?? '');
     if (!codes) return page(req, reply, await currentView(req), 'Invalid code.', 400);
     return page(req, reply, { state: 'codes', codes }, null);
   });

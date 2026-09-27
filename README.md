@@ -110,7 +110,7 @@ open http://localhost:8080/login
 
 ### Two-factor authentication
 
-- Set up TOTP two-factor at `/settings/2fa` (linked from the sidebar as "Two-factor"): scan the QR code with an authenticator app, or copy the text secret in by hand, then confirm with a 6-digit code. Confirming shows 10 one-time recovery codes — save them now, since each works only once and they are never shown again.
+- Set up TOTP two-factor at `/settings/2fa` (linked from the sidebar as "Two-factor"): scan the QR code with an authenticator app, or copy the text secret in by hand, then confirm with a 6-digit code. Confirming shows 10 one-time recovery codes — save them now, since each works only once and they are never shown again. Turning 2FA on signs out your other browser sessions; existing API tokens stay valid, so revoke old admin tokens you no longer need (the `never expires` pill marks the risky ones).
 - Once enabled, the login page asks for a code after the username and password — a 6-digit TOTP code or a recovery code — and `pidb login` prompts for `2FA code:` the same way.
 - "Regenerate recovery codes" and "Turn off two-factor" (both on `/settings/2fa`) each require the current password plus a fresh second factor (a TOTP code or an unused recovery code), so an admin who lost the authenticator but kept a recovery code can still regenerate codes or turn 2FA off.
 - Emergency reset — if both the authenticator and every recovery code are lost — from a shell on the host: `pidb-server 2fa reset` (Docker: `docker compose run --rm --no-deps server 2fa reset`). It turns two-factor off for the admin account; log back in with the password and set it up again.

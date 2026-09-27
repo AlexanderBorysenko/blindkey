@@ -10,6 +10,7 @@ import {
   openTotpSecret, recordFactorFailure, replaceRecoveryCodes, resetFactorFailures, savePendingTotp,
 } from '../repos/twofactor.js';
 import { writeAudit } from '../repos/audit.js';
+import { deleteOtherSessions } from '../repos/admin.js';
 import { auditAs } from './common.js';
 
 export const CHALLENGE_TTL_MS = 300_000;
@@ -42,7 +43,11 @@ async function newRecoveryCodes(ctx: AppContext, adminId: number): Promise<strin
   return codes;
 }
 
-export async function confirmEnrollment(ctx: AppContext, actor: Actor, code: string): Promise<string[] | null> {
+/**
+ * Enables a pending enrollment when `code` matches. With `keepSessionId` (the UI session that
+ * enrolled), every other session of the admin is signed out (spec §2.3).
+ */
+export async function confirmEnrollment(ctx: AppContext, actor: Actor, code: string, keepSessionId?: string): Promise<string[] | null> {
   const adminId = actor.principal.id;
   const row = getTotp(ctx.db, adminId);
   if (!row || row.enabled_at !== null) return null;
@@ -53,7 +58,8 @@ export async function confirmEnrollment(ctx: AppContext, actor: Actor, code: str
   }
   enableTotp(ctx.db, adminId, step);
   const codes = await newRecoveryCodes(ctx, adminId);
-  auditAs(ctx, actor, { action: 'auth.totp_enrolled' });
+  const revoked = keepSessionId === undefined ? undefined : deleteOtherSessions(ctx.db, adminId, keepSessionId);
+  auditAs(ctx, actor, { action: 'auth.totp_enrolled', ...(revoked === undefined ? {} : { meta: { revoked_sessions: revoked } }) });
   return codes;
 }
 

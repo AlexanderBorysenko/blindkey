@@ -401,3 +401,34 @@ describe('F1: per-admin second-factor lockout in the UI', () => {
     }
   });
 });
+
+// F2: turning 2FA on signs out the admin's other sessions (no rate-limited route is used).
+describe('F2: enrolling revokes the other sessions', () => {
+  it('session A enrolls; session B, created before enrollment, is signed out; A still works', async () => {
+    const t4 = await makeTestApp();
+    try {
+      const admin = createAdmin(t4.db, 'erin', await hashPassword('pw'));
+      const a = createSession(t4.db, admin.id, SESSION_TTL_MS, '', '');
+      const b = createSession(t4.db, admin.id, SESSION_TTL_MS, '', '');
+      expect((await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: b } })).statusCode).toBe(200);
+      const home = await t4.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: a } });
+      const csrfA = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
+      await t4.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { pidb_session: a }, payload: { csrf: csrfA } });
+      const code = hotp(openTotpSecret(t4.ring, getTotp(t4.db, admin.id)!), stepAt(Date.now()));
+      const confirm = await t4.app.inject({ method: 'POST', url: '/settings/2fa/confirm', cookies: { pidb_session: a }, payload: { csrf: csrfA, code } });
+      expect(confirm.statusCode).toBe(200);
+
+      const resB = await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: b } });
+      expect(resB.statusCode).toBe(302);
+      expect(resB.headers.location).toBe('/login');
+      const resA = await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: a } });
+      expect(resA.statusCode).toBe(200);
+
+      const enrolled = listAudit(t4.db, { action: 'auth.totp_enrolled' });
+      expect(enrolled).toHaveLength(1);
+      expect(enrolled[0]!.meta).toEqual({ revoked_sessions: 1 });
+    } finally {
+      await t4.app.close();
+    }
+  });
+});
