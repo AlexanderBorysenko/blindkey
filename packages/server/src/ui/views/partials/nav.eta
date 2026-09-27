@@ -42,6 +42,9 @@
   <a href="/settings/2fa" <%~ it.path.startsWith('/settings/2fa') ? 'aria-current="page"' : '' %>>
     <span>Two-factor</span>
   </a>
+  <a href="/settings/password" <%~ it.path === '/settings/password' ? 'aria-current="page"' : '' %>>
+    <span>Password</span>
+  </a>
 </div>
 <div class="side-foot">
   <span class="tag">admin</span>

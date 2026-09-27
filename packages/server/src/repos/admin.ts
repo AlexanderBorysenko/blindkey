@@ -28,6 +28,10 @@ export function createAdmin(db: Db, username: string, passwordHash: string): Adm
   return db.prepare(`SELECT id, username, password_hash, created_at FROM admin WHERE id = ?`).get(Number(info.lastInsertRowid)) as AdminRow;
 }
 
+export function setAdminPasswordHash(db: Db, id: number, hash: string): void {
+  db.prepare(`UPDATE admin SET password_hash = ? WHERE id = ?`).run(hash, id);
+}
+
 export interface SessionRow {
   id: string;
   admin_id: number;
@@ -54,6 +58,11 @@ export function deleteSession(db: Db, id: string): boolean {
 /** Deletes every session of the admin except `keepId`. Returns how many were deleted. */
 export function deleteOtherSessions(db: Db, adminId: number, keepId: string): number {
   return db.prepare(`DELETE FROM sessions WHERE admin_id = ? AND id <> ?`).run(adminId, keepId).changes;
+}
+
+/** Deletes every session of the admin, including the caller's own. Returns how many were deleted. */
+export function deleteAllSessions(db: Db, adminId: number): number {
+  return db.prepare(`DELETE FROM sessions WHERE admin_id = ?`).run(adminId).changes;
 }
 
 export function purgeExpiredSessions(db: Db, nowTs: number = now()): number {

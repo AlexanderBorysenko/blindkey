@@ -6,7 +6,7 @@ import * as readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { loadConfig } from './config.js';
 import { openDb } from './db/connection.js';
-import { runBackup, runInit, runRotateKey, runTotpReset, startServer } from './ops.js';
+import { runBackup, runInit, runPasswordReset, runRotateKey, runTotpReset, startServer } from './ops.js';
 
 const CTRL_C = '\u0003';
 const BACKSPACE = '\u007f';
@@ -131,6 +131,31 @@ program
       const db = openDb(config.dbPath);
       const file = runBackup(db, opts.out ?? join(config.dataDir, 'backups'), Number.parseInt(opts.keep, 10));
       console.log(`backup written: ${file}`);
+      db.close();
+    } catch (err) {
+      fatal(err);
+    }
+  });
+
+program
+  .command('passwd')
+  .description('Change the admin password (emergency recovery: signs out every session)')
+  .action(async () => {
+    try {
+      const config = loadConfig();
+      const db = openDb(config.dbPath);
+      let password = process.env.PIDB_ADMIN_PASSWORD;
+      if (!password) {
+        password = await promptHidden('New admin password: ');
+        // A second readline on piped (non-TTY) stdin can lose buffered input, so the repeat
+        // is only asked for interactively — and only on the prompt path, never with the env var.
+        if (stdin.isTTY) {
+          const repeat = await promptHidden('Repeat new admin password: ');
+          if (repeat !== password) throw new Error('passwords do not match');
+        }
+      }
+      const r = await runPasswordReset(db, password);
+      console.log(`password changed for ${r.username}; signed out ${r.sessions} sessions`);
       db.close();
     } catch (err) {
       fatal(err);

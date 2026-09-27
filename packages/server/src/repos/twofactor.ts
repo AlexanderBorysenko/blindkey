@@ -75,8 +75,9 @@ export function recordFactorFailure(db: Db, adminId: number, max: number, lockMs
   return { locked, until: locked ? until : null };
 }
 
+/** Clears the failure counter AND any active lock — a full reset, not just the counter. */
 export function resetFactorFailures(db: Db, adminId: number): void {
-  db.prepare(`UPDATE admin_totp SET failed_count = 0 WHERE admin_id = ?`).run(adminId);
+  db.prepare(`UPDATE admin_totp SET failed_count = 0, locked_until = NULL WHERE admin_id = ?`).run(adminId);
 }
 
 export function deleteTwoFactor(db: Db, adminId: number): void {
@@ -137,6 +138,11 @@ export function claimChallengeAttempt(db: Db, id: string, max: number, nowTs: nu
 
 export function deleteChallenge(db: Db, id: string): void {
   db.prepare(`DELETE FROM login_challenges WHERE id = ?`).run(id);
+}
+
+/** Deletes every pending login challenge for the admin (shell password reset). Returns how many were deleted. */
+export function deleteChallengesFor(db: Db, adminId: number): number {
+  return db.prepare(`DELETE FROM login_challenges WHERE admin_id = ?`).run(adminId).changes;
 }
 
 export function purgeExpiredChallenges(db: Db, nowTs: number = now()): number {

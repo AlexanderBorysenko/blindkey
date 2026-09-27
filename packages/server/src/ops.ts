@@ -3,12 +3,13 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { openDb, type Db } from './db/connection.js';
 import type { KeyRing, Config } from './config.js';
-import { createAdmin, getAdmin } from './repos/admin.js';
+import { createAdmin, deleteAllSessions, getAdmin, setAdminPasswordHash } from './repos/admin.js';
 import { getDocument, upsertDocument } from './repos/documents.js';
 import { rewrapAllSecrets } from './repos/secrets.js';
-import { deleteTwoFactor, rewrapTotpSecrets } from './repos/twofactor.js';
+import { deleteChallengesFor, deleteTwoFactor, resetFactorFailures, rewrapTotpSecrets } from './repos/twofactor.js';
 import { writeAudit } from './repos/audit.js';
 import { hashPassword } from './crypto/passwords.js';
+import { validateNewPassword } from './services/password.js';
 import { GUIDELINES_MD } from './seed/guidelines.js';
 import { buildApp } from './http/app.js';
 
@@ -38,6 +39,31 @@ export function runTotpReset(db: Db): string {
   deleteTwoFactor(db, admin.id);
   writeAudit(db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_reset', meta: { via: 'shell' } });
   return admin.username;
+}
+
+/**
+ * Shell password reset (`pidb-server passwd`, spec §1.3). Unlike the UI's `changePassword`,
+ * this cannot know the current password — it is the emergency-recovery path — so it signs out
+ * EVERY session (not "every other one"), drops pending login challenges, and clears any 2FA
+ * lock. 2FA itself is left as is (use `2fa reset` separately).
+ *
+ * `hashPassword` is async, so the hash is computed before the transaction opens — better-sqlite3
+ * transactions must run synchronously.
+ */
+export async function runPasswordReset(db: Db, password: string): Promise<{ username: string; sessions: number }> {
+  const admin = getAdmin(db);
+  if (!admin) throw new Error('no admin user — run init first');
+  const error = validateNewPassword(password);
+  if (error) throw new Error(error);
+  const hash = await hashPassword(password);
+  return db.transaction(() => {
+    setAdminPasswordHash(db, admin.id, hash);
+    const sessions = deleteAllSessions(db, admin.id);
+    deleteChallengesFor(db, admin.id);
+    resetFactorFailures(db, admin.id);
+    writeAudit(db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.password_reset', meta: { via: 'shell' } });
+    return { username: admin.username, sessions };
+  })();
 }
 
 const BACKUP_RE = /^pidb-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/;

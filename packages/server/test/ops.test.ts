@@ -7,11 +7,11 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { openDb } from '../src/db/connection.js';
-import { runInit, runRotateKey, runBackup, runTotpReset } from '../src/ops.js';
-import { getAdmin, createAdmin } from '../src/repos/admin.js';
+import { runInit, runRotateKey, runBackup, runTotpReset, runPasswordReset } from '../src/ops.js';
+import { getAdmin, createAdmin, createSession } from '../src/repos/admin.js';
 import { getDocument } from '../src/repos/documents.js';
 import { createSecret, revealField } from '../src/repos/secrets.js';
-import { savePendingTotp, getTotp } from '../src/repos/twofactor.js';
+import { savePendingTotp, getTotp, createChallenge, getChallenge, factorLockedUntil } from '../src/repos/twofactor.js';
 import { listAudit } from '../src/repos/audit.js';
 import { verifyPassword } from '../src/crypto/passwords.js';
 import type { KeyRing } from '../src/config.js';
@@ -65,6 +65,37 @@ describe('ops', () => {
   it('2fa reset throws when there is no admin', () => {
     const db = openDb(':memory:');
     expect(() => runTotpReset(db)).toThrow(/no admin user/);
+  });
+  it('passwd changes the hash, signs out every session, clears a 2FA lock, drops pending challenges, and audits password_reset', async () => {
+    const db = openDb(':memory:');
+    await runInit(db, { username: 'alex', password: 'old-password!!' });
+    const admin = getAdmin(db)!;
+    createSession(db, admin.id, 60_000, '', '');
+    createSession(db, admin.id, 60_000, '', '');
+    const challenge = createChallenge(db, admin.id, 60_000, '', '');
+    const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
+    savePendingTotp(db, ring, admin.id, randomBytes(20));
+    db.prepare(`UPDATE admin_totp SET locked_until = ? WHERE admin_id = ?`).run(Date.now() + 60_000, admin.id);
+
+    const result = await runPasswordReset(db, 'brand-new-pass1');
+    expect(result).toEqual({ username: 'alex', sessions: 2 });
+    expect(await verifyPassword(getAdmin(db)!.password_hash, 'brand-new-pass1')).toBe(true);
+    expect(await verifyPassword(getAdmin(db)!.password_hash, 'old-password!!')).toBe(false);
+    expect((db.prepare(`SELECT COUNT(*) AS c FROM sessions`).get() as { c: number }).c).toBe(0);
+    expect(factorLockedUntil(db, admin.id)).toBeNull();
+    expect(getChallenge(db, challenge)).toBeNull();
+    const rows = listAudit(db, { action: 'auth.password_reset' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.meta).toEqual({ via: 'shell' });
+  });
+  it('passwd throws when there is no admin', async () => {
+    const db = openDb(':memory:');
+    await expect(runPasswordReset(db, 'brand-new-pass1')).rejects.toThrow(/no admin user/);
+  });
+  it('passwd throws the validator message for a too-short password', async () => {
+    const db = openDb(':memory:');
+    await runInit(db, { username: 'alex', password: 'old-password!!' });
+    await expect(runPasswordReset(db, 'short')).rejects.toThrow('Password must be at least 12 characters.');
   });
   it('backup writes a consistent copy and prunes old ones', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));

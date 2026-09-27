@@ -8,6 +8,7 @@ import { PUBLIC_DIR, isUiRequest } from './render.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerDocumentRoutes } from './routes/documents.js';
+import { registerPasswordRoutes } from './routes/password.js';
 import { registerProjectRoutes } from './routes/projects.js';
 import { registerSecretRoutes } from './routes/secrets.js';
 import { registerTwoFactorRoutes } from './routes/twofactor.js';
@@ -86,4 +87,5 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
   registerSecretRoutes(app, ctx);
   registerAdminRoutes(app, ctx);
   registerTwoFactorRoutes(app, ctx);
+  registerPasswordRoutes(app, ctx);
 }
