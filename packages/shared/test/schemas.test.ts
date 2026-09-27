@@ -75,8 +75,12 @@ describe('tokenInputSchema', () => {
   it('requires at least one valid scope; projects default null', () => {
     const r = tokenInputSchema.parse({ name: 'cc', scopes: ['docs:read'] });
     expect(r.projects).toBeNull();
-    expect(r.expires_at).toBeNull();
+    expect(r.expires_at).toBeUndefined();
     expect(tokenInputSchema.safeParse({ name: 'cc', scopes: [] }).success).toBe(false);
     expect(tokenInputSchema.safeParse({ name: 'cc', scopes: ['root'] }).success).toBe(false);
+  });
+  it('an explicit null expires_at parses to null (never expires)', () => {
+    const r = tokenInputSchema.parse({ name: 'cc', scopes: ['docs:read'], expires_at: null });
+    expect(r.expires_at).toBeNull();
   });
 });

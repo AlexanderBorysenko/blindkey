@@ -2,7 +2,7 @@ import type { AuthTokenRequest, TokenInput } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, type Actor, type Principal } from '../auth/principal.js';
 import { NotFoundError, ValidationError } from '../errors.js';
-import { createToken, listTokens, revokeToken, type TokenRow } from '../repos/tokens.js';
+import { createToken, listTokens, revokeToken, DAY_MS, type TokenRow } from '../repos/tokens.js';
 import { getProjectBySlug, listProjects } from '../repos/projects.js';
 import { listAudit, writeAudit, type AuditQuery, type AuditRow } from '../repos/audit.js';
 import { getAdminByUsername } from '../repos/admin.js';
@@ -31,6 +31,8 @@ export function listTokensFor(ctx: AppContext, principal: Principal): PublicToke
   return listTokens(ctx.db).map((t) => publicToken(ctx, t));
 }
 
+export const DEFAULT_TOKEN_DAYS = 90;
+
 export function createTokenFor(ctx: AppContext, actor: Actor, input: TokenInput): PublicToken & { token: string } {
   assertScope(actor.principal, 'admin');
   let projectIds: number[] | null = null;
@@ -42,7 +44,12 @@ export function createTokenFor(ctx: AppContext, actor: Actor, input: TokenInput)
       projectIds.push(p.id);
     }
   }
-  const { token, row } = createToken(ctx.db, { name: input.name, scopes: input.scopes, projectIds, expiresAt: input.expires_at });
+  const nowTs = Date.now();
+  const expiresAt = input.expires_at === undefined ? nowTs + DEFAULT_TOKEN_DAYS * DAY_MS : input.expires_at;
+  if (expiresAt !== null && expiresAt <= nowTs) {
+    throw new ValidationError([{ path: ['expires_at'], message: 'must be in the future' }]);
+  }
+  const { token, row } = createToken(ctx.db, { name: input.name, scopes: input.scopes, projectIds, expiresAt });
   auditAs(ctx, actor, { action: 'token.create', target_type: 'token', target_id: row.id, meta: { name: row.name, scopes: row.scopes } });
   return { ...publicToken(ctx, row), token };
 }
@@ -63,14 +70,14 @@ export async function exchangePassword(
   input: AuthTokenRequest,
   ip: string,
   userAgent: string,
-): Promise<{ token: string; id: number; name: string } | null> {
+): Promise<{ token: string; id: number; name: string; expires_at: number } | null> {
   const admin = getAdminByUsername(ctx.db, input.username);
   const ok = admin ? await verifyPassword(admin.password_hash, input.password) : false;
   if (!admin || !ok) {
     writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin?.id ?? null, action: 'auth.login_failed', ip, user_agent: userAgent, meta: { username: input.username } });
     return null;
   }
-  const { token, row } = createToken(ctx.db, { name: input.name, scopes: ['admin'], projectIds: null, expiresAt: null });
+  const { token, row } = createToken(ctx.db, { name: input.name, scopes: ['admin'], projectIds: null, expiresAt: Date.now() + input.expires_days * DAY_MS });
   writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.login', target_type: 'token', target_id: row.id, ip, user_agent: userAgent, meta: { name: row.name } });
-  return { token, id: row.id, name: row.name };
+  return { token, id: row.id, name: row.name, expires_at: row.expires_at as number };
 }

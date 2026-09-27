@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { AppError, UnauthorizedError } from '../errors.js';
 import type { Principal } from '../auth/principal.js';
-import { findActiveTokenByValue, touchToken } from '../repos/tokens.js';
+import { lookupTokenByValue, touchToken } from '../repos/tokens.js';
 import { writeAudit } from '../repos/audit.js';
 import { parseTokenPrefix } from '../crypto/tokens.js';
 import type { AppContext } from './context.js';
@@ -55,8 +55,20 @@ export function registerAuth(app: FastifyInstance, ctx: AppContext): void {
     const m = BEARER_RE.exec(req.headers.authorization ?? '');
     const token = m?.[1];
     if (!token) throw new UnauthorizedError();
-    const row = findActiveTokenByValue(ctx.db, token);
-    if (!row) {
+    const found = lookupTokenByValue(ctx.db, token);
+    if (found.state === 'expired') {
+      // Only a holder of the token value can see this distinction; it does not feed the failure limiter.
+      writeAudit(ctx.db, {
+        actor_type: 'token',
+        actor_id: found.row.id,
+        action: 'auth.token_expired',
+        ip,
+        user_agent: req.headers['user-agent'] ?? '',
+        meta: { prefix: found.row.prefix },
+      });
+      throw new AppError(401, 'token_expired', 'token expired');
+    }
+    if (found.state === 'none') {
       limiter.record(ip);
       writeAudit(ctx.db, {
         actor_type: 'token',
@@ -68,6 +80,7 @@ export function registerAuth(app: FastifyInstance, ctx: AppContext): void {
       });
       throw new UnauthorizedError();
     }
+    const row = found.row;
     touchToken(ctx.db, row.id);
     req.principal = { kind: 'token', id: row.id, scopes: row.scopes, projectIds: row.project_ids };
   });

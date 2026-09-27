@@ -44,7 +44,7 @@
         <td class="mono"><%= t.prefix %></td>
         <td><% t.scopes.forEach(function (s) { %><span class="chip"><%= s %></span> <% }) %></td>
         <td><% if (t.projects === null) { %><span class="muted">all</span><% } else { %><% t.projects.forEach(function (p) { %><span class="tag"><%= p %></span> <% }) %><% } %></td>
-        <td><% if (t.expires_at === null) { %>never<% } else { %><time datetime="<%= it.fmt.iso(t.expires_at) %>" title="<%= it.fmt.iso(t.expires_at) %>"><%= it.fmt.ago(t.expires_at) %></time><% } %></td>
+        <td><% if (t.expires_at === null && t.revoked_at === null) { %><span class="pill status-paused">never expires</span><% } else if (t.expires_at === null) { %>never<% } else { %><time datetime="<%= it.fmt.iso(t.expires_at) %>" title="<%= it.fmt.iso(t.expires_at) %>"><%= it.fmt.ago(t.expires_at) %></time><% } %></td>
         <td><% if (t.last_used_at === null) { %>—<% } else { %><time datetime="<%= it.fmt.iso(t.last_used_at) %>" title="<%= it.fmt.iso(t.last_used_at) %>"><%= it.fmt.ago(t.last_used_at) %></time><% } %></td>
         <td><% if (t.revoked_at === null) { %><span class="pill status-active">active</span><% } else { %><span class="pill status-archived">revoked</span><% } %></td>
         <td>
@@ -87,7 +87,8 @@
     <datalist id="project-slugs">
       <% it.projects.forEach(function (p) { %><option value="<%= p.slug %>"></option><% }) %>
     </datalist>
-    <label>Expires in (days; empty = never) <input name="days" type="number" min="1" /></label>
+    <label>Expires in (days) <input name="days" type="number" min="1" value="90" /></label>
+    <label class="check"><input type="checkbox" name="never" /> Never expires</label>
     <div class="actions">
       <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
       <button class="btn primary" type="submit">Create token</button>

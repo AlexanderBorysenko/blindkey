@@ -5,10 +5,9 @@ import { createTokenFor, listAuditFor, listTokensFor, revokeTokenFor } from '../
 import { listProjectsFor } from '../../services/projects.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
-import { body, list, pageContext, parseTags, str } from '../forms.js';
+import { body, bool, list, pageContext, parseTags, str } from '../forms.js';
 import { renderPage } from '../render.js';
-
-const DAY_MS = 86_400_000;
+import { DAY_MS } from '../../repos/tokens.js';
 
 export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void {
   const tokensPage = (req: FastifyRequest, extra: Record<string, unknown>) => {
@@ -36,26 +35,30 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     if (scopes.length === 0) {
       return reply.status(400).type('text/html').send(tokensPage(req, { error: 'at least one scope is required' }));
     }
-    // Empty/absent means "never expires". Anything else must be a positive whole number of
-    // days: Date.now() + n * DAY_MS stays a valid positive epoch-ms for a negative or zero n,
-    // so tokenInputSchema's z.number().int().positive() cannot catch an already-expired or
-    // dead-on-arrival token on its own — that must be rejected here, before the arithmetic.
-    let expiresAt: number | null = null;
-    if (days) {
+    // Three cases: the "never expires" checkbox forces null; a whole number of days (greater
+    // than zero) becomes an explicit expiry — Date.now() + n * DAY_MS stays a valid positive
+    // epoch-ms for a negative or zero n, so tokenInputSchema's z.number().int().positive()
+    // cannot catch an already-expired or dead-on-arrival token on its own, so that is rejected
+    // here, before the arithmetic; and empty/absent leaves expires_at omitted, so the service
+    // applies its default lifetime (90 days).
+    const never = bool(b, 'never');
+    let expiresAt: number | null | undefined;
+    if (never) {
+      expiresAt = null;
+    } else if (days) {
       const n = Number(days);
       if (!Number.isInteger(n) || n <= 0) {
-        return reply
-          .status(400)
-          .type('text/html')
-          .send(tokensPage(req, { error: 'Expiry must be a whole number of days greater than zero.' }));
+        return reply.status(400).type('text/html').send(tokensPage(req, { error: 'Expiry must be a whole number of days greater than zero.' }));
       }
       expiresAt = Date.now() + n * DAY_MS;
+    } else {
+      expiresAt = undefined; // service default (90 days)
     }
     const parsed = tokenInputSchema.safeParse({
       name: str(b, 'name'),
       scopes,
       projects: projects.length ? projects : null,
-      expires_at: expiresAt,
+      ...(expiresAt === undefined ? {} : { expires_at: expiresAt }),
     });
     if (!parsed.success) {
       const message = parsed.error.issues.map((i) => `${i.path.join('.') || 'form'}: ${i.message}`).join('; ');

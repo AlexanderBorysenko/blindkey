@@ -2,11 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { makeTestApp, type TestCtx } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
-import { listTokens } from '../src/repos/tokens.js';
+import { listTokens, DAY_MS } from '../src/repos/tokens.js';
 
 let t: TestCtx;
 let session: string;
 let csrf: string;
+const near = (value: number, expected: number) => expect(Math.abs(value - expected)).toBeLessThan(60_000);
 const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
 const post = (url: string, payload: Record<string, unknown>) =>
   t.app.inject({ method: 'POST', url, cookies: { pidb_session: session }, payload });
@@ -50,7 +51,26 @@ describe('ui tokens', () => {
     await post('/tokens', { csrf, name: 'all-projects', scopes: 'admin' });
     const row = listTokens(t.db).find((r) => r.name === 'all-projects')!;
     expect(row.project_ids).toBeNull();
+  });
+
+  it('empty days defaults to about 90 days', async () => {
+    await post('/tokens', { csrf, name: 'empty-days', scopes: 'admin' });
+    const row = listTokens(t.db).find((r) => r.name === 'empty-days')!;
+    near(row.expires_at!, Date.now() + 90 * DAY_MS);
+  });
+
+  it('the never expires checkbox mints a token that never expires', async () => {
+    await post('/tokens', { csrf, name: 'never-expires', scopes: 'admin', never: 'on', days: '' });
+    const row = listTokens(t.db).find((r) => r.name === 'never-expires')!;
     expect(row.expires_at).toBeNull();
+  });
+
+  it('flags non-expiring active tokens in the table', async () => {
+    await post('/tokens', { csrf, name: 'flagged-never', scopes: 'admin', never: 'on', days: '' });
+    const res = await page('/tokens');
+    const main = res.body.slice(res.body.indexOf('<main'), res.body.indexOf('</main>'));
+    expect(main).toContain('never expires');
+    expect(main).toContain('class="pill status-paused"');
   });
 
   it('re-renders with an error when no scope is checked', async () => {

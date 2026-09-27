@@ -44,18 +44,28 @@ export function createToken(
   return { token: t.token, row: toRow(row) };
 }
 
-export function findActiveTokenByValue(db: Db, token: string, nowTs: number = now()): TokenRow | null {
+export const DAY_MS = 86_400_000;
+
+export type TokenLookup = { state: 'active'; row: TokenRow } | { state: 'expired'; row: TokenRow } | { state: 'none' };
+
+/** A revoked token reads as unknown ('none'); an expired one is reported so clients can say "log in again". */
+export function lookupTokenByValue(db: Db, token: string, nowTs: number = now()): TokenLookup {
   const prefix = parseTokenPrefix(token);
-  if (!prefix) return null;
+  if (!prefix) return { state: 'none' };
   const hash = hashToken(token);
   const candidates = db.prepare(`SELECT ${COLS} FROM api_tokens WHERE prefix = ?`).all(prefix) as RawToken[];
   for (const c of candidates) {
     if (!hashesEqual(c.token_hash, hash)) continue;
-    if (c.revoked_at !== null) return null;
-    if (c.expires_at !== null && c.expires_at <= nowTs) return null;
-    return toRow(c);
+    if (c.revoked_at !== null) return { state: 'none' };
+    if (c.expires_at !== null && c.expires_at <= nowTs) return { state: 'expired', row: toRow(c) };
+    return { state: 'active', row: toRow(c) };
   }
-  return null;
+  return { state: 'none' };
+}
+
+export function findActiveTokenByValue(db: Db, token: string, nowTs: number = now()): TokenRow | null {
+  const r = lookupTokenByValue(db, token, nowTs);
+  return r.state === 'active' ? r.row : null;
 }
 
 export function touchToken(db: Db, id: number, ts: number = now()): void {

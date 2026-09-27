@@ -107,7 +107,8 @@ export const tokenInputSchema = z.strictObject({
   name: z.string().min(1).max(100),
   scopes: z.array(scopeSchema).min(1),
   projects: z.array(slugSchema).nullable().default(null),
-  expires_at: z.number().int().positive().nullable().default(null),
+  // Omitted → the server applies its default lifetime; an explicit null means "never expires".
+  expires_at: z.number().int().positive().nullable().optional(),
 });
 export type TokenInput = z.infer<typeof tokenInputSchema>;
 
@@ -115,5 +116,6 @@ export const authTokenRequestSchema = z.strictObject({
   username: z.string().min(1).max(100),
   password: z.string().min(1).max(1000),
   name: z.string().min(1).max(100).default('cli'),
+  expires_days: z.number().int().min(1).max(365).default(30),
 });
 export type AuthTokenRequest = z.infer<typeof authTokenRequestSchema>;
