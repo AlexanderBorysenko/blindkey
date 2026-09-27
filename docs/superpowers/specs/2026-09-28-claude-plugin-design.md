@@ -80,13 +80,12 @@ plugin/
   bin/pidb                           # sh shim: exec node "<plugin root>/dist/pidb.mjs" "$@" with PIDB_AGENT=1
   bin/pidb.cmd                       # Windows shim, same
   hooks/hooks.json                   # SessionStart, PreToolUse (Bash|Read|Grep|Glob|Edit|Write|mcp__*), PostToolUse (Bash)
-  hooks/*.mjs
   skills/pidb/SKILL.md
   commands/connect.md, server.md, bind.md, status.md
   package.json                       # runtime deps installed into plugin data: @napi-rs/keyring
-  dist/pidb.mjs, dist/mcp.mjs        # esbuild bundles, committed
+  dist/pidb.mjs, dist/mcp.mjs, dist/hook.mjs   # esbuild bundles, committed
 ```
-- Root script `npm run build:plugin` (esbuild, dev dependency) bundles `packages/cli` agent entry and `packages/plugin-bridge` (new workspace for the MCP bridge + shared plugin state code) into `plugin/dist`. `@napi-rs/keyring` and `@modelcontextprotocol/sdk`? — keyring is external (native); everything else bundled.
+- Root script `npm run build:plugin` (esbuild, dev dependency) bundles three entries from `packages/cli/src/agent/` (all plugin code lives there so vitest covers it): `pidb.mjs` (agent CLI), `mcp.mjs` (bridge), `hook.mjs` (hook dispatcher: `node hook.mjs guard|redact|session-start`) into `plugin/dist`. `@napi-rs/keyring` is external (native, installed at first run); everything else (commander, `@modelcontextprotocol/sdk`, shared) is bundled.
 - Plugin data dir resolution (bin shims do not receive `CLAUDE_PLUGIN_DATA`): hooks and MCP get it from env; the CLI uses `PIDB_PLUGIN_DATA` if set, else derives it from its own path (`.../plugins/cache/<marketplace>/<plugin>/<version>/dist/pidb.mjs` → `~/.claude/plugins/data/<plugin>-<marketplace>`), else `~/.claude/plugins/data/pidb-pidb`.
 - First run: SessionStart hook runs `npm install --omit=dev --no-audit --no-fund --prefix <data>` with the plugin's `package.json` if `<data>/node_modules/@napi-rs/keyring` is missing (timeout-tolerant; reports status in context). Bundles resolve keyring via `createRequire(<data>/package.json)`.
 
@@ -114,7 +113,7 @@ plugin/
 
 ## 3. Hardening (hooks + skill)
 
-### 3.1 PreToolUse guard (`hooks/guard.mjs`)
+### 3.1 PreToolUse guard (`hook.mjs guard`)
 Deny (with a reason telling Claude the safe alternative) when:
 - Bash command contains `pidb` together with `secret get`/`--print`, or `login`, or `token`.
 - Bash command runs `pidb secret exec` and the child command prints environment: `echo`/`printf` of `$PIDB_`/`${PIDB_`/`%PIDB_`/`$env:PIDB_`, `env`, `printenv`, `set` (bare), `export -p`, `Get-ChildItem env:`, `gci env:`, `dir env:`, `ls env:`, `node -e`/`python -c` containing `process.env`/`os.environ`.
@@ -123,10 +122,10 @@ Deny (with a reason telling Claude the safe alternative) when:
 - Bash `curl`/`wget`/`Invoke-WebRequest`/`iwr`/`irm` targeting a configured pidb server URL (forces use of MCP/CLI).
 The guard is heuristic defense-in-depth; the skill states the rules plainly.
 
-### 3.2 PostToolUse redaction (`hooks/redact.mjs`, Bash)
+### 3.2 PostToolUse redaction (`hook.mjs redact`, Bash)
 Replace in tool output (via `updatedOutput`): pidb tokens (`pidb_[A-Za-z0-9_-]{20,}`), PEM private key blocks, `AKIA[0-9A-Z]{16}`, and `KEY=value` lines whose key matches `/(PASS(WORD)?|SECRET|TOKEN|API_?KEY|PRIVATE)/i` (value → `[pidb:redacted]`). Does not fetch secret values.
 
-### 3.3 SessionStart (`hooks/session-start.mjs`)
+### 3.3 SessionStart (`hook.mjs session-start`)
 - Ensures deps (2.1). Resolves binding for cwd. Injects `additionalContext` (≤ ~4 KB): profile + url, connection status, bound project summary, document index (slugs + titles), secret names with field keys (sensitive marked `*`), and the 6 golden rules (below). Unbound repo: short note + "call pidb_bind or ask the user which project". Not connected: "run `pidb connect`". Never throws; on any failure injects a one-line status.
 
 ### 3.4 Skill `pidb` — golden rules
