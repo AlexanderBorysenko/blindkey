@@ -27,9 +27,9 @@ export async function runInit(db: Db, opts: { username: string; password: string
 }
 
 export function runRotateKey(db: Db, ring: KeyRing): { secrets: number; totp: number } {
-  // One transaction per table: a failure in either leaves that table on the old key version,
-  // and rotate-key is safe to run again (rows already on the current version are skipped).
-  return { secrets: rewrapAllSecrets(db, ring), totp: rewrapTotpSecrets(db, ring) };
+  // One outer transaction: either every secret and every 2FA secret is rewrapped, or nothing is
+  // (the README runbook relies on this). Rows already on the current version are skipped, so it is safe to re-run.
+  return db.transaction(() => ({ secrets: rewrapAllSecrets(db, ring), totp: rewrapTotpSecrets(db, ring) }))();
 }
 
 export function runTotpReset(db: Db): string {

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { openDb } from '../src/db/connection.js';
 import { runInit, runRotateKey, runBackup, runTotpReset } from '../src/ops.js';
-import { getAdmin } from '../src/repos/admin.js';
+import { getAdmin, createAdmin } from '../src/repos/admin.js';
 import { getDocument } from '../src/repos/documents.js';
 import { createSecret, revealField } from '../src/repos/secrets.js';
 import { savePendingTotp, getTotp } from '../src/repos/twofactor.js';
@@ -34,6 +34,21 @@ describe('ops', () => {
     const ring2: KeyRing = { current: 2, keys: new Map([[1, ring1.keys.get(1)!], [2, randomBytes(32)]]) };
     expect(runRotateKey(db, ring2)).toEqual({ secrets: 1, totp: 0 });
     expect(revealField(db, { current: 2, keys: new Map([[2, ring2.keys.get(2)!]]) }, s.id, 'k')).toBe('v');
+  });
+  it('rotate-key is all-or-nothing: a failed 2FA rewrap leaves the secrets table on the old key version', () => {
+    const db = openDb(':memory:');
+    const ring1: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
+    const s = createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const admin = createAdmin(db, 'alex', 'hash');
+    savePendingTotp(db, ring1, admin.id, randomBytes(20));
+    // Corrupt the 2FA row so its rewrap throws (no key for version 99 in any ring below).
+    db.prepare(`UPDATE admin_totp SET key_version = 99 WHERE admin_id = ?`).run(admin.id);
+
+    const ring2: KeyRing = { current: 2, keys: new Map([[1, ring1.keys.get(1)!], [2, randomBytes(32)]]) };
+    expect(() => runRotateKey(db, ring2)).toThrow(/no master key for version 99/);
+
+    const raw = db.prepare(`SELECT key_version FROM secrets WHERE id = ?`).get(s.id) as { key_version: number };
+    expect(raw.key_version).toBe(1);
   });
   it('2fa reset deletes the admin_totp row and audits auth.totp_reset via shell', async () => {
     const db = openDb(':memory:');
