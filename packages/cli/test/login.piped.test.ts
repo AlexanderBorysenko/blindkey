@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeServer, runCliAsync } from './helpers.js';
+import { makeServer, runCliAsync, runCliKeepStdinOpen } from './helpers.js';
 import { startEnrollment, confirmEnrollment } from '../../server/src/services/twofactor.js';
 import { getTotp, openTotpSecret } from '../../server/src/repos/twofactor.js';
 import { hotp, stepAt } from '../../server/src/auth/totp.js';
@@ -63,4 +63,28 @@ describe('pidb login — piped (non-interactive) stdin', () => {
       await s.close();
     }
   });
+
+  it(
+    'exits promptly after a successful login even when the caller keeps stdin open',
+    async () => {
+      // Regression: the shared reader must go idle (paused + unref'd) between
+      // prompts, not just once the pipe finally reaches EOF. A caller that
+      // holds its end of the pipe open (spawn's default stdio: 'pipe', `docker
+      // exec -i`, a CI harness) must still see `pidb login` exit right after it
+      // has every answer it needs.
+      const s = await makeServer();
+      try {
+        await s.admin('robin', 'correct horse battery');
+        const dir = mkdtempSync(join(tmpdir(), 'pidb-piped-keepopen-'));
+        const r = await runCliKeepStdinOpen(['login', s.url], baseEnv(dir), repoRoot, 'robin\ncorrect horse battery\n', 5000);
+        expect(r.timedOut).toBe(false);
+        expect(r.status).toBe(0);
+        const saved = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { token: string };
+        expect(saved.token).toMatch(/^pidb_/);
+      } finally {
+        await s.close();
+      }
+    },
+    8000,
+  );
 });

@@ -19,8 +19,19 @@ const BACKSPACE = '\u007f';
  * `waiter` that the next `line` (or `close`, meaning no more input) resolves.
  * This lets username, password and a 2FA code — three separate prompts —
  * each pull the next line of one piped answer stream, in order.
+ *
+ * Between prompts (no waiter registered), the reader is paused and `stdin` is
+ * unref'd: a caller that keeps its end of the pipe open (a `spawn` with the
+ * default `stdio: 'pipe'`, `docker exec -i`, a CI harness) must not force
+ * `pidb login` to keep running until that pipe closes once it already has
+ * every answer it asked for. `nextNonTtyLine` re-arms both when a waiter
+ * needs a line. Pausing the reader can still let an already-received chunk
+ * finish emitting any further `line` events it contains (Node parses a
+ * chunk's lines synchronously as it arrives, before an in-handler `pause()`
+ * takes effect) — those extra lines land in `queue`, not lost.
  */
 interface NonTtyLineSource {
+  rl: readline.Interface;
   queue: string[];
   waiters: ((line: string | null) => void)[];
   ended: boolean;
@@ -28,20 +39,35 @@ interface NonTtyLineSource {
 
 let sharedSource: NonTtyLineSource | undefined;
 
+function goIdle(source: NonTtyLineSource): void {
+  source.rl.pause();
+  stdin.unref();
+}
+
+function wake(source: NonTtyLineSource): void {
+  stdin.ref();
+  source.rl.resume();
+}
+
 function nonTtySource(): NonTtyLineSource {
   if (sharedSource) return sharedSource;
-  const source: NonTtyLineSource = { queue: [], waiters: [], ended: false };
   const rl = readline.createInterface({ input: stdin, terminal: false });
+  const source: NonTtyLineSource = { rl, queue: [], waiters: [], ended: false };
   rl.on('line', (line: string) => {
     const waiter = source.waiters.shift();
-    if (waiter) waiter(line);
-    else source.queue.push(line);
+    if (!waiter) {
+      source.queue.push(line);
+      return;
+    }
+    waiter(line);
+    if (source.waiters.length === 0) goIdle(source);
   });
   rl.on('close', () => {
     source.ended = true;
     let waiter: ((line: string | null) => void) | undefined;
     while ((waiter = source.waiters.shift())) waiter(null);
   });
+  goIdle(source); // nobody has asked for a line yet
   sharedSource = source;
   return source;
 }
@@ -51,6 +77,7 @@ function nextNonTtyLine(): Promise<string | null> {
   const source = nonTtySource();
   if (source.queue.length > 0) return Promise.resolve(source.queue.shift()!);
   if (source.ended) return Promise.resolve(null);
+  wake(source);
   return new Promise((resolve) => source.waiters.push(resolve));
 }
 

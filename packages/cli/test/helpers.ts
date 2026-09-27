@@ -93,3 +93,55 @@ export function runCliAsync(args: string[], env: Record<string, string>, repoRoo
     if (stdinInput !== undefined) child.stdin!.end(stdinInput);
   });
 }
+
+export interface CliRunOrTimeout extends CliRun {
+  /** True if the child was still running at `timeoutMs` and had to be killed. */
+  timedOut: boolean;
+}
+
+/**
+ * Like runCliAsync, but writes `stdinInput` to the child's stdin WITHOUT
+ * ending the stream — as if the caller's own end of the pipe stays open (a
+ * `spawn` with the default `stdio: 'pipe'`, `docker exec -i`, a CI harness) —
+ * and races the child's exit against `timeoutMs`. A CLI command that finishes
+ * its own work must exit on its own even though the pipe is still open; if it
+ * doesn't, the child is killed and `timedOut` is true instead of hanging the
+ * test suite.
+ */
+export function runCliKeepStdinOpen(
+  args: string[],
+  env: Record<string, string>,
+  repoRoot: string,
+  stdinInput: string,
+  timeoutMs = 5000,
+): Promise<CliRunOrTimeout> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(join(repoRoot, 'node_modules/.bin/tsx'), [join(repoRoot, 'packages/cli/src/cli.ts'), ...args], {
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (c: string) => (stdout += c));
+    child.stderr.on('data', (c: string) => (stderr += c));
+    child.on('error', reject);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      resolve({ status: null, stdout, stderr, timedOut: true });
+    }, timeoutMs);
+    child.on('close', (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ status, stdout, stderr, timedOut: false });
+    });
+    // Deliberately no .end(): the pipe stays open, as it would for a real
+    // caller that hasn't (or won't) close its end.
+    child.stdin!.write(stdinInput);
+  });
+}
