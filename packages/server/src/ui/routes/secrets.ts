@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../http/context.js';
-import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretPatchSchema } from '@pidb/shared';
+import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretKeySchema, secretPatchSchema } from '@pidb/shared';
 import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, recentSecretAccessFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
 import { ConflictError } from '../../errors.js';
 import { adminActor, requireAdmin } from '../session.js';
@@ -10,6 +10,8 @@ import { renderPage, renderPartial } from '../render.js';
 import { scopeOf } from './documents.js';
 
 type SecretParams = { Params: { slug?: string; name: string } };
+/** `GET .../secrets/new` (spec §1.4): a prefill link, so the query is untyped and permissive. */
+type SecretNewParams = { Params: { slug?: string }; Querystring: Record<string, unknown> };
 
 interface FieldRow {
   key: string;
@@ -55,6 +57,26 @@ function fieldRows(b: Record<string, unknown>): FieldRow[] {
   return rows;
 }
 
+/**
+ * `keys` query param (spec §1.4, e.g. `host!,password`): one row per comma-separated key, empty
+ * value, sensitive unless the key ends with `!` (which is stripped before validating). A key that
+ * doesn't match `secretKeySchema` is dropped rather than rejecting the whole request — this is a
+ * prefill hint, not a submission. No keys survive → the same single empty sensitive row the plain
+ * "new secret" form always started with.
+ */
+function prefillRows(raw: string): FieldRow[] {
+  const rows: FieldRow[] = [];
+  for (const rawKey of raw.split(',')) {
+    const trimmed = rawKey.trim();
+    if (!trimmed) continue;
+    const sensitive = !trimmed.endsWith('!');
+    const key = sensitive ? trimmed : trimmed.slice(0, -1);
+    if (!secretKeySchema.safeParse(key).success) continue;
+    rows.push({ key, value: '', sensitive });
+  }
+  return rows.length > 0 ? rows : [{ key: '', value: '', sensitive: true }];
+}
+
 export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get('/global/secrets', async (req, reply) => {
     const principal = requireAdmin(req);
@@ -68,9 +90,12 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
   });
 
   for (const base of ['/p/:slug/secrets', '/global/secrets']) {
-    app.get<SecretParams>(`${base}/new`, async (req, reply) => {
+    app.get<SecretNewParams>(`${base}/new`, async (req, reply) => {
       requireAdmin(req);
       const scope = scopeOf(req.params);
+      // Prefill only: name/description/tags/keys, never a value (spec §1.4 — `value*` query
+      // params are simply never read here, whatever a caller sends).
+      const q = req.query;
       return reply.type('text/html').send(
         renderPage('secret-edit', {
           ...pageContext(ctx, req, 'New secret'),
@@ -81,7 +106,12 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
           action: `${scope.prefix}/secrets`,
           hintKeys: NON_SENSITIVE_KEYS,
           error: null,
-          form: { name: '', description: '', tags: '', rows: [{ key: '', value: '', sensitive: true }] },
+          form: {
+            name: str(q, 'name'),
+            description: str(q, 'description'),
+            tags: str(q, 'tags'),
+            rows: prefillRows(str(q, 'keys')),
+          },
         }),
       );
     });

@@ -1,18 +1,8 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { connectPollSchema, connectStartSchema } from '@pidb/shared';
 import type { AppContext } from '../context.js';
-import { parseBody } from '../helpers.js';
+import { originOf, parseBody } from '../helpers.js';
 import { pollConnect, startConnect } from '../../services/connect.js';
-
-/**
- * Honors `trustProxy` (set on the Fastify instance in buildApp): `req.protocol`/`req.host` already
- * reflect `X-Forwarded-Proto`/`X-Forwarded-Host` when the server trusts its proxy. `req.host` (not
- * `req.hostname`, which strips the port) is used deliberately: the verification URL must keep the
- * port the admin's browser needs to reach this server on.
- */
-function originOf(req: FastifyRequest): string {
-  return `${req.protocol}://${req.host}`;
-}
 
 export function registerConnectRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post(
