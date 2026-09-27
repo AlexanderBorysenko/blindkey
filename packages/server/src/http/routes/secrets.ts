@@ -1,8 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { secretInputSchema, secretPatchSchema } from '@pidb/shared';
+import { secretInputSchema, secretPatchSchema, secretUseSchema } from '@pidb/shared';
 import type { AppContext } from '../context.js';
 import { actorOf, parseBody, principalOf } from '../helpers.js';
-import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, revealAllFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
+import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, revealAllFor, revealFieldFor, updateSecretFor, useSecretFor } from '../../services/secrets.js';
+
+const USE_RATE_LIMIT = { max: 120, timeWindow: '1 minute' };
 
 type P = { Params: { slug?: string; name: string; key: string } };
 
@@ -24,6 +26,15 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
       if ((req.headers.accept ?? '').includes('text/plain')) return reply.type('text/plain; charset=utf-8').send(value);
       return { key: req.params.key, value };
     });
+
+    app.post<P>(
+      `${base}/:name/use`,
+      { config: { rateLimit: USE_RATE_LIMIT } },
+      async (req) => {
+        const input = parseBody(secretUseSchema, req.body);
+        return useSecretFor(ctx, actorOf(req), projectOf(req), req.params.name, input.purpose, input.fields);
+      },
+    );
 
     app.post<P>(base, async (req, reply) => {
       const input = parseBody(secretInputSchema, req.body);

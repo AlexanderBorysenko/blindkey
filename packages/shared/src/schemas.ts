@@ -111,6 +111,13 @@ export const secretPatchSchema = z.strictObject({
 });
 export type SecretPatch = z.infer<typeof secretPatchSchema>;
 
+/** Body for `POST .../secrets/:name/use` (spec §1.2): substitution-only access, never returns via reveal endpoints. */
+export const secretUseSchema = z.strictObject({
+  purpose: z.enum(['exec', 'write', 'env']),
+  fields: z.array(secretKeySchema).max(200).optional(),
+});
+export type SecretUseInput = z.infer<typeof secretUseSchema>;
+
 export const docSlugSchema = slugSchema;
 
 export const documentInputSchema = z.strictObject({

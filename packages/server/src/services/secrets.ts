@@ -75,6 +75,40 @@ export function revealAllFor(ctx: AppContext, actor: Actor, projectSlug: string 
   return { name: secret.name, fields };
 }
 
+/**
+ * Substitution-only secret access (spec §1.2): `POST .../secrets/:name/use`. Returns field values
+ * to the caller (unlike `secrets:meta`), but only for `secrets:use` or `secrets:reveal` — an agent
+ * token can hold `secrets:use` but never `secrets:reveal`, so this is the only way it ever sees a
+ * value, and only for immediate substitution (exec/write/env), never surfaced via the reveal
+ * endpoints (Review Focus 1: those still require `secrets:reveal`).
+ *
+ * Audits one `secret.used` row per call with `{ purpose, fields: [keys], agent }` — never values.
+ */
+export function useSecretFor(
+  ctx: AppContext,
+  actor: Actor,
+  projectSlug: string | null,
+  name: string,
+  purpose: 'exec' | 'write' | 'env',
+  fields?: string[],
+): { name: string; fields: Record<string, string> } {
+  if (!hasScope(actor.principal, 'secrets:use') && !hasScope(actor.principal, 'secrets:reveal')) {
+    throw new ForbiddenError('secrets:use');
+  }
+  const project = scopeProject(ctx, actor.principal, projectSlug);
+  const secret = mustGet(ctx, project?.id ?? null, name);
+  const knownKeys = new Set(secret.fields.map((f) => f.key));
+  const wanted = fields ?? secret.fields.map((f) => f.key);
+  for (const key of wanted) {
+    if (!knownKeys.has(key)) throw new NotFoundError('field not found');
+  }
+  const values = new Map(revealAllFields(ctx.db, ctx.ring, secret.id).map((f) => [f.key, f.value]));
+  const result: Record<string, string> = {};
+  for (const key of wanted) result[key] = values.get(key)!;
+  auditAs(ctx, actor, { action: 'secret.used', target_type: 'secret', target_id: secret.id, meta: { purpose, fields: wanted, agent: actor.principal.agent } });
+  return { name: secret.name, fields: result };
+}
+
 /** 403 `forbidden` raised where `secrets:meta-write` is not enough — a sensitive field would be created, touched or removed (spec §1.1). */
 const SENSITIVE_FORBIDDEN = () => new AppError(403, 'forbidden', 'sensitive fields need secrets:write');
 
