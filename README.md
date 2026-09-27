@@ -50,6 +50,8 @@ npm run build
 node packages/cli/dist/cli.js login http://localhost:8080     # prompts for the admin credentials
 ```
 
+The token `pidb login` saves lasts 30 days by default; `--expires <days>` sets 1–365. If two-factor authentication is on for the admin, `pidb login` asks for a `2FA code:` after the password. Once a saved token expires, every command prints `token expired — run \`pidb login <url>\` again` and exits with the auth exit code.
+
 Configuration resolves from `PIDB_URL` / `PIDB_TOKEN`, then `~/.config/pidb/config.json` (written `0600` by `pidb login`; `PIDB_CONFIG_HOME` overrides the directory).
 
 Put `pidb` on your `PATH` first — `npm link -w @pidb/cli` (or prefix each command below with `npx`) — so the examples run as written:
@@ -78,9 +80,12 @@ Admin:
 
 ```bash
 pidb token create --name claude-code --scopes projects:read,docs:read,secrets:meta --projects acme --expires 90d
+pidb token create --name backup-script --scopes secrets:reveal --no-expiry   # never expires
 pidb token list
 pidb token revoke 3
 ```
+
+`token create` expires in 90 days by default; `--expires 90d|12h|30m` sets a duration, and `--no-expiry` creates a token that never expires (`--expires` and `--no-expiry` together are refused).
 
 Exit codes: `0` success, `1` generic error, `2` refused (missing `--print`, would overwrite a file), `3` authentication or missing scope, `4` not found.
 
@@ -98,9 +103,17 @@ open http://localhost:8080/login
 - Log in with the admin credentials created by `pidb-server init`; the session is a `pidb_session` cookie (httpOnly, SameSite=Lax, `Secure` behind HTTPS) valid for 7 days. The `Secure` flag is derived from `req.protocol`, which Fastify only reports as `https` when it trusts the `X-Forwarded-Proto` header from a proxy — so if TLS is terminated in front of the server (e.g. Caddy), you must also set `PIDB_TRUST_PROXY` (to `true`, or to the proxy's IP/CIDR — see [Environment](#environment)) or the cookie will be issued without `Secure`.
 - Projects, documents and secrets are browsable and editable; document saves run the same secret-value lint as the API, with "Save anyway" as the audited override.
 - Sensitive secret fields are masked. "Reveal" fetches one field, writes an `audit_log` row with `actor_type = admin`, and the response is `no-store`. To use a value, prefer `pidb secret exec|write|env`.
-- `/tokens` creates API tokens (the value is shown once) and revokes them; `/audit` is the paginated audit log.
+- `/tokens` creates API tokens (the value is shown once) and revokes them; `/audit` is the paginated audit log. The new-token dialog's "Expires in (days)" defaults to 90; its "Never expires" checkbox is the only way to create a non-expiring token, and the table flags an active non-expiring token with a `never expires` pill.
 - Assets (the hand-written `app.css` stylesheet, IBM Plex fonts, htmx) are served from `node_modules`/`src/ui/public` under `/assets` — no CDN, so the UI works offline and under a strict CSP; the UI uses a small hand-written custom stylesheet (IBM Plex, light and dark themes) rather than a CSS framework (`prefers-color-scheme`).
+- The UI runs under `script-src 'self'; style-src 'self'` with no exception for inline code: no view renders an inline `<script>`, an `on*=` handler or a `style=` attribute — all client-side behaviour lives in the one delegated file `/assets/app.js`.
 - A project sidebar lists every project by status, plus global docs/secrets, tokens and audit — the same nav collapses to a `Menu` drawer below 800px. Each secret page shows its own recent-access panel (who revealed which field, and when), and a revealed field auto-hides itself after a short countdown.
+
+### Two-factor authentication
+
+- Set up TOTP two-factor at `/settings/2fa` (linked from the sidebar as "Two-factor"): scan the QR code with an authenticator app, or copy the text secret in by hand, then confirm with a 6-digit code. Confirming shows 10 one-time recovery codes — save them now, since each works only once and they are never shown again.
+- Once enabled, the login page asks for a code after the username and password — a 6-digit TOTP code or a recovery code — and `pidb login` prompts for `2FA code:` the same way.
+- "Regenerate recovery codes" and "Turn off two-factor" (both on `/settings/2fa`) each require the current password plus a fresh second factor (a TOTP code or an unused recovery code), so an admin who lost the authenticator but kept a recovery code can still regenerate codes or turn 2FA off.
+- Emergency reset — if both the authenticator and every recovery code are lost — from a shell on the host: `pidb-server 2fa reset` (Docker: `docker compose run --rm --no-deps server 2fa reset`). It turns two-factor off for the admin account; log back in with the password and set it up again.
 
 ## Deployment (Docker)
 
@@ -309,10 +322,11 @@ Now rewrap every secret:
 docker compose run --rm --no-deps server rotate-key
 ```
 
-`rotate-key` rewraps everything in one transaction: it either rewraps every secret or none. Read what it printed:
+`rotate-key` rewraps everything — every secret and every 2FA TOTP secret — in one transaction: it either rewraps all of it or none. It now prints two lines; read them:
 
 - **`rewrapped <count> secrets to key version <N+1>`**, with the count you wrote down: the rotation worked. Go on below.
-- **An error** (for example `no master key for version …`, a decrypt error, or a complaint about `PIDB_MASTER_KEY_PREVIOUS`): nothing was rewrapped. Do not start the stack. Compare the `PREVIOUS` entry in `docker/.env` with `sudo cat "secrets/master_key.v$N"`, fix it, and run `rotate-key` again — or roll back as described below.
+- **`rewrapped <count> 2FA secrets`**: the second line, added for two-factor authentication. It is informational only — 0 is normal if no admin has 2FA enabled — and does not change how you read the first line above.
+- **An error** (for example `no master key for version …`, a decrypt error, or a complaint about `PIDB_MASTER_KEY_PREVIOUS`): nothing was rewrapped, including the 2FA secrets. Do not start the stack. Compare the `PREVIOUS` entry in `docker/.env` with `sudo cat "secrets/master_key.v$N"`, fix it, and run `rotate-key` again — or roll back as described below.
 - **`rewrapped 0 secrets`** although the table showed secrets: this run changed nothing. Do not start the stack yet, and run the version query again. If the rows show the same version as your first query, the numbers are wrong (N was not the version the rows use, or `.env` wasn't bumped): roll back. Only if your first query showed N and the rows now show N+1 did an earlier `rotate-key` run already succeed (for example you are repeating the step after a dropped SSH session) — then the rotation is done: go on below.
 
 To roll back — only while the query shows the same version as your first query, i.e. no `rotate-key` run has rewrapped anything — put the old key back and undo the `.env` edit:

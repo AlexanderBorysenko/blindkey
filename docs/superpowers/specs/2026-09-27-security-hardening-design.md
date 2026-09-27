@@ -89,7 +89,7 @@ CREATE TABLE login_challenges (
 ```
 
 - **Recovery codes:** 10 codes of the form `xxxxx-xxxxx` from the alphabet `abcdefghjkmnpqrstuvwxyz23456789`, each hashed with argon2id. They are shown **once**, on a `no-store` page. Using one sets `used_at`, and it never works again.
-- **`rotate-key`** (`runRotateKey`) also rewraps `admin_totp.secret_enc` for rows whose `key_version != current`: open with the old key and the same AAD, seal with the current key. The CLI output reports both counts: `rewrapped N secrets and M 2FA secrets to key version V`.
+- **`rotate-key`** (`runRotateKey`) also rewraps `admin_totp.secret_enc` for rows whose `key_version != current`: open with the old key and the same AAD, seal with the current key. Both rewraps run in one transaction, so it is all or nothing. The CLI prints two lines: `rewrapped N secrets to key version V` (unchanged), then `rewrapped M 2FA secrets`.
 
 ### 2.3 Enrollment and management (UI)
 
@@ -98,7 +98,7 @@ A new page **`/settings/2fa`** is linked in the sidebar Admin group as "Two-fact
 - **No row, or not yet enabled:** a "Set up two-factor" button (`POST /settings/2fa/start`) creates or replaces the pending row. The page then shows the QR code (an SVG data URI from the `qrcode` package; CSP `img-src data:` already allows it), the base32 secret as text (grouped by 4), and a confirm form (`POST /settings/2fa/confirm`, 6-digit code).
   - A correct code sets `enabled_at`, generates 10 recovery codes, and renders them once with "Save these now" copy.
   - A wrong code re-renders with an error.
-- **Enabled:** shows "Enabled since <date>" and the number of unused recovery codes. Two actions each require the **current password + a fresh TOTP code**:
+- **Enabled:** shows "Enabled since <date>" and the number of unused recovery codes. Two actions each require the **current password + a fresh second factor** (a TOTP code **or** an unused recovery code — a recovery code is accepted so an admin who lost the authenticator can still regenerate codes or turn 2FA off):
   - "Regenerate recovery codes" (`POST /settings/2fa/recovery`): replaces all codes and shows the new ones once.
   - "Turn off two-factor" (`POST /settings/2fa/disable`): deletes `admin_totp` and `recovery_codes` for the admin.
 - **Until enrolled:** every admin page shows a warn-colored `.alert.warn` banner at the top of `<main>`: "Two-factor authentication is off. Set it up →" (link to `/settings/2fa`). The banner is rendered from a `pageContext` field `totpEnabled: boolean`.
@@ -123,8 +123,10 @@ A new page **`/settings/2fa`** is linked in the sidebar Admin group as "Two-fact
 - **Valid code:** create the session, delete the challenge, clear `pidb_2fa`, audit `auth.login` with `meta.via = 'ui'` and `meta.second_factor = 'totp' | 'recovery'`, redirect to `/`.
 - **Invalid code:**
   - Increment `attempts` and audit `auth.totp_failed`.
-  - At 5 attempts, delete the challenge and redirect to `/login` with the error "Too many attempts — log in again."
+  - At 5 attempts, delete the challenge, clear `pidb_2fa`, and render the login page with status 401 and the message "Too many attempts — log in again." (rendered, not redirected, so the message is visible).
   - Otherwise re-render with "Invalid code."
+
+A malformed code (a non-string `code` field) is treated as a wrong code.
 
 Expired challenges are purged opportunistically, like sessions.
 
