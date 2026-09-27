@@ -14,6 +14,7 @@ function exitCodeFor(status: number): number {
 }
 
 function describeError(status: number, body: ApiErrorBody): string {
+  if (status === 401 && body.error === 'token_expired') return 'token expired — run `pidb login <url>` again';
   const head = body.message && body.message !== body.error ? `${body.error}: ${body.message}` : body.error;
   const lines = [`${head} (HTTP ${status})`];
   if (typeof body.scope === 'string') lines.push(`  required scope: ${body.scope}`);

@@ -35,8 +35,8 @@ describe('parseExpires', () => {
     expect(parseExpires('12h', now)).toBe(now + 12 * 3_600_000);
     expect(parseExpires('30m', now)).toBe(now + 30 * 60_000);
   });
-  it('returns null when omitted', () => {
-    expect(parseExpires(undefined, now)).toBeNull();
+  it('returns undefined when omitted', () => {
+    expect(parseExpires(undefined, now)).toBeUndefined();
   });
   it('rejects other shapes', () => {
     expect(() => parseExpires('tomorrow', now)).toThrow(CliError);
@@ -76,6 +76,27 @@ describe('token create', () => {
 
     const list = (await runTokenList(admin())).json as PublicToken[];
     expect(list.some((t) => t.name === 'empty-projects' || t.name === 'blank-projects')).toBe(false);
+  });
+});
+
+describe('token create expiry', () => {
+  it('defaults to 90 days when --expires and --no-expiry are both omitted', async () => {
+    const before = Date.now();
+    const result = await runTokenCreate(admin(), { name: 'expiry-default', scopes: 'docs:read' });
+    const json = result.json as PublicToken;
+    expect(json.expires_at).not.toBeNull();
+    expect(Math.abs((json.expires_at as number) - (before + 90 * 86_400_000))).toBeLessThan(60_000);
+  });
+
+  it('creates a never-expiring token with --no-expiry', async () => {
+    const result = await runTokenCreate(admin(), { name: 'no-expiry', scopes: 'docs:read', expiry: false });
+    expect((result.json as PublicToken).expires_at).toBeNull();
+  });
+
+  it('rejects combining --expires with --no-expiry', async () => {
+    await expect(
+      runTokenCreate(admin(), { name: 'both', scopes: 'docs:read', expires: '90d', expiry: false }),
+    ).rejects.toThrow(/--no-expiry/);
   });
 });
 

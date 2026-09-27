@@ -29,8 +29,9 @@ export function buildProgram(): Command {
     .argument('<url>', 'server base url, e.g. https://pidb.example.com')
     .option('--username <username>', 'admin username (prompts when omitted)')
     .option('--name <name>', 'token name (default: cli-<hostname>)')
+    .option('--expires <days>', 'token lifetime in days, 1-365 (default: 30)')
     .description('Exchange admin credentials for an API token and save it')
-    .action(async (url: string, opts: { username?: string; name?: string }) => {
+    .action(async (url: string, opts: { username?: string; name?: string; expires?: string }) => {
       emit(await runLogin(url, opts), false);
     });
 
@@ -179,11 +180,14 @@ export function buildProgram(): Command {
     .requiredOption('--name <name>', 'token name')
     .requiredOption('--scopes <scopes>', 'comma-separated scopes')
     .option('--projects <slugs>', 'comma-separated project slugs (default: all projects)')
-    .option('--expires <duration>', 'expiry such as 90d, 12h, 30m')
+    .option('--expires <duration>', 'expiry such as 90d, 12h, 30m (default: 90d)')
+    .option('--no-expiry', 'create a token that never expires')
     .option('--json', 'raw JSON output')
-    .action(async (opts: { name: string; scopes: string; projects?: string; expires?: string; json?: boolean }) => {
-      emit(await runTokenCreate(clientFrom(), opts), opts.json === true);
-    });
+    .action(
+      async (opts: { name: string; scopes: string; projects?: string; expires?: string; expiry?: boolean; json?: boolean }) => {
+        emit(await runTokenCreate(clientFrom(), opts), opts.json === true);
+      },
+    );
   token
     .command('list')
     .option('--json', 'raw JSON output')

@@ -8,6 +8,7 @@ import { prompt as defaultPrompt, promptHidden as defaultPromptHidden } from '..
 export interface LoginOptions {
   username?: string;
   name?: string;
+  expires?: string;
 }
 
 export interface LoginIo {
@@ -19,6 +20,7 @@ interface AuthTokenResponse {
   token: string;
   id: number;
   name: string;
+  expires_at: number;
 }
 
 export async function runLogin(
@@ -28,6 +30,14 @@ export async function runLogin(
   io: LoginIo = { prompt: defaultPrompt, promptHidden: defaultPromptHidden },
 ): Promise<CommandResult> {
   const url = normalizeUrl(rawUrl);
+
+  let expires_days = 30;
+  if (opts.expires !== undefined) {
+    if (!/^\d+$/.test(opts.expires.trim())) throw new CliError(`invalid --expires "${opts.expires}" — a number of days from 1 to 365`);
+    expires_days = Number.parseInt(opts.expires.trim(), 10);
+    if (expires_days < 1 || expires_days > 365) throw new CliError(`invalid --expires "${opts.expires}" — a number of days from 1 to 365`);
+  }
+
   const username = opts.username ?? (await io.prompt('Admin username: '));
   const password = await io.promptHidden('Admin password: ');
   if (!username || !password) throw new CliError('username and password are required');
@@ -37,11 +47,11 @@ export async function runLogin(
   // Authorization header for an empty token.
   const client = new PidbClient({ url, token: '' });
   const res = await client.json<AuthTokenResponse>('POST', '/api/v1/auth/token', {
-    body: { username, password, name },
+    body: { username, password, name, expires_days },
   });
   const path = saveConfig({ url, token: res.token }, env);
   return {
-    json: { url, token_id: res.id, token_name: res.name, config: path },
-    text: `logged in to ${url}; admin token "${res.name}" (id ${res.id}) saved to ${path}`,
+    json: { url, token_id: res.id, token_name: res.name, config: path, expires_at: res.expires_at },
+    text: `logged in to ${url}; admin token "${res.name}" (id ${res.id}) saved to ${path}, expires ${new Date(res.expires_at).toISOString().slice(0, 10)}`,
   };
 }

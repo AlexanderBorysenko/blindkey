@@ -104,6 +104,12 @@ describe('PidbClient', () => {
     expect((err as ApiError).message.length).toBeLessThanOrEqual(600);
   });
 
+  it('gives a helpful hint for an expired token', () => {
+    const err = new ApiError(401, { error: 'token_expired', message: 'token expired' });
+    expect(err.message).toContain('token expired — run `pidb login <url>` again');
+    expect(err.exitCode).toBe(3);
+  });
+
   it('handles 204 responses', async () => {
     const c = client(s.token(['docs:write']));
     await c.json('PUT', '/api/v1/docs/tmp-doc', { body: { title: 'T', category: 'notes', body_md: 'hi' } });

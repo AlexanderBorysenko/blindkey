@@ -9,6 +9,8 @@ export interface TokenCreateOptions {
   scopes: string;
   projects?: string;
   expires?: string;
+  /** commander sets this to false for --no-expiry */
+  expiry?: boolean;
 }
 
 export function parseScopes(raw: string): Scope[] {
@@ -27,8 +29,8 @@ export function parseScopes(raw: string): Scope[] {
 
 const UNITS: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000 };
 
-export function parseExpires(raw: string | undefined, now: number = Date.now()): number | null {
-  if (raw === undefined) return null;
+export function parseExpires(raw: string | undefined, now: number = Date.now()): number | undefined {
+  if (raw === undefined) return undefined;
   const m = /^(\d+)([dhm])$/.exec(raw.trim());
   const unit = m ? UNITS[m[2] as string] : undefined;
   if (!m || unit === undefined) throw new CliError(`invalid --expires "${raw}" — use 90d, 12h or 30m`);
@@ -47,10 +49,13 @@ export async function runTokenCreate(client: PidbClient, opts: TokenCreateOption
   if (opts.projects !== undefined && projects !== null && projects.length === 0) {
     throw new CliError('--projects was given but lists no project — omit the flag entirely for a token covering all projects');
   }
-  const expires_at = parseExpires(opts.expires);
-  const created = await client.json<PublicToken & { token: string }>('POST', '/api/v1/tokens', {
-    body: { name: opts.name, scopes, projects, expires_at },
-  });
+  if (opts.expiry === false && opts.expires !== undefined) {
+    throw new CliError('use either --expires or --no-expiry, not both');
+  }
+  const expires_at = opts.expiry === false ? null : parseExpires(opts.expires);
+  const body: Record<string, unknown> = { name: opts.name, scopes, projects };
+  if (expires_at !== undefined) body.expires_at = expires_at; // omitted → server default (90 days)
+  const created = await client.json<PublicToken & { token: string }>('POST', '/api/v1/tokens', { body });
   return {
     json: created,
     text: [
