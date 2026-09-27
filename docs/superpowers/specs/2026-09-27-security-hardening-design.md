@@ -89,6 +89,11 @@ CREATE TABLE login_challenges (
 ```
 
 - **Recovery codes:** 10 codes of the form `xxxxx-xxxxx` from the alphabet `abcdefghjkmnpqrstuvwxyz23456789`, each hashed with argon2id. They are shown **once**, on a `no-store` page. Using one sets `used_at`, and it never works again.
+- **Migration 3** adds the per-admin second-factor lockout (§2.4):
+  ```sql
+  ALTER TABLE admin_totp ADD COLUMN failed_count INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE admin_totp ADD COLUMN locked_until INTEGER;
+  ```
 - **`rotate-key`** (`runRotateKey`) also rewraps `admin_totp.secret_enc` for rows whose `key_version != current`: open with the old key and the same AAD, seal with the current key. Both rewraps run in one transaction, so it is all or nothing. The CLI prints two lines: `rewrapped N secrets to key version V` (unchanged), then `rewrapped M 2FA secrets`.
 
 ### 2.3 Enrollment and management (UI)
@@ -97,13 +102,15 @@ A new page **`/settings/2fa`** is linked in the sidebar Admin group as "Two-fact
 
 - **No row, or not yet enabled:** a "Set up two-factor" button (`POST /settings/2fa/start`) creates or replaces the pending row. The page then shows the QR code (an SVG data URI from the `qrcode` package; CSP `img-src data:` already allows it), the base32 secret as text (grouped by 4), and a confirm form (`POST /settings/2fa/confirm`, 6-digit code).
   - A correct code sets `enabled_at`, generates 10 recovery codes, and renders them once with "Save these now" copy.
+  - A correct code also **signs out the admin's other sessions** (`DELETE FROM sessions WHERE admin_id = ? AND id <> <current session>`): a session opened before enrollment must not keep full access for the rest of its 7-day life. The current session stays. The `auth.totp_enrolled` audit row records `meta.revoked_sessions` (the number deleted). Existing API tokens are not revoked.
   - A wrong code re-renders with an error.
 - **Enabled:** shows "Enabled since <date>" and the number of unused recovery codes. Two actions each require the **current password + a fresh second factor** (a TOTP code **or** an unused recovery code — a recovery code is accepted so an admin who lost the authenticator can still regenerate codes or turn 2FA off):
   - "Regenerate recovery codes" (`POST /settings/2fa/recovery`): replaces all codes and shows the new ones once.
   - "Turn off two-factor" (`POST /settings/2fa/disable`): deletes `admin_totp` and `recovery_codes` for the admin.
 - **Until enrolled:** every admin page shows a warn-colored `.alert.warn` banner at the top of `<main>`: "Two-factor authentication is off. Set it up →" (link to `/settings/2fa`). The banner is rendered from a `pageContext` field `totpEnabled: boolean`.
-- **Audit actions:** `auth.totp_enrolled`, `auth.totp_disabled`, `auth.recovery_regenerated`, `auth.totp_failed`, `auth.recovery_used`, `auth.totp_reset`.
-- All `/settings/2fa*` responses are `cache-control: no-store`. All POSTs require CSRF.
+- **Audit actions:** `auth.totp_enrolled`, `auth.totp_disabled`, `auth.recovery_regenerated`, `auth.totp_failed`, `auth.recovery_used`, `auth.totp_reset`, `auth.totp_locked` (§2.4).
+- All `/settings/2fa*` responses are `cache-control: no-store`. All POSTs require CSRF and are rate-limited to 10/min per IP.
+- While the admin's second factor is locked (§2.4), regenerate and turn-off re-render with status 429 and the lockout message, without checking the password or code. The code inputs of these two forms use `inputmode="text"`, since they accept recovery codes; the confirm form keeps `inputmode="numeric"`.
 
 ### 2.4 UI login flow
 
@@ -116,19 +123,28 @@ A new page **`/settings/2fa`** is linked in the sidebar Admin group as "Two-fact
    - Set cookie `pidb_2fa=<id>`: httpOnly, SameSite=Lax, path `/login`, max-age 300, Secure as for the session.
    - Redirect to `/login/2fa`. **No session yet.**
 
-`GET /login/2fa` is public. It renders a single input `name="code"` (autocomplete `one-time-code`) and accepts either a 6-digit TOTP code or a recovery code. A missing or expired challenge redirects to `/login`.
+`GET /login/2fa` is public. It renders a single input `name="code"` (autocomplete `one-time-code`) and accepts either a 6-digit TOTP code (whitespace inside it, as in `123 456`, is ignored) or a recovery code. A missing or expired challenge redirects to `/login`.
 
 `POST /login/2fa` is public and rate-limited to 10/min per IP.
 
+- **Admin locked out** (see *Per-admin lockout* below): re-render the code page with status 429 and "Too many wrong codes — try again in N minutes." (N computed from `locked_until`). The code is not checked and no challenge attempt is used.
+- **Every other request first claims an attempt atomically**, before the code is checked: `UPDATE login_challenges SET attempts = attempts + 1 WHERE id = ? AND attempts < 5 AND expires_at > now RETURNING attempts`. If no row comes back, the challenge is exhausted or expired: delete it, clear `pidb_2fa`, and render the login page with 401 "Too many attempts — log in again." This caps parallel guesses on one challenge at 5.
 - **Valid code:** create the session, delete the challenge, clear `pidb_2fa`, audit `auth.login` with `meta.via = 'ui'` and `meta.second_factor = 'totp' | 'recovery'`, redirect to `/`.
 - **Invalid code:**
-  - Increment `attempts` and audit `auth.totp_failed`.
-  - At 5 attempts, delete the challenge, clear `pidb_2fa`, and render the login page with status 401 and the message "Too many attempts — log in again." (rendered, not redirected, so the message is visible).
+  - Audit `auth.totp_failed` (the attempt was already claimed).
+  - If the claimed attempt was the 5th, delete the challenge, clear `pidb_2fa`, and render the login page with status 401 and the message "Too many attempts — log in again." (rendered, not redirected, so the message is visible).
   - Otherwise re-render with "Invalid code."
 
 A malformed code (a non-string `code` field) is treated as a wrong code.
 
 Expired challenges are purged opportunistically, like sessions.
+
+**Per-admin lockout.** The per-IP rate limits live in memory, reset on restart, and depend on the client IP being right (`PIDB_TRUST_PROXY`). A persistent per-admin cap backs them up, enforced in `verifySecondFactor` and so shared by the UI login, the settings re-authentication and the API:
+- Every failed second-factor check (TOTP or recovery code, including malformed input) increments `admin_totp.failed_count` atomically. On the 10th (`MAX_FACTOR_FAILURES`), `locked_until` is set to now + 15 minutes (`FACTOR_LOCK_MS`), `failed_count` resets to 0, and audit `auth.totp_locked` is written (`actor_type 'admin'`, `actor_id`, `meta.until`).
+- While `locked_until` is in the future, every second-factor check fails **without looking at the input**, so even a correct code is refused, and nothing is counted.
+- A successful check resets `failed_count` to 0.
+- Wrong codes at enrollment confirmation (§2.3) are not counted: 2FA is not on yet.
+- Turning 2FA off and `pidb-server 2fa reset` clear the lock, since they delete the row.
 
 The UI guard (`registerUiGuard`) must allow `/login/2fa` anonymously, exactly like `/login`.
 
@@ -138,6 +154,7 @@ The UI guard (`registerUiGuard`) must allow `/login/2fa` anonymously, exactly li
 
 - **Admin with 2FA enabled and no `totp`:** 401 `totp_required` ("two-factor code required"). No audit row, because the password was correct and this is a normal step.
 - **Wrong `totp`:** 401 `unauthorized` ("invalid credentials") and audit `auth.totp_failed`. The existing 5/min route limit applies.
+- **Admin locked out** (§2.4), with a correct password: 429 `totp_locked` ("too many wrong codes — try again later"), whether or not `totp` is present, before any code is checked.
 - **Correct:** the token is minted as in §1.1, and the `auth.login` meta records `second_factor`.
 
 **CLI `pidb login`:**
