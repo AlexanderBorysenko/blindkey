@@ -6,14 +6,18 @@ import {
   base32Encode, generateRecoveryCode, generateTotpSecret, normalizeRecoveryCode, otpauthUri, verifyTotp,
 } from '../auth/totp.js';
 import {
-  claimTotpStep, deleteTwoFactor, enableTotp, getTotp, listUnusedRecoveryCodes, markRecoveryCodeUsed,
-  openTotpSecret, replaceRecoveryCodes, savePendingTotp,
+  type TotpRow, claimTotpStep, deleteTwoFactor, enableTotp, factorLockedUntil, getTotp, listUnusedRecoveryCodes, markRecoveryCodeUsed,
+  openTotpSecret, recordFactorFailure, replaceRecoveryCodes, resetFactorFailures, savePendingTotp,
 } from '../repos/twofactor.js';
+import { writeAudit } from '../repos/audit.js';
 import { auditAs } from './common.js';
 
 export const CHALLENGE_TTL_MS = 300_000;
 export const MAX_CHALLENGE_ATTEMPTS = 5;
 export const RECOVERY_CODE_COUNT = 10;
+/** Persistent per-admin cap on wrong second-factor codes (spec §2.4). */
+export const MAX_FACTOR_FAILURES = 10;
+export const FACTOR_LOCK_MS = 15 * 60_000;
 export type SecondFactor = 'totp' | 'recovery';
 
 export function isTotpEnabled(ctx: AppContext, adminId: number): boolean {
@@ -53,17 +57,17 @@ export async function confirmEnrollment(ctx: AppContext, actor: Actor, code: str
   return codes;
 }
 
-/**
- * Accepts a 6-digit TOTP code or a recovery code (case/space/dash-insensitive).
- * Records the used step / marks the recovery code used. Returns which factor matched.
- * Callers write the audit rows (they know the request's ip and user agent).
- */
-export async function verifySecondFactor(ctx: AppContext, adminId: number, input: string): Promise<SecondFactor | null> {
-  const row = getTotp(ctx.db, adminId);
-  if (!row || row.enabled_at === null) return null;
+/** Epoch ms until which the admin's second factor is locked after too many wrong codes, or null. */
+export function isSecondFactorLocked(ctx: AppContext, adminId: number): number | null {
+  return factorLockedUntil(ctx.db, adminId, Date.now());
+}
+
+async function matchSecondFactor(ctx: AppContext, row: TotpRow, input: string): Promise<SecondFactor | null> {
+  const adminId = row.admin_id;
   const trimmed = input.trim();
-  if (/^\d{6}$/.test(trimmed)) {
-    const step = verifyTotp(openTotpSecret(ctx.ring, row), trimmed, row.last_used_step);
+  const digits = trimmed;
+  if (/^\d{6}$/.test(digits)) {
+    const step = verifyTotp(openTotpSecret(ctx.ring, row), digits, row.last_used_step);
     return step !== null && claimTotpStep(ctx.db, adminId, step) ? 'totp' : null;
   }
   const normalized = normalizeRecoveryCode(trimmed);
@@ -73,6 +77,27 @@ export async function verifySecondFactor(ctx: AppContext, adminId: number, input
       return markRecoveryCodeUsed(ctx.db, rc.id) ? 'recovery' : null;
     }
   }
+  return null;
+}
+
+/**
+ * Accepts a 6-digit TOTP code or a recovery code (case/space/dash-insensitive).
+ * Records the used step / marks the recovery code used. Returns which factor matched.
+ * While the admin is locked out it returns null without checking the input. Every failure is
+ * counted; the MAX_FACTOR_FAILURES-th locks the factor for FACTOR_LOCK_MS (audited as
+ * auth.totp_locked). Callers write the per-request audit rows (they know the ip and user agent).
+ */
+export async function verifySecondFactor(ctx: AppContext, adminId: number, input: string): Promise<SecondFactor | null> {
+  const row = getTotp(ctx.db, adminId);
+  if (!row || row.enabled_at === null) return null;
+  if (isSecondFactorLocked(ctx, adminId) !== null) return null;
+  const used = await matchSecondFactor(ctx, row, input);
+  if (used) {
+    resetFactorFailures(ctx.db, adminId);
+    return used;
+  }
+  const { locked, until } = recordFactorFailure(ctx.db, adminId, MAX_FACTOR_FAILURES, FACTOR_LOCK_MS, Date.now());
+  if (locked) writeAudit(ctx.db, { actor_type: 'admin', actor_id: adminId, action: 'auth.totp_locked', meta: { until } });
   return null;
 }
 

@@ -6,8 +6,9 @@ import { getTotp } from '../../repos/twofactor.js';
 import { verifyPassword } from '../../crypto/passwords.js';
 import {
   confirmEnrollment, countUnusedRecoveryCodes, disableTwoFactor, isTotpEnabled, pendingEnrollment,
-  regenerateRecoveryCodes, startEnrollment, verifySecondFactor,
+  isSecondFactorLocked, regenerateRecoveryCodes, startEnrollment, verifySecondFactor,
 } from '../../services/twofactor.js';
+import { factorLockedMessage } from './auth.js';
 import { writeAudit } from '../../repos/audit.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
@@ -57,29 +58,34 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
   });
 
   // Both destructive actions re-authenticate with the password AND a fresh code.
-  async function reauth(req: FastifyRequest): Promise<boolean> {
+  // Returns null on success, or the error page's message and status.
+  async function reauth(req: FastifyRequest): Promise<{ status: number; error: string } | null> {
     const admin = adminOf(req);
+    const lockedUntil = isSecondFactorLocked(ctx, admin.id);
+    if (lockedUntil !== null) return { status: 429, error: factorLockedMessage(lockedUntil) };
     const b = body(req);
     const passwordOk = await verifyPassword(admin.password_hash, str(b, 'password'));
     const factor = passwordOk ? await verifySecondFactor(ctx, admin.id, str(b, 'code')) : null;
     if (!passwordOk || !factor) {
       writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_failed', ip: req.ip, user_agent: req.headers['user-agent'] ?? '', meta: { via: 'settings' } });
-      return false;
+      return { status: 400, error: 'Invalid password or code.' };
     }
-    return true;
+    return null;
   }
 
   app.post('/settings/2fa/recovery', async (req, reply) => {
     assertCsrf(ctx, req);
     if (!isTotpEnabled(ctx, adminOf(req).id)) return reply.redirect('/settings/2fa', 302);
-    if (!(await reauth(req))) return page(req, reply, await currentView(req), 'Invalid password or code.', 400);
+    const failed = await reauth(req);
+    if (failed) return page(req, reply, await currentView(req), failed.error, failed.status);
     return page(req, reply, { state: 'codes', codes: await regenerateRecoveryCodes(ctx, adminActor(req)) }, null);
   });
 
   app.post('/settings/2fa/disable', async (req, reply) => {
     assertCsrf(ctx, req);
     if (!isTotpEnabled(ctx, adminOf(req).id)) return reply.redirect('/settings/2fa', 302);
-    if (!(await reauth(req))) return page(req, reply, await currentView(req), 'Invalid password or code.', 400);
+    const failed = await reauth(req);
+    if (failed) return page(req, reply, await currentView(req), failed.error, failed.status);
     disableTwoFactor(ctx, adminActor(req));
     return reply.redirect('/settings/2fa?done=saved', 302);
   });

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { makeTestApp, type TestCtx } from './helpers.js';
-import { createAdmin } from '../src/repos/admin.js';
+import { createAdmin, createSession } from '../src/repos/admin.js';
+import { SESSION_TTL_MS } from '../src/ui/session.js';
+import { confirmEnrollment, startEnrollment, verifySecondFactor, MAX_FACTOR_FAILURES } from '../src/services/twofactor.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { getTotp, openTotpSecret, createChallenge, getChallenge } from '../src/repos/twofactor.js';
 import { hotp, stepAt } from '../src/auth/totp.js';
@@ -349,5 +351,53 @@ describe('R7: malformed code body on POST /login/2fa', () => {
 
     await t2.app.close();
     // This instance: POST /login x2, POST /login/2fa x2 — both well under 10/min.
+  });
+});
+
+// F1: the persistent per-admin lockout, seen through the UI. The 10 failures are driven
+// through the service (R4: this instance sends POST /login x1 and POST /login/2fa x2).
+describe('F1: per-admin second-factor lockout in the UI', () => {
+  it('a locked admin gets 429 on /login/2fa and settings reauth even with the right code; unlocked, the code works', async () => {
+    const t3 = await makeTestApp();
+    try {
+      const admin = createAdmin(t3.db, 'dave', await hashPassword('pw'));
+      const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null }, ip: '', userAgent: '' };
+      startEnrollment(t3.ctx, admin.id);
+      const secret = () => openTotpSecret(t3.ring, getTotp(t3.db, admin.id)!);
+      await confirmEnrollment(t3.ctx, actor, hotp(secret(), stepAt(Date.now())));
+      for (let i = 0; i < MAX_FACTOR_FAILURES; i++) await verifySecondFactor(t3.ctx, admin.id, '000000');
+      expect(listAudit(t3.db, { action: 'auth.totp_locked' })).toHaveLength(1);
+
+      const loginRes = await t3.app.inject({ method: 'POST', url: '/login', payload: { username: 'dave', password: 'pw' } });
+      const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+      const locked = await t3.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: ch }, payload: { code: hotp(secret(), stepAt(Date.now()) + 1) } });
+      expect(locked.statusCode).toBe(429);
+      expect(main(locked.body)).toContain('Too many wrong codes — try again in 15 minutes.');
+      expect(locked.cookies.find((c) => c.name === 'pidb_session')).toBeUndefined();
+      expect(getChallenge(t3.db, ch)?.attempts).toBe(0);
+
+      // Settings reauth: the right password and the right code are still refused while locked.
+      const session3 = createSession(t3.db, admin.id, SESSION_TTL_MS, '', '');
+      const home = await t3.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session3 } });
+      const csrf3 = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
+      const reauth = await t3.app.inject({
+        method: 'POST',
+        url: '/settings/2fa/recovery',
+        cookies: { pidb_session: session3 },
+        payload: { csrf: csrf3, password: 'pw', code: hotp(secret(), stepAt(Date.now()) + 1) },
+      });
+      expect(reauth.statusCode).toBe(429);
+      expect(main(reauth.body)).toContain('Too many wrong codes — try again in 15 minutes.');
+
+      // The lock has passed: the same challenge now accepts the right code.
+      t3.db.prepare(`UPDATE admin_totp SET locked_until = ? WHERE admin_id = ?`).run(Date.now() - 1, admin.id);
+      const ok = await t3.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: ch }, payload: { code: hotp(secret(), stepAt(Date.now()) + 1) } });
+      expect(ok.statusCode).toBe(302);
+      expect(ok.headers.location).toBe('/');
+      const state = t3.db.prepare(`SELECT failed_count FROM admin_totp WHERE admin_id = ?`).get(admin.id) as { failed_count: number };
+      expect(state.failed_count).toBe(0);
+    } finally {
+      await t3.app.close();
+    }
   });
 });

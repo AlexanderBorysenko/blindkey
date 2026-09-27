@@ -18,6 +18,9 @@ import {
   regenerateRecoveryCodes,
   disableTwoFactor,
   countUnusedRecoveryCodes,
+  isSecondFactorLocked,
+  MAX_FACTOR_FAILURES,
+  FACTOR_LOCK_MS,
 } from '../src/services/twofactor.js';
 
 function setup() {
@@ -122,5 +125,98 @@ describe('twofactor service', () => {
     expect(isTotpEnabled(ctx, admin.id)).toBe(false);
     expect(getTotp(ctx.db, admin.id)).toBeNull();
     expect(listAudit(ctx.db, { action: 'auth.totp_disabled' })).toHaveLength(1);
+  });
+
+  // F1: persistent per-admin second-factor lockout.
+  function lockState(ctx: AppContext, adminId: number): { failed_count: number; locked_until: number | null } {
+    return ctx.db.prepare(`SELECT failed_count, locked_until FROM admin_totp WHERE admin_id = ?`).get(adminId) as { failed_count: number; locked_until: number | null };
+  }
+
+  async function enrolled() {
+    const s = setup();
+    startEnrollment(s.ctx, s.admin.id);
+    const codes = (await confirmEnrollment(s.ctx, s.actor, codeForStep(s.ctx, s.admin.id, 0)))!;
+    return { ...s, codes };
+  }
+
+  it('lockout: constants are 10 failures / 15 minutes', () => {
+    expect(MAX_FACTOR_FAILURES).toBe(10);
+    expect(FACTOR_LOCK_MS).toBe(15 * 60_000);
+  });
+
+  it('lockout: 10 wrong codes lock the admin; the correct code is then rejected; auth.totp_locked is audited', async () => {
+    const { ctx, admin } = await enrolled();
+    for (let i = 0; i < 9; i++) expect(await verifySecondFactor(ctx, admin.id, '000000')).toBeNull();
+    expect(lockState(ctx, admin.id).failed_count).toBe(9);
+    expect(isSecondFactorLocked(ctx, admin.id)).toBeNull();
+    const before = Date.now();
+    expect(await verifySecondFactor(ctx, admin.id, '000000')).toBeNull();
+    const until = isSecondFactorLocked(ctx, admin.id);
+    expect(until).not.toBeNull();
+    expect(until!).toBeGreaterThanOrEqual(before + FACTOR_LOCK_MS);
+    expect(lockState(ctx, admin.id)).toEqual({ failed_count: 0, locked_until: until });
+
+    const locked = listAudit(ctx.db, { action: 'auth.totp_locked' });
+    expect(locked).toHaveLength(1);
+    expect(locked[0]!.actor_type).toBe('admin');
+    expect(locked[0]!.actor_id).toBe(admin.id);
+    expect(locked[0]!.meta).toEqual({ until });
+
+    // 11th attempt with the correct code: still rejected, and not consumed or counted.
+    const good = codeForStep(ctx, admin.id, 1);
+    expect(await verifySecondFactor(ctx, admin.id, good)).toBeNull();
+    expect(lockState(ctx, admin.id)).toEqual({ failed_count: 0, locked_until: until });
+    expect(listAudit(ctx.db, { action: 'auth.totp_locked' })).toHaveLength(1);
+  });
+
+  it('lockout: a recovery code is also rejected while locked', async () => {
+    const { ctx, admin, codes } = await enrolled();
+    for (let i = 0; i < MAX_FACTOR_FAILURES; i++) await verifySecondFactor(ctx, admin.id, '000000');
+    expect(await verifySecondFactor(ctx, admin.id, codes[0]!)).toBeNull();
+    expect(countUnusedRecoveryCodes(ctx, admin.id)).toBe(10);
+  });
+
+  it('lockout: once locked_until has passed, the correct code works again and failed_count is 0', async () => {
+    const { ctx, admin } = await enrolled();
+    for (let i = 0; i < MAX_FACTOR_FAILURES; i++) await verifySecondFactor(ctx, admin.id, '000000');
+    expect(isSecondFactorLocked(ctx, admin.id)).not.toBeNull();
+    ctx.db.prepare(`UPDATE admin_totp SET locked_until = ? WHERE admin_id = ?`).run(Date.now() - 1, admin.id);
+    expect(isSecondFactorLocked(ctx, admin.id)).toBeNull();
+    await verifySecondFactor(ctx, admin.id, '000000');
+    expect(lockState(ctx, admin.id).failed_count).toBe(1);
+    expect(await verifySecondFactor(ctx, admin.id, codeForStep(ctx, admin.id, 1))).toBe('totp');
+    expect(lockState(ctx, admin.id).failed_count).toBe(0);
+  });
+
+  it('lockout: a success resets the failure count', async () => {
+    const { ctx, admin } = await enrolled();
+    for (let i = 0; i < MAX_FACTOR_FAILURES - 1; i++) await verifySecondFactor(ctx, admin.id, '000000');
+    expect(await verifySecondFactor(ctx, admin.id, codeForStep(ctx, admin.id, 1))).toBe('totp');
+    expect(lockState(ctx, admin.id).failed_count).toBe(0);
+    for (let i = 0; i < MAX_FACTOR_FAILURES - 1; i++) await verifySecondFactor(ctx, admin.id, '000000');
+    expect(isSecondFactorLocked(ctx, admin.id)).toBeNull();
+  });
+
+  it('lockout: malformed input counts as a failure', async () => {
+    const { ctx, admin } = await enrolled();
+    await verifySecondFactor(ctx, admin.id, 'not a code');
+    expect(lockState(ctx, admin.id).failed_count).toBe(1);
+  });
+
+  it('lockout: confirmEnrollment failures are not counted', async () => {
+    const { ctx, admin, actor } = setup();
+    startEnrollment(ctx, admin.id);
+    for (let i = 0; i < MAX_FACTOR_FAILURES + 2; i++) expect(await confirmEnrollment(ctx, actor, '000000')).toBeNull();
+    expect(lockState(ctx, admin.id).failed_count).toBe(0);
+    expect(await confirmEnrollment(ctx, actor, codeForStep(ctx, admin.id, 0))).not.toBeNull();
+    expect(isSecondFactorLocked(ctx, admin.id)).toBeNull();
+  });
+
+  it('lockout: disableTwoFactor clears the lock (the row is deleted)', async () => {
+    const { ctx, admin, actor } = await enrolled();
+    for (let i = 0; i < MAX_FACTOR_FAILURES; i++) await verifySecondFactor(ctx, admin.id, '000000');
+    expect(isSecondFactorLocked(ctx, admin.id)).not.toBeNull();
+    disableTwoFactor(ctx, actor);
+    expect(isSecondFactorLocked(ctx, admin.id)).toBeNull();
   });
 });

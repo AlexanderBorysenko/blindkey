@@ -4,7 +4,7 @@ import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { getTotp, openTotpSecret } from '../src/repos/twofactor.js';
 import { hotp, stepAt } from '../src/auth/totp.js';
-import { startEnrollment, confirmEnrollment } from '../src/services/twofactor.js';
+import { startEnrollment, confirmEnrollment, verifySecondFactor, MAX_FACTOR_FAILURES } from '../src/services/twofactor.js';
 import { listAudit } from '../src/repos/audit.js';
 import type { Actor } from '../src/auth/principal.js';
 
@@ -107,5 +107,32 @@ describe('POST /api/v1/auth/token — 2FA', () => {
     expect(r.json().error).toBe('unauthorized');
     expect(listAudit(t.db, { action: 'auth.login_failed' })).toHaveLength(1);
     expect(listAudit(t.db, { action: 'auth.totp_failed' })).toHaveLength(0);
+  });
+
+  it('F1: a locked admin gets 429 totp_locked even with the correct code; after the lock, it works', async () => {
+    const t = await makeTestApp();
+    try {
+      const admin = createAdmin(t.db, 'alex', await hashPassword('correct horse'));
+      await setupEnrolled(t, admin.id);
+      for (let i = 0; i < MAX_FACTOR_FAILURES; i++) await verifySecondFactor(t.ctx, admin.id, '000000');
+      expect(listAudit(t.db, { action: 'auth.totp_locked' })).toHaveLength(1);
+
+      const locked = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse', totp: codeForStep(t, admin.id, 1) } });
+      expect(locked.statusCode).toBe(429);
+      expect(locked.json().error).toBe('totp_locked');
+      expect(locked.json().message).toBe('too many wrong codes — try again later');
+      const noCode = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse' } });
+      expect(noCode.statusCode).toBe(429);
+      expect(noCode.json().error).toBe('totp_locked');
+
+      t.db.prepare(`UPDATE admin_totp SET locked_until = ? WHERE admin_id = ?`).run(Date.now() - 1, admin.id);
+      const ok = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse', totp: codeForStep(t, admin.id, 1) } });
+      expect(ok.statusCode).toBe(201);
+      const state = t.db.prepare(`SELECT failed_count FROM admin_totp WHERE admin_id = ?`).get(admin.id) as { failed_count: number };
+      expect(state.failed_count).toBe(0);
+      // This instance: POST /auth/token x3 (limit 5/min).
+    } finally {
+      await t.app.close();
+    }
   });
 });

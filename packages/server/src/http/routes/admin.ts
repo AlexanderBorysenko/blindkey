@@ -44,6 +44,7 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
       const result = await exchangePassword(ctx, input, req.ip, req.headers['user-agent'] ?? '');
       if (!result.ok) {
         if (result.reason === 'totp_required') throw new AppError(401, 'totp_required', 'two-factor code required');
+        if (result.reason === 'totp_locked') throw new AppError(429, 'totp_locked', 'too many wrong codes — try again later');
         throw new UnauthorizedError('invalid credentials');
       }
       const { ok: _ok, ...body } = result;

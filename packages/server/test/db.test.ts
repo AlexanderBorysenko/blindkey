@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db/connection.js';
-import { runMigrations } from '../src/db/migrations.js';
+import Database from 'better-sqlite3';
+import { MIGRATIONS, runMigrations } from '../src/db/migrations.js';
 
 describe('db', () => {
   it('creates all tables', () => {
@@ -16,6 +17,18 @@ describe('db', () => {
   it('is idempotent', () => {
     const db = openDb(':memory:');
     expect(runMigrations(db)).toBe(0);
+  });
+  it('migration 3 adds the second-factor lockout columns to an existing admin_totp row', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`);
+    for (const m of MIGRATIONS.filter((x) => x.id <= 2)) {
+      db.exec(m.sql);
+      db.prepare(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, 0)`).run(m.id);
+    }
+    db.prepare(`INSERT INTO admin (id, username, password_hash, created_at) VALUES (1, 'a', 'h', 0)`).run();
+    db.prepare(`INSERT INTO admin_totp (admin_id, secret_enc, key_version, enabled_at, last_used_step, created_at) VALUES (1, x'00', 1, 5, 0, 0)`).run();
+    expect(runMigrations(db)).toBe(1);
+    expect(db.prepare(`SELECT failed_count, locked_until FROM admin_totp WHERE admin_id = 1`).get()).toEqual({ failed_count: 0, locked_until: null });
   });
   it('enforces foreign keys with cascade', () => {
     const db = openDb(':memory:');

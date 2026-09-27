@@ -51,6 +51,34 @@ export function claimTotpStep(db: Db, adminId: number, step: number): boolean {
   return db.prepare(`UPDATE admin_totp SET last_used_step = ? WHERE admin_id = ? AND last_used_step < ?`).run(step, adminId, step).changes > 0;
 }
 
+/** Epoch ms until which the admin's second factor is locked, or null when it is not locked. */
+export function factorLockedUntil(db: Db, adminId: number, nowTs: number = now()): number | null {
+  const r = db.prepare(`SELECT locked_until FROM admin_totp WHERE admin_id = ?`).get(adminId) as { locked_until: number | null } | undefined;
+  return r?.locked_until != null && r.locked_until > nowTs ? r.locked_until : null;
+}
+
+/**
+ * Atomically counts one failed second-factor attempt. When the count reaches `max`, locks
+ * the factor until `nowTs + lockMs` and resets the count to 0.
+ */
+export function recordFactorFailure(db: Db, adminId: number, max: number, lockMs: number, nowTs: number = now()): { locked: boolean; until: number | null } {
+  const until = nowTs + lockMs;
+  const r = db.prepare(
+    `UPDATE admin_totp SET
+       failed_count = CASE WHEN failed_count + 1 >= ? THEN 0 ELSE failed_count + 1 END,
+       locked_until = CASE WHEN failed_count + 1 >= ? THEN ? ELSE locked_until END
+     WHERE admin_id = ?
+     RETURNING failed_count, locked_until`,
+  ).get(max, max, until, adminId) as { failed_count: number; locked_until: number | null } | undefined;
+  if (!r) return { locked: false, until: null };
+  const locked = r.failed_count === 0 && r.locked_until === until;
+  return { locked, until: locked ? until : null };
+}
+
+export function resetFactorFailures(db: Db, adminId: number): void {
+  db.prepare(`UPDATE admin_totp SET failed_count = 0 WHERE admin_id = ?`).run(adminId);
+}
+
 export function deleteTwoFactor(db: Db, adminId: number): void {
   db.transaction(() => {
     db.prepare(`DELETE FROM admin_totp WHERE admin_id = ?`).run(adminId);

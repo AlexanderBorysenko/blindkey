@@ -8,7 +8,7 @@ import { listAudit, writeAudit, type AuditQuery, type AuditRow } from '../repos/
 import { getAdminByUsername } from '../repos/admin.js';
 import { verifyPassword } from '../crypto/passwords.js';
 import { auditAs } from './common.js';
-import { isTotpEnabled, verifySecondFactor, type SecondFactor } from './twofactor.js';
+import { isSecondFactorLocked, isTotpEnabled, verifySecondFactor, type SecondFactor } from './twofactor.js';
 
 export interface PublicToken {
   id: number;
@@ -68,7 +68,7 @@ export function listAuditFor(ctx: AppContext, principal: Principal, query: Audit
 
 export type ExchangeResult =
   | { ok: true; token: string; id: number; name: string; expires_at: number }
-  | { ok: false; reason: 'invalid' | 'totp_required' };
+  | { ok: false; reason: 'invalid' | 'totp_required' | 'totp_locked' };
 
 export async function exchangePassword(ctx: AppContext, input: AuthTokenRequest, ip: string, userAgent: string): Promise<ExchangeResult> {
   const admin = getAdminByUsername(ctx.db, input.username);
@@ -79,6 +79,7 @@ export async function exchangePassword(ctx: AppContext, input: AuthTokenRequest,
   }
   let secondFactor: SecondFactor | undefined;
   if (isTotpEnabled(ctx, admin.id)) {
+    if (isSecondFactorLocked(ctx, admin.id) !== null) return { ok: false, reason: 'totp_locked' };
     if (input.totp === undefined) return { ok: false, reason: 'totp_required' };
     const used = await verifySecondFactor(ctx, admin.id, input.totp);
     if (!used) {

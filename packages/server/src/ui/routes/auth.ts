@@ -13,9 +13,17 @@ import {
 import {
   bumpChallengeAttempts, createChallenge, deleteChallenge, getChallenge, purgeExpiredChallenges,
 } from '../../repos/twofactor.js';
-import { CHALLENGE_TTL_MS, MAX_CHALLENGE_ATTEMPTS, isTotpEnabled, verifySecondFactor } from '../../services/twofactor.js';
+import {
+  CHALLENGE_TTL_MS, MAX_CHALLENGE_ATTEMPTS, isSecondFactorLocked, isTotpEnabled, verifySecondFactor,
+} from '../../services/twofactor.js';
 
 type LoginBody = { Body: { username?: string; password?: string } };
+
+/** The message shown while an admin's second factor is locked (spec §2.4). */
+export function factorLockedMessage(until: number, nowTs: number = Date.now()): string {
+  const minutes = Math.max(1, Math.ceil((until - nowTs) / 60_000));
+  return `Too many wrong codes — try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+}
 
 function isSecure(req: FastifyRequest): boolean {
   return req.protocol === 'https';
@@ -86,6 +94,8 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
         clearChallengeCookie(reply);
         return reply.redirect('/login', 302);
       }
+      const lockedUntil = isSecondFactorLocked(ctx, challenge.admin_id);
+      if (lockedUntil !== null) return codePage(reply, 429, factorLockedMessage(lockedUntil));
       const used = await verifySecondFactor(ctx, challenge.admin_id, str(body(req), 'code'));
       if (!used) {
         writeAudit(ctx.db, { actor_type: 'admin', actor_id: challenge.admin_id, action: 'auth.totp_failed', ip: req.ip, user_agent: ua, meta: { via: 'ui' } });

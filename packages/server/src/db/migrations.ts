@@ -143,6 +143,13 @@ CREATE TABLE login_challenges (
 );
 `,
   },
+  {
+    id: 3,
+    sql: `
+ALTER TABLE admin_totp ADD COLUMN failed_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE admin_totp ADD COLUMN locked_until INTEGER;
+`,
+  },
 ];
 
 export function runMigrations(db: Database.Database): number {
