@@ -7,7 +7,7 @@
 import { Command, CommanderError } from 'commander';
 import { PidbClient } from './client.js';
 import { loadConfig, normalizeUrl } from './config.js';
-import { CliError, EXIT_AUTH, EXIT_NOT_FOUND, EXIT_REFUSED } from './errors.js';
+import { CliError, EXIT_NOT_FOUND, EXIT_REFUSED } from './errors.js';
 import { emit, table } from './output.js';
 import { runLogin } from './commands/login.js';
 import { runProjectsGet, runProjectsList, runSearch } from './commands/projects.js';
@@ -19,7 +19,7 @@ import { runTokenCreate, runTokenList, runTokenRevoke } from './commands/tokens.
 import { resolveDataDir } from './agent/datadir.js';
 import { resolveAgentConfig } from './agent/context.js';
 import { runConnect } from './agent/connect.js';
-import { loadBindings, loadProfiles, repoKey, saveBindings, saveProfiles } from './agent/state.js';
+import { loadBindings, loadProfiles, performBind, repoKey, saveBindings, saveProfiles } from './agent/state.js';
 import { keyringStore, type TokenStore } from './agent/tokenstore.js';
 
 export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
@@ -380,17 +380,9 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
     .argument('<project>', 'project slug to bind this repo to')
     .option('--profile <name>', 'profile to bind (default: the repo\'s current binding, else the default profile)')
     .action((project: string, opts: { profile?: string }) => {
-      const profiles = loadProfiles(dataDir);
-      const bindings = loadBindings(dataDir);
-      const key = repoKey(cwd);
-      const profileName = opts.profile ?? bindings[key]?.profile ?? profiles.default;
-      if (!profileName || !profiles.profiles[profileName]) {
-        throw new CliError('no server configured — run `pidb profile add <name> <url>`', EXIT_AUTH);
-      }
-      bindings[key] = { profile: profileName, project };
-      saveBindings(dataDir, bindings);
+      const result = performBind(dataDir, cwd, project, opts.profile);
       emit(
-        { json: bindings[key], text: `bound this repo to project "${project}" on profile "${profileName}"` },
+        { json: result, text: `bound this repo to project "${result.project}" on profile "${result.profile}"` },
         false,
       );
     });

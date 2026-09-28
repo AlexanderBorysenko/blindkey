@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import nodePath from 'node:path';
-import { CliError } from '../errors.js';
+import { CliError, EXIT_AUTH } from '../errors.js';
 
 export interface Profile {
   url: string;
@@ -142,6 +142,30 @@ export function isPathInside(dir: string, candidate: string): boolean {
   if (rel === '..' || rel.startsWith(`..${sep}`)) return false;
   if (isAbsolute(rel)) return false; // e.g. a different drive letter on win32 — relative() can't express it
   return true;
+}
+
+export interface BindResult {
+  profile: string;
+  project: string;
+}
+
+/**
+ * Shared binding logic (spec §2.3/§2.4): binds `cwd`'s repo (keyed by `repoKey(cwd)`) to `project` on
+ * the resolved profile — `profileOverride` if given, else the repo's existing binding, else the
+ * default profile. Used by both the CLI `bind` command (`program.ts`) and the MCP bridge's
+ * `pidb_bind` tool (`bridge.ts`) so the two can never disagree about how a repo gets bound.
+ */
+export function performBind(dataDir: string, cwd: string, project: string, profileOverride?: string): BindResult {
+  const profiles = loadProfiles(dataDir);
+  const bindings = loadBindings(dataDir);
+  const key = repoKey(cwd);
+  const profileName = profileOverride ?? bindings[key]?.profile ?? profiles.default;
+  if (!profileName || !profiles.profiles[profileName]) {
+    throw new CliError('no server configured — run `pidb profile add <name> <url>`', EXIT_AUTH);
+  }
+  bindings[key] = { profile: profileName, project };
+  saveBindings(dataDir, bindings);
+  return { profile: profileName, project };
 }
 
 export interface RepoKeyOptions {
