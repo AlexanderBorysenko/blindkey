@@ -18,6 +18,7 @@ import { runSecretEnv, runSecretWrite } from './commands/files.js';
 import { runTokenCreate, runTokenList, runTokenRevoke } from './commands/tokens.js';
 import { resolveDataDir } from './agent/datadir.js';
 import { resolveAgentConfig } from './agent/context.js';
+import { runConnect } from './agent/connect.js';
 import { loadBindings, loadProfiles, repoKey, saveBindings, saveProfiles } from './agent/state.js';
 import { keyringStore, type TokenStore } from './agent/tokenstore.js';
 
@@ -201,7 +202,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     .description('Write one field value to a file (never printed)')
     .action(
       async (target: string, name: string, field: string, opts: { out: string; mode?: string; force?: boolean; json?: boolean }) => {
-        emit(await runSecretWrite(await client(), target, name, field, opts), opts.json === true);
+        emit(await runSecretWrite(await client(), target, name, field, { ...opts, agent, dataDir }), opts.json === true);
       },
     );
   secret
@@ -214,7 +215,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     .option('--json', 'raw JSON output')
     .description('Write every field as key=value lines to a file (never printed)')
     .action(async (target: string, name: string, opts: { out: string; mode?: string; force?: boolean; json?: boolean }) => {
-      emit(await runSecretEnv(await client(), target, name, opts), opts.json === true);
+      emit(await runSecretEnv(await client(), target, name, { ...opts, agent, dataDir }), opts.json === true);
     });
   secret
     .command('exec')
@@ -223,7 +224,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     .argument('<command...>', 'command to run after --')
     .description('Run a command with the secret fields injected as PIDB_<KEY> environment variables')
     .action(async (target: string, name: string, command: string[]) => {
-      process.exitCode = await runSecretExec(await client(), target, name, command);
+      process.exitCode = await runSecretExec(await client(), target, name, command, { agent });
     });
   // `secret get`/`secret set` are refused before commander parses their own arguments/options.
   secret.hook('preSubcommand', (_secret, subcommand) => {
@@ -287,10 +288,19 @@ interface AgentOnlyDeps {
 }
 
 /**
- * Commands that exist only in agent mode (spec §2.3): `profile`, `bind`/
- * `unbind`, `status`. `connect` is intentionally not registered here (Task 6).
+ * Commands that exist only in agent mode (spec §2.3): `connect`, `profile`,
+ * `bind`/`unbind`, `status`.
  */
 function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: AgentOnlyDeps): void {
+  program
+    .command('connect')
+    .option('--profile <name>', "profile to connect (default: the repo's bound profile, else the default profile)")
+    .option('--url <url>', 'server url — required only when --profile names a profile that does not exist yet')
+    .description('Browser device-flow connect (spec §1.3): approve in the browser, nothing pasted here')
+    .action(async (opts: { profile?: string; url?: string }) => {
+      emit(await runConnect(opts, { cwd, store, dataDir }), false);
+    });
+
   const profile = program.command('profile').description('Server profiles');
   profile
     .command('list')

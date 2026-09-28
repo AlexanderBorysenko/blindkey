@@ -1,12 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import nodePath from 'node:path';
 import { CliError } from '../errors.js';
 
 export interface Profile {
   url: string;
+  /** Projects the current (or most recently issued) token for this profile was approved for, per
+   * the connect poll response (spec §2.3) — used to widen a later `pidb connect`'s request. */
+  projects?: string[];
+  /** Expiry of the current token for this profile, from the connect poll response. */
+  expires_at?: number | null;
 }
 
 export interface ProfilesFile {
@@ -71,6 +76,33 @@ export function loadBindings(dataDir: string): BindingsFile {
 
 export function saveBindings(dataDir: string, data: BindingsFile): void {
   writeJsonAtomic(bindingsPath(dataDir), data);
+}
+
+/** `written.json` (spec §2.2): absolute paths produced by `pidb secret write|env` in agent mode. */
+export interface WrittenFile {
+  paths: string[];
+}
+
+function writtenPath(dataDir: string): string {
+  return join(dataDir, 'written.json');
+}
+
+export function loadWritten(dataDir: string): WrittenFile {
+  return readJsonFile(writtenPath(dataDir), { paths: [] });
+}
+
+/** Appends `absPath` to `written.json`, deduped, atomic (a no-op write if it's already recorded). */
+export function recordWritten(dataDir: string, absPath: string): void {
+  const data = loadWritten(dataDir);
+  if (data.paths.includes(absPath)) return;
+  data.paths.push(absPath);
+  writeJsonAtomic(writtenPath(dataDir), data);
+}
+
+/** True when `candidate` is `dir` itself or nested inside it (both resolved to absolute paths first). */
+export function isPathInside(dir: string, candidate: string): boolean {
+  const rel = relative(resolve(dir), resolve(candidate));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 export interface RepoKeyOptions {

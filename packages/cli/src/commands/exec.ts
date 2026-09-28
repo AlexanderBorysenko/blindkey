@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { scopedPath, seg, type PidbClient } from '../client.js';
 import type { RevealedFields } from '../api-types.js';
 import { CliError } from '../errors.js';
+import { createRedactor } from '../agent/redact.js';
 
 /** Field keys allow [A-Za-z0-9_.-]; env vars do not, so `.` and `-` become `_`. */
 export function envKeyFor(key: string): string {
@@ -31,24 +32,61 @@ export function buildEnv(fields: Record<string, string>, base: NodeJS.ProcessEnv
   return env;
 }
 
+export interface RunSecretExecOptions {
+  /** Agent mode (spec §2.3): fetch via the substitution-only `/use` endpoint (purpose `exec`) instead
+   * of the reveal endpoint, and redact the child's stdout/stderr before relaying it. */
+  agent?: boolean;
+}
+
 export async function runSecretExec(
   client: PidbClient,
   target: string,
   name: string,
   command: string[],
+  opts: RunSecretExecOptions = {},
 ): Promise<number> {
   const [bin, ...args] = command;
   if (!bin) throw new CliError('no command given — usage: pidb secret exec <target> "<name>" -- <command...>');
 
-  const revealed = await client.json<RevealedFields>('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields`));
+  const revealed = opts.agent
+    ? await client.json<RevealedFields>('POST', scopedPath(target, 'secrets', `/${seg(name)}/use`), {
+        body: { purpose: 'exec' },
+      })
+    : await client.json<RevealedFields>('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields`));
   const env = buildEnv(revealed.fields, process.env);
 
+  if (!opts.agent) {
+    return await new Promise<number>((resolve, reject) => {
+      const child = spawn(bin, args, { stdio: 'inherit', env });
+      child.on('error', (err) => reject(new CliError(`cannot run ${bin}: ${err.message}`)));
+      child.on('close', (code, signal) => {
+        if (signal) {
+          // Report the conventional 128+signal code without printing anything of the secret.
+          resolve(128 + (typeof signal === 'string' ? signalNumber(signal) : 0));
+          return;
+        }
+        resolve(code ?? 1);
+      });
+    });
+  }
+
+  // Agent mode: stdin is still inherited, but stdout/stderr are piped through a redactor (each stream
+  // gets its own instance — they must not share held-back state) before being relayed to our own
+  // stdout/stderr, so a value the child prints verbatim or in an encoded form never reaches the agent.
+  const values = Object.values(revealed.fields);
+  const stdoutRedactor = createRedactor(values);
+  const stderrRedactor = createRedactor(values);
   return await new Promise<number>((resolve, reject) => {
-    const child = spawn(bin, args, { stdio: 'inherit', env });
+    const child = spawn(bin, args, { stdio: ['inherit', 'pipe', 'pipe'], env });
+    child.stdout.on('data', (chunk: Buffer) => process.stdout.write(stdoutRedactor.push(chunk)));
+    child.stderr.on('data', (chunk: Buffer) => process.stderr.write(stderrRedactor.push(chunk)));
     child.on('error', (err) => reject(new CliError(`cannot run ${bin}: ${err.message}`)));
     child.on('close', (code, signal) => {
+      const tailOut = stdoutRedactor.flush();
+      if (tailOut) process.stdout.write(tailOut);
+      const tailErr = stderrRedactor.flush();
+      if (tailErr) process.stderr.write(tailErr);
       if (signal) {
-        // Report the conventional 128+signal code without printing anything of the secret.
         resolve(128 + (typeof signal === 'string' ? signalNumber(signal) : 0));
         return;
       }
