@@ -27,10 +27,13 @@ function derivedDataDir(selfPath: string): string | null {
  *   1. uses `PIDB_PLUGIN_DATA` if set,
  *   2. else derives `<the plugin cache's own "plugins" dir>/data/<plugin>-<marketplace>` from its
  *      own installed path,
- *   3. else (selfPath isn't inside a plugin cache — dev/tsx, or a truncated path) falls back to
- *      `$HOME/.claude/plugins/data/pidb-pidb`.
+ *   3. else (selfPath isn't inside a plugin cache — dev/tsx, a truncated path, or the user's own
+ *      `pidb` install running in agent mode because `CLAUDECODE=1`, spec §2.3) falls back to
+ *      `<Claude config dir>/plugins/data/pidb-pidb`, where the Claude config dir is
+ *      `CLAUDE_CONFIG_DIR` if set, else `$HOME/.claude`.
  */
 export function resolveDataDir(env: NodeJS.ProcessEnv = process.env, selfPath: string = process.argv[1] ?? ''): string {
   if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
-  return derivedDataDir(selfPath) ?? join(env.HOME ?? homedir(), '.claude', 'plugins', 'data', 'pidb-pidb');
+  const claudeDir = env.CLAUDE_CONFIG_DIR || join(env.HOME ?? homedir(), '.claude');
+  return derivedDataDir(selfPath) ?? join(claudeDir, 'plugins', 'data', 'pidb-pidb');
 }

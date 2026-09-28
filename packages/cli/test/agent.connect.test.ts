@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AGENT_SCOPES } from '@pidb/shared';
-import { isSafeVerificationUrl, runConnect } from '../src/agent/connect.js';
+import { buildVerificationUrl, runConnect } from '../src/agent/connect.js';
 import { loadProfiles, saveBindings, saveProfiles } from '../src/agent/state.js';
 import { memoryStore, type TokenStore } from '../src/agent/tokenstore.js';
 import { CliError } from '../src/errors.js';
@@ -260,79 +260,39 @@ describe('runConnect: denied / expired / not configured', () => {
   });
 });
 
-describe('isSafeVerificationUrl (fix round 1, Critical 2)', () => {
+describe('buildVerificationUrl (F6: built locally, never the server-supplied url)', () => {
   const profileUrl = 'https://good.example.com';
   const code = 'ABCD-EFGH';
 
-  it('accepts the exact expected shape', () => {
-    expect(isSafeVerificationUrl(`https://good.example.com/connect?code=${code}`, code, profileUrl)).toBe(true);
+  it('builds <profile url>/connect?code=<code>', () => {
+    expect(buildVerificationUrl(profileUrl, code)).toBe(`https://good.example.com/connect?code=${code}`);
   });
 
-  it('rejects an extra query parameter (&)', () => {
-    expect(isSafeVerificationUrl(`https://good.example.com/connect?code=${code}&extra=1`, code, profileUrl)).toBe(false);
+  it('keeps a profile url path prefix', () => {
+    expect(buildVerificationUrl('https://good.example.com/pidb', code)).toBe(`https://good.example.com/pidb/connect?code=${code}`);
   });
 
-  it('rejects a pipe character smuggled into the path (|)', () => {
-    expect(isSafeVerificationUrl(`https://good.example.com/connect|evil?code=${code}`, code, profileUrl)).toBe(false);
-  });
-
-  it('rejects a quote character smuggled into the path (")', () => {
-    expect(isSafeVerificationUrl(`https://good.example.com/connect"?code=${code}`, code, profileUrl)).toBe(false);
-  });
-
-  it('rejects a percent character in the user_code', () => {
-    expect(isSafeVerificationUrl(`https://good.example.com/connect?code=AB%44-EFGH`, 'AB%44-EFGH', profileUrl)).toBe(false);
-  });
-
-  it('rejects a file: scheme', () => {
-    expect(isSafeVerificationUrl('file:///etc/passwd', code, profileUrl)).toBe(false);
-  });
-
-  it('rejects a different origin than the profile url', () => {
-    expect(isSafeVerificationUrl(`https://evil.example.com/connect?code=${code}`, code, profileUrl)).toBe(false);
-  });
-
-  it('rejects a malformed user_code (lowercase, no dash, wrong length)', () => {
-    for (const bad of ['abcd-efgh', 'ABCDEFGH', 'ABC-DEFG', 'ABCD-EFGHI']) {
-      expect(isSafeVerificationUrl(`https://good.example.com/connect?code=${bad}`, bad, profileUrl)).toBe(false);
+  it('rejects a malformed user_code (lowercase, no dash, wrong length, smuggled characters)', () => {
+    for (const bad of ['abcd-efgh', 'ABCDEFGH', 'ABC-DEFG', 'ABCD-EFGHI', 'AB%44-EFGH', 'ABCD-EFGH&x=1', 'ABCD-EFGH#f', 'ABCD-EF/H', '']) {
+      expect(buildVerificationUrl(profileUrl, bad)).toBeNull();
     }
   });
 
-  it('rejects a mismatched path', () => {
-    expect(isSafeVerificationUrl(`https://good.example.com/other?code=${code}`, code, profileUrl)).toBe(false);
-  });
-
-  it('rejects when the profile url itself is unparseable', () => {
-    expect(isSafeVerificationUrl(`https://good.example.com/connect?code=${code}`, code, 'not a url')).toBe(false);
-  });
-
-  it('rejects userinfo (fix round 2, Minor 1)', () => {
-    expect(isSafeVerificationUrl(`https://user:pass@good.example.com/connect?code=${code}`, code, profileUrl)).toBe(false);
-  });
-
-  it('rejects a fragment (fix round 2, Minor 1)', () => {
-    expect(isSafeVerificationUrl(`https://good.example.com/connect?code=${code}#frag`, code, profileUrl)).toBe(false);
-  });
-
-  it('rejects a raw string that does not round-trip through URL unchanged (fix round 2, Minor 1 — whitespace/tab smuggling)', () => {
-    // A tab embedded in the url: WHATWG URL parsing silently strips it, so `target.href` would
-    // differ from the raw string that actually arrived.
-    const withTab = `https://good.example.com/con\tnect?code=${code}`;
-    expect(isSafeVerificationUrl(withTab, code, profileUrl)).toBe(false);
-    const leadingWhitespace = ` https://good.example.com/connect?code=${code}`;
-    expect(isSafeVerificationUrl(leadingWhitespace, code, profileUrl)).toBe(false);
+  it('rejects a non-http(s) or unparseable profile url, and userinfo', () => {
+    expect(buildVerificationUrl('file:///etc', code)).toBeNull();
+    expect(buildVerificationUrl('not a url', code)).toBeNull();
+    expect(buildVerificationUrl('https://user:pass@good.example.com', code)).toBeNull();
   });
 });
 
 describe('runConnect: verification url validation gates the browser open (Critical 2)', () => {
-  it('a malicious/mismatched verification_url is never opened, a warning is printed, and polling still proceeds', async () => {
+  it('a tampered server verification_url is ignored: the locally built url is printed and opened instead (F6)', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
     const { now, sleep } = fakeClock(0);
     const out = fakeOut();
-    const openBrowserImpl = vi.fn(() => ({ cmd: 'open', args: [] }));
+    const openBrowserImpl = vi.fn((_url: string) => ({ cmd: 'open', args: [] }));
 
-    // A fake start response whose verification_url has the right origin/path but a stray query
-    // parameter (classic open-redirect/argument-injection shape) — everything else (poll) is real.
+    // A fake start response whose verification_url points elsewhere — everything else (poll) is real.
     let started = false;
     const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
       const href = String(url);
@@ -340,7 +300,7 @@ describe('runConnect: verification url validation gates the browser open (Critic
         started = true;
         const real = await fetch(href, init);
         const body = (await real.json()) as { verification_url: string; user_code: string; [k: string]: unknown };
-        const tampered = { ...body, verification_url: `${body.verification_url}&evil=1` };
+        const tampered = { ...body, verification_url: `https://evil.example.com/phish?code=${body.user_code}` };
         return new Response(JSON.stringify(tampered), { status: 201, headers: { 'content-type': 'application/json' } });
       }
       return fetch(href, init);
@@ -349,9 +309,33 @@ describe('runConnect: verification url validation gates the browser open (Critic
     const connectPromise = runConnect({}, { cwd: dataDir, store, dataDir, now, sleep, out, fetchImpl, openBrowserImpl });
     const line = await waitForLine(out);
     expect(started).toBe(true);
+    const code = userCodeFrom(line);
+    expect(line).toBe(`Open ${s.url}/connect?code=${code} and approve code ${code}\n`);
+    expect(line).not.toContain('evil');
     approveByLine(line, ['projects:read'], ['acme']);
 
     await connectPromise;
+    expect(openBrowserImpl).toHaveBeenCalledTimes(1);
+    expect(openBrowserImpl.mock.calls[0]?.[0]).toBe(`${s.url}/connect?code=${code}`);
+  });
+
+  it('a malformed user_code: no browser open, a warning is printed', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://fake.invalid' } } });
+    const out = fakeOut();
+    const { now, sleep } = fakeClock(0);
+    const openBrowserImpl = vi.fn(() => ({ cmd: 'open', args: [] }));
+    const fetchImpl = (async (url: string | URL) => {
+      if (String(url).endsWith('/connect/start')) {
+        return new Response(
+          JSON.stringify({ device_code: 'dc', user_code: 'AAAA-BBBB&x=1', verification_url: 'https://fake.invalid/connect', expires_in: 5, interval: 5 }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ error: 'authorization_pending' }), { status: 428 });
+    }) as unknown as typeof fetch;
+    const settlement = runConnect({}, { cwd: dataDir, store, dataDir, now, sleep, out, fetchImpl, openBrowserImpl }).catch((e: unknown) => e);
+    await waitForLine(out);
+    await settlement;
     expect(openBrowserImpl).not.toHaveBeenCalled();
     expect(out.lines.some((l) => /warning:.*not opening/.test(l))).toBe(true);
   });
@@ -389,7 +373,7 @@ describe('runConnect: verification url validation gates the browser open (Critic
     // (BEL, ESC) instead of blanket-rejecting every control character (which would also flag "\n").
     expect(line).not.toContain('\u0007');
     expect(line).not.toContain('\u001b');
-    expect(line).toContain('AAAABBBB'); // the code/url survive, just with the control chars stripped
+    expect(line).toContain('AAAA[31mBBBB'); // the code survives, just with the control chars stripped
     const err = await settlement;
     expect(err).toBeInstanceOf(CliError);
     expect((err as CliError).message).toMatch(/timed out/);

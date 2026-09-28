@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { NON_SENSITIVE_KEYS } from '@pidb/shared';
 import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -241,6 +242,15 @@ describe('plugin manifests', () => {
     const p = readJson(join(pluginDir, 'package.json')) as { private: boolean; dependencies: Record<string, string> };
     expect(p.private).toBe(true);
     expect(Object.keys(p.dependencies)).toEqual(['@napi-rs/keyring']);
+  });
+
+  it('SKILL.md upsert_secret_meta examples only write keys the server treats as non-sensitive (F3)', () => {
+    const skill = readFileSync(join(pluginDir, 'skills', 'pidb', 'SKILL.md'), 'utf8');
+    const calls = [...skill.matchAll(/upsert_secret_meta\((.*?)\)`/g)].map((m) => m[1] ?? '');
+    const keys = calls.flatMap((c) => [...c.matchAll(/key: "([^"]+)"/g)].map((m) => m[1]));
+    expect(keys.length).toBeGreaterThan(0);
+    for (const k of keys) expect(NON_SENSITIVE_KEYS as readonly string[]).toContain(k);
+    expect(skill).not.toMatch(/key: "account_id", sensitive: false/);
   });
 
   it('skill and commands have frontmatter', () => {

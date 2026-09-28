@@ -63,7 +63,7 @@ function waitForResponse(c: ChildProcessWithoutNullStreams, id: number, timeoutM
 }
 
 describe('MCP bridge executable entry (packages/cli/src/agent/bridge-main.ts), real stdio', () => {
-  it('answers initialize and tools/list with just the local pidb_* tools when not connected', async () => {
+  it('answers initialize and tools/list with the static upstream tools + local pidb_* tools when not connected (F2)', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-bridge-main-'));
     child = spawn(join(repoRoot, 'node_modules/.bin/tsx'), [join(repoRoot, 'packages/cli/src/agent/bridge-main.ts')], {
       env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_PLUGIN_DATA: dataDir },
@@ -88,7 +88,23 @@ describe('MCP bridge executable entry (packages/cli/src/agent/bridge-main.ts), r
     const listRes = await waitForResponse(child, 2);
     expect(listRes.error).toBeUndefined();
     const names = (listRes.result as { tools: { name: string }[] }).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['pidb_bind', 'pidb_profiles', 'pidb_status']);
+    expect(names).toEqual(
+      [
+        'get_project',
+        'list_documents',
+        'list_projects',
+        'list_secrets',
+        'pidb_bind',
+        'pidb_profiles',
+        'pidb_status',
+        'read_document',
+        'search',
+        'secret_request_link',
+        'update_project',
+        'upsert_secret_meta',
+        'write_document',
+      ].sort(),
+    );
     expect(stderr).toBe('');
   });
 });

@@ -61,13 +61,13 @@ Give Claude Code a stable, safe working context for pidb: it knows the bound pro
 - Expired requests are purged opportunistically on start/poll.
 
 ### 1.4 Prefilled secret form
-- `GET /p/:slug/secrets/new` and `/global/secrets/new` accept `name`, `description`, `tags` (comma-separated), `keys` (comma-separated field keys; a key ending in `!` is non-sensitive, e.g. `host!,password`) and prefill the form (sensitive = default checked unless `!`). Values are never accepted from the query. Nothing is created until the user submits.
+- `GET /p/:slug/secrets/new` and `/global/secrets/new` accept `name`, `description`, `tags` (comma-separated), `keys` (comma-separated field keys; a key ending in `!` is non-sensitive, e.g. `host!,password`) and prefill the form (sensitive = default checked unless `!`). The `!` marker is ignored for a key where `defaultSensitive(key)` is true (anything outside `host`, `port`, `url`, `username`, `database`, `public_key`): `password!` still renders sensitive — the user can untick it in the form themselves. Values are never accepted from the query. Nothing is created until the user submits.
 - `GET .../secrets/:name/edit` accepts the same `keys` param: any key not already on the secret gets an appended empty row (sensitive per the same `!` rule); a key already present is left untouched (existing value/sensitivity wins, never duplicated or reset). This is how `secret_request_link` (1.5) points at an existing secret instead of `/new`.
 
 ### 1.5 MCP tools (server `/mcp`)
-- `update_project(slug, name?, status?, tags?, summary?)` — `projects:write`.
+- `update_project(slug, name?, status?, tags?, summary?)` — `projects:write`. Audit meta `fields` lists only the keys actually provided.
 - `upsert_secret_meta(project?, name, description?, tags?, fields?: [{key, value}])` — `secrets:meta-write`; creates (non-sensitive fields only) or patches per 1.1.
-- `secret_request_link(project?, name, description?, tags?, keys: [{key, sensitive}])` — any secrets scope; returns `{ url }` built from the request origin (trust-proxy aware) per 1.4. Tool description: "give this link to the user; they type the values; then call list_secrets to confirm."
+- `secret_request_link(project?, name, description?, tags?, keys: [{key, sensitive}])` — any secrets scope; returns `{ url }` built from the request origin (trust-proxy aware) per 1.4. `sensitive: false` is ignored for default-sensitive keys (no `!` marker is emitted), so an agent can never make e.g. `password` a visible field whose value `list_secrets` would later return. Tool description: "give this link to the user; they type the values; then call list_secrets to confirm."
 - Server instructions text updated: values are consumed only via `pidb secret exec|write|env`.
 
 ## 2. Plugin
@@ -87,7 +87,7 @@ plugin/
   dist/pidb.mjs, dist/mcp.mjs, dist/hook.mjs   # esbuild bundles, committed
 ```
 - Root script `npm run build:plugin` (esbuild, dev dependency) bundles three entries from `packages/cli/src/agent/` (all plugin code lives there so vitest covers it): `pidb.mjs` (agent CLI), `mcp.mjs` (bridge), `hook.mjs` (hook dispatcher: `node hook.mjs guard|redact|session-start`) into `plugin/dist`. `@napi-rs/keyring` is external (native, installed at first run); everything else (commander, `@modelcontextprotocol/sdk`, shared) is bundled.
-- Plugin data dir resolution (bin shims do not receive `CLAUDE_PLUGIN_DATA`): hooks and MCP get it from env; the CLI uses `PIDB_PLUGIN_DATA` if set, else derives it from its own path (`.../plugins/cache/<marketplace>/<plugin>/<version>/dist/pidb.mjs` → `~/.claude/plugins/data/<plugin>-<marketplace>`), else `~/.claude/plugins/data/pidb-pidb`.
+- Plugin data dir resolution (bin shims do not receive `CLAUDE_PLUGIN_DATA`): hooks and MCP get it from env; the CLI uses `PIDB_PLUGIN_DATA` if set, else derives it from its own path (`.../plugins/cache/<marketplace>/<plugin>/<version>/dist/pidb.mjs` → `~/.claude/plugins/data/<plugin>-<marketplace>`), else `<claude config dir>/plugins/data/pidb-pidb` where the config dir is `CLAUDE_CONFIG_DIR` if set, else `~/.claude` (this is also where a user-installed `pidb` finds the agent state when it runs in agent mode under Claude Code, 2.3).
 - First run: SessionStart hook runs `npm install --omit=dev --no-audit --no-fund --prefix <data>` with the plugin's `package.json` if `<data>/node_modules/@napi-rs/keyring` is missing (timeout-tolerant; reports status in context). Bundles resolve keyring via `createRequire(<data>/package.json)`.
 
 ### 2.2 State (plugin data dir)
@@ -98,18 +98,20 @@ plugin/
 - All JSON writes are atomic (temp + rename).
 
 ### 2.3 Agent-mode CLI (`PIDB_AGENT=1`)
+- Entered by the plugin's bin shims (`PIDB_AGENT=1`) — and also by the normal `pidb` entry whenever `CLAUDECODE=1` is set (Claude Code sets it for its Bash tool's commands), unless `PIDB_ALLOW_USER_MODE=1`. Reason: Claude Code appends the plugin's `bin/` to the **end** of PATH, so a user-installed `pidb` (npm link / global install) would otherwise shadow the shim and run ungated, unredacted, without `written.json`. `PIDB_AGENT=1` always wins; `PIDB_ALLOW_USER_MODE=1` is the user's opt-out for their own `!pidb …` commands.
 - Commands: `connect [--profile] [--url]`, `profile list|add <name> <url>|set-url <name> <url>|use <name>|remove <name>`, `bind <project>` / `unbind`, `status`, `projects list|get`, `search`, `docs list|get|put`, `secrets list`, `secret exec|write|env`. `search` is read-only and included for the agent's own use. `profile add` on an existing name refuses (exit 2, "profile `<name>` exists — use `pidb profile set-url <name> <url>`"); `profile set-url` changes the profile's url and clears its stored token (prints "token cleared — run `pidb connect --profile <name>`").
 - Not available (exit 2 with "not available to the Claude agent — ask the user"): `login`, `secret get`, `secret set`, `token *`.
 - Config: url from the profile (bound profile for the cwd repo, else default), token from keyring. `PIDB_URL`/`PIDB_TOKEN` env ignored in agent mode.
-- `connect`: start → print `Open <verification_url> and approve code <user_code>` → try to open the browser (`open` on macOS, `cmd /c start "" <url>` on Windows, `xdg-open` otherwise; failure is fine) → poll every `interval` s until success/deny/expiry (max 10 min) → store token in keyring → print name, projects, scopes, expiry (never the token). Requested scopes = all AGENT_SCOPES; requested projects = the bound project (if any) plus projects of the existing token.
+- `connect`: start → validate `user_code` (`XXXX-XXXX`) and build the url locally as `<profile url>/connect?code=<user_code>` (the server's `verification_url` is ignored) → print `Open <that url> and approve code <user_code>` → try to open the browser (not opened if the code is malformed — a warning is printed instead) (`open` on macOS, `cmd /c start "" <url>` on Windows, `xdg-open` otherwise; failure is fine) → poll every `interval` s until success/deny/expiry (max 10 min) → store token in keyring → print name, projects, scopes, expiry (never the token). Requested scopes = all AGENT_SCOPES; requested projects = the bound project (if any) plus projects of the existing token.
 - `secret exec|write|env` call the use endpoint (1.2) with the purpose.
 - **exec redaction**: child stdout/stderr are piped; every occurrence of each value (length ≥ 4) and of its base64, base64url, URL-encoded and JSON-escaped forms is replaced by `[pidb:redacted]` before writing to the CLI's own stdout/stderr, correctly across chunk boundaries (hold back `maxPatternLength-1` bytes). stdin is inherited. Exit code preserved.
 - **write/env** record the absolute output path in `written.json`; refuse to write inside the plugin data dir.
 
 ### 2.4 MCP bridge (`dist/mcp.mjs`, stdio)
 - Resolves profile + token per call (cwd = Claude Code's project dir). Proxies server MCP tools by forwarding JSON-RPC `tools/list` / `tools/call` to `<url>/mcp` with the bearer token (MCP SDK client over Streamable HTTP).
+- `tools/list` always returns the 10 allowlisted server tools from static descriptors (name, description, inputSchema — one module, `agent/upstream-tools.ts`, checked against a live server's `tools/list` by a drift test), even when not connected or while deps are installing; when connected, the upstream's own schema is preferred for an allowlisted name. Declares `tools: { listChanged: true }` and sends `notifications/tools/list_changed` (best effort) when the resolved config goes from unconnected to connected — detected on every request and by a 15 s poll while unconnected. Calls while not connected → tool error with the connect hint.
 - Local tools: `pidb_status` (profile, url, bound project, token present, token expiry/projects if known), `pidb_bind(project, profile?)`, `pidb_profiles()`.
-- Server errors are returned as tool errors with a hint (`401 token_expired` → "run `pidb connect`"; 403 → "the token lacks access — run `pidb connect` to widen").
+- Server errors are returned as tool errors with a hint (`401 token_expired` → "run `pidb connect`"; 403 → "the token lacks access — run `pidb connect` to widen"; except `forbidden: sensitive fields need secrets:write`, which no agent token can ever get → "use secret_request_link for sensitive fields").
 - Never returns the token; never exposes a reveal/use tool.
 
 ## 3. Hardening (hooks + skill)
@@ -121,19 +123,20 @@ Deny (with a reason telling Claude the safe alternative) when:
 - Any tool touches protected paths: plugin data dir, `~/.config/pidb`, `%APPDATA%\pidb`, any path in `written.json` (Read/Grep/Glob/Edit/Write file paths, and Bash commands mentioning them: `cat`, `type`, `Get-Content`, `less`, `head`, `tail`, `grep`, `sed`, `awk`, `cp`, `base64`, `xxd`, `od`, `strings`).
 - Bash reads OS credential stores: `security find-generic-password`/`find-internet-password`, `cmdkey /list`, `Get-StoredCredential`, `secret-tool lookup`, `keyring get`.
 - Bash `curl`/`wget`/`Invoke-WebRequest`/`iwr`/`irm` targeting a configured pidb server URL (forces use of MCP/CLI).
+- Bash command escapes agent mode (2.3): mentions `PIDB_ALLOW_USER_MODE`, or assigns/unsets `CLAUDECODE` (`CLAUDECODE=`, `env -u`/`--unset`, `unset`, `env:CLAUDECODE`).
 The guard is heuristic defense-in-depth; the skill states the rules plainly.
 
 ### 3.2 PostToolUse redaction (`hook.mjs redact`, Bash)
 Replace in tool output (via `updatedToolOutput`): pidb tokens (`pidb_[A-Za-z0-9_-]{20,}`), PEM private key blocks, `AKIA[0-9A-Z]{16}`, and `KEY=value` lines whose key matches `/(PASS(WORD)?|SECRET|TOKEN|API_?KEY|PRIVATE)/i` (value → `[pidb:redacted]`). Does not fetch secret values.
 
 ### 3.3 SessionStart (`hook.mjs session-start`)
-- Ensures deps (2.1). Resolves binding for cwd. Injects `additionalContext` (≤ ~4 KB): profile + url, connection status, bound project summary, document index (slugs + titles), secret names with field keys (sensitive marked `*`), and the 6 golden rules (below). Unbound repo: short note + "call pidb_bind or ask the user which project". Not connected: "run `pidb connect`". Never throws; on any failure injects a one-line status.
+- Ensures deps (2.1). Resolves binding for cwd. Injects `additionalContext` (≤ ~4 KB): profile + url, connection status, bound project summary, document index (slugs + titles), secret names with field keys (sensitive marked `*`), and the 6 golden rules (below). Unbound repo: short note + "call pidb_bind or ask the user which project". Not connected: "run `pidb connect`". Project fetch errors: 401 → "token expired or revoked — run `pidb connect`"; 403 → widen hint; 404 → "project not found or not approved for this token — run `pidb connect` to approve it, or `pidb bind` another". Never throws; on any failure injects a one-line status.
 
 ### 3.4 Skill `pidb` — golden rules
 1. Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.
 2. Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env `PIDB_<KEY>`), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.
 3. Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.
-4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, username) go into non-sensitive fields via `upsert_secret_meta`.
+4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, url, username, database, public_key) go into non-sensitive fields via `upsert_secret_meta`; any other key → `secret_request_link`.
 5. 401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.
 6. Never use curl against the pidb server; use MCP tools / the CLI.
 Plus: data model, tool list, profile/bind commands, Windows vs macOS notes.

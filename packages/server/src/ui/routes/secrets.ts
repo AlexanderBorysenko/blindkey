@@ -60,7 +60,8 @@ function fieldRows(b: Record<string, unknown>): FieldRow[] {
 
 /**
  * `keys` query param (spec §1.4, e.g. `host!,password`): one row per comma-separated key, empty
- * value, sensitive unless the key ends with `!` (which is stripped before validating). A key that
+ * value, sensitive unless the key ends with `!` (which is stripped before validating) AND the key is
+ * non-sensitive by default (`defaultSensitive`) — `password!` still renders sensitive. A key that
  * doesn't match `secretKeySchema`, or repeats an earlier key in the same list, is dropped rather
  * than rejecting the whole request — this is a prefill hint, not a submission.
  */
@@ -70,12 +71,15 @@ function parseKeyRows(raw: string): FieldRow[] {
   for (const rawKey of raw.split(',')) {
     const trimmed = rawKey.trim();
     if (!trimmed) continue;
-    const sensitive = !trimmed.endsWith('!');
-    const key = sensitive ? trimmed : trimmed.slice(0, -1);
+    const marked = trimmed.endsWith('!');
+    const key = marked ? trimmed.slice(0, -1) : trimmed;
     if (!secretKeySchema.safeParse(key).success) continue;
     if (seen.has(key)) continue;
     seen.add(key);
-    rows.push({ key, value: '', sensitive });
+    // The "!" marker is honoured only for keys that are non-sensitive by default (spec §1.4): a link
+    // (built by an agent) must never pre-untick e.g. `password`, which would let list_secrets return
+    // the value the user then types. The user can still untick the row in the form themselves.
+    rows.push({ key, value: '', sensitive: !marked || defaultSensitive(key) });
   }
   return rows;
 }

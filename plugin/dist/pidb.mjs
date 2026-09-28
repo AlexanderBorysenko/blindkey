@@ -24111,7 +24111,8 @@ function derivedDataDir(selfPath) {
 }
 function resolveDataDir(env = process.env, selfPath = process.argv[1] ?? "") {
   if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
-  return derivedDataDir(selfPath) ?? join4(env.HOME ?? homedir2(), ".claude", "plugins", "data", "pidb-pidb");
+  const claudeDir = env.CLAUDE_CONFIG_DIR || join4(env.HOME ?? homedir2(), ".claude");
+  return derivedDataDir(selfPath) ?? join4(claudeDir, "plugins", "data", "pidb-pidb");
 }
 
 // packages/cli/src/agent/context.ts
@@ -24168,24 +24169,17 @@ function sanitizeForTerminal(s) {
   return s.replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, "");
 }
 var USER_CODE_RE = /^[A-Z]{4}-[A-Z]{4}$/;
-function parseSafeVerificationUrl(rawUrl, userCode, profileUrl) {
+function buildVerificationUrl(profileUrl, userCode) {
   if (!USER_CODE_RE.test(userCode)) return null;
   let target;
-  let origin;
   try {
-    target = new URL(rawUrl);
-    origin = new URL(profileUrl);
+    target = new URL(`${profileUrl}/connect?code=${userCode}`);
   } catch {
     return null;
   }
-  if (rawUrl !== target.href) return null;
   if (target.protocol !== "http:" && target.protocol !== "https:") return null;
   if (target.username !== "" || target.password !== "") return null;
-  if (target.hash !== "") return null;
-  if (target.origin !== origin.origin) return null;
-  if (target.pathname !== "/connect") return null;
-  if (target.search !== `?code=${userCode}`) return null;
-  return target;
+  return target.href;
 }
 function sanitizeInterval(raw) {
   const n = typeof raw === "number" ? raw : NaN;
@@ -24256,16 +24250,18 @@ async function runConnect(opts, deps) {
     throw new CliError(`could not start connect: ${body.error ?? `HTTP ${startRes.status}`}`);
   }
   const start = await readJson(startRes);
-  if (typeof start.verification_url !== "string" || typeof start.user_code !== "string") {
-    throw new CliError("server returned a malformed connect response (non-string verification_url/user_code)");
+  if (typeof start.user_code !== "string") {
+    throw new CliError("server returned a malformed connect response (non-string user_code)");
   }
-  out.write(`Open ${sanitizeForTerminal(start.verification_url)} and approve code ${sanitizeForTerminal(start.user_code)}
+  const verificationUrl = buildVerificationUrl(url2, start.user_code);
+  if (verificationUrl) {
+    out.write(`Open ${verificationUrl} and approve code ${start.user_code}
 `);
-  const validatedUrl = parseSafeVerificationUrl(start.verification_url, start.user_code, url2);
-  if (validatedUrl) {
-    openBrowserImpl(validatedUrl.href, platform);
+    openBrowserImpl(verificationUrl, platform);
   } else {
-    out.write("warning: the server-provided verification url looks unexpected — not opening a browser automatically\n");
+    out.write(`Open ${sanitizeForTerminal(`${url2}/connect`)} and approve code ${sanitizeForTerminal(start.user_code)}
+`);
+    out.write("warning: the server returned an unexpected code format — not opening a browser automatically\n");
   }
   const expiresInS = sanitizeExpiresIn(start.expires_in);
   const deadline = now() + Math.min(MAX_WAIT_MS, expiresInS * 1e3);

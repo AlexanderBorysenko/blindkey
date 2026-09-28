@@ -75,38 +75,24 @@ function sanitizeForTerminal(s: string): string {
 const USER_CODE_RE = /^[A-Z]{4}-[A-Z]{4}$/;
 
 /**
- * Strict allowlist check (fix round 1, Critical 2; tightened in fix round 2) before ever opening a
- * browser to a server-supplied url: http(s) only, no userinfo (`user:pass@`) and no fragment, same
- * origin as the profile's own configured server, path exactly `/connect`, query exactly
- * `?code=<the code we were just given>`, the code itself matching the server's own generation
- * format, and the raw string identical to `URL`'s own canonical `.href` for it (the WHATWG URL parser
- * silently strips embedded tabs/newlines and leading/trailing C0 controls, so a raw string that
- * *doesn't* round-trip unchanged is evidence of exactly that kind of smuggling). Returns the parsed
- * `URL` (so the caller opens its canonical `.href`, never the untrusted raw string) or `null`.
+ * The browser url `pidb connect` opens and prints (spec §2.3, F6): built locally as
+ * `<profile url>/connect?code=<user_code>` — the server's own `verification_url` is never trusted
+ * (not printed, not opened), so a hostile or misconfigured server can't point the user's browser
+ * elsewhere. `user_code` must match the server's generation format (`XXXX-XXXX`, uppercase letters)
+ * first — anything else could smuggle extra query/path characters into the url — and the profile url
+ * must be http(s). Returns the canonical href, or `null` when either check fails.
  */
-function parseSafeVerificationUrl(rawUrl: string, userCode: string, profileUrl: string): URL | null {
+export function buildVerificationUrl(profileUrl: string, userCode: string): string | null {
   if (!USER_CODE_RE.test(userCode)) return null;
   let target: URL;
-  let origin: URL;
   try {
-    target = new URL(rawUrl);
-    origin = new URL(profileUrl);
+    target = new URL(`${profileUrl}/connect?code=${userCode}`);
   } catch {
     return null;
   }
-  if (rawUrl !== target.href) return null;
   if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
   if (target.username !== '' || target.password !== '') return null;
-  if (target.hash !== '') return null;
-  if (target.origin !== origin.origin) return null;
-  if (target.pathname !== '/connect') return null;
-  if (target.search !== `?code=${userCode}`) return null;
-  return target;
-}
-
-/** Boolean wrapper around {@link parseSafeVerificationUrl} for callers that only need the verdict. */
-export function isSafeVerificationUrl(rawUrl: string, userCode: string, profileUrl: string): boolean {
-  return parseSafeVerificationUrl(rawUrl, userCode, profileUrl) !== null;
+  return target.href;
 }
 
 function sanitizeInterval(raw: unknown): number {
@@ -200,16 +186,18 @@ export async function runConnect(opts: ConnectOptions, deps: ConnectDeps): Promi
     throw new CliError(`could not start connect: ${body.error ?? `HTTP ${startRes.status}`}`);
   }
   const start = await readJson<StartResponse>(startRes);
-  if (typeof start.verification_url !== 'string' || typeof start.user_code !== 'string') {
-    throw new CliError('server returned a malformed connect response (non-string verification_url/user_code)');
+  if (typeof start.user_code !== 'string') {
+    throw new CliError('server returned a malformed connect response (non-string user_code)');
   }
 
-  out.write(`Open ${sanitizeForTerminal(start.verification_url)} and approve code ${sanitizeForTerminal(start.user_code)}\n`);
-  const validatedUrl = parseSafeVerificationUrl(start.verification_url, start.user_code, url);
-  if (validatedUrl) {
-    openBrowserImpl(validatedUrl.href, platform);
+  // Built locally from the profile url — the server's `verification_url` is ignored (F6).
+  const verificationUrl = buildVerificationUrl(url, start.user_code);
+  if (verificationUrl) {
+    out.write(`Open ${verificationUrl} and approve code ${start.user_code}\n`);
+    openBrowserImpl(verificationUrl, platform);
   } else {
-    out.write('warning: the server-provided verification url looks unexpected — not opening a browser automatically\n');
+    out.write(`Open ${sanitizeForTerminal(`${url}/connect`)} and approve code ${sanitizeForTerminal(start.user_code)}\n`);
+    out.write('warning: the server returned an unexpected code format — not opening a browser automatically\n');
   }
 
   const expiresInS = sanitizeExpiresIn(start.expires_in);

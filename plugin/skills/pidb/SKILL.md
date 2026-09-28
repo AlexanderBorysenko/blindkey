@@ -16,7 +16,7 @@ pidb is a self-hosted server that holds, per project, **documents** (Markdown: a
 
 - **Project** — `slug`, name, status (`active|paused|archived`), tags, summary.
 - **Document** — per project (or global), `slug`, title, category (`context|architecture|deploy|conventions|client|notes|guidelines`), Markdown body. Docs may reference secrets as `{{secret:Name}}` — never paste a value into a doc (the server rejects docs that look like they contain one).
-- **Secret** — per project (or global), a `name` with fields; each field is sensitive (value hidden) or not (e.g. `host`, `port`, `username`, `database`). Global docs/secrets are visible to every project-scoped token.
+- **Secret** — per project (or global), a `name` with fields; each field is sensitive (value hidden) or not. Only these keys are non-sensitive by default: `host`, `port`, `url`, `username`, `database`, `public_key` — every other key (`password`, `account_id`, `api_key`, …) is sensitive. Global docs/secrets are visible to every project-scoped token.
 - **Binding** — this repo (git top level) → `{ profile, project }`, stored locally in the plugin data dir (never committed).
 - **Profile** — a named server URL (`prod`, `local`, …) with its agent token kept in the OS credential store.
 
@@ -25,7 +25,7 @@ pidb is a self-hosted server that holds, per project, **documents** (Markdown: a
 1. Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.
 2. Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env `PIDB_<KEY>`), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.
 3. Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.
-4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, username) go into non-sensitive fields via `upsert_secret_meta`.
+4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts go into non-sensitive fields via `upsert_secret_meta` (keys `host`, `port`, `url`, `username`, `database`, `public_key` only).
 5. 401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.
 6. Never use curl against the pidb server; use MCP tools / the CLI.
 
@@ -41,8 +41,8 @@ Server (proxied with the agent token; project defaults to global when omitted):
 - `list_documents(project?)`, `read_document(project?, slug)`, `write_document(project?, slug, title, category, body_md, force?)`.
 - `list_secrets(project?)` — names, field keys, sensitivity; never values.
 - `update_project(slug, name?, status?, tags?, summary?)`.
-- `upsert_secret_meta(project?, name, description?, tags?, fields?: [{key, value}])` — only non-sensitive fields; anything sensitive is the user's job.
-- `secret_request_link(project?, name, description?, tags?, keys: [{key, sensitive}])` — a prefilled admin-UI link for the user.
+- `upsert_secret_meta(project?, name, description?, tags?, fields?: [{key, value}])` — only the non-sensitive keys `host`, `port`, `url`, `username`, `database`, `public_key`; any other key is refused ("sensitive fields need secrets:write") — use `secret_request_link` for it.
+- `secret_request_link(project?, name, description?, tags?, keys: [{key, sensitive}])` — a prefilled admin-UI link for the user. `sensitive: false` only takes effect for the non-sensitive keys above; any other key stays sensitive.
 
 There is deliberately no tool that returns a secret value.
 
@@ -83,8 +83,8 @@ Never: `echo`/`printf`/`Write-Output` a `PIDB_*` variable, run `env`/`printenv`/
 ## Secret-request flow (a value you need doesn't exist yet)
 
 1. `list_secrets(project)` — confirm it's really missing (check global too).
-2. Store what isn't secret yourself: `upsert_secret_meta(project, "Stripe", description, fields: [{key: "account_id", value: "acct_…"}])`.
-3. `secret_request_link(project, "Stripe", description, keys: [{key: "secret_key", sensitive: true}, {key: "account_id", sensitive: false}])` → give the user the link and say what to type there. Don't ask for the value in chat.
+2. Store what isn't secret yourself — only the non-sensitive keys (`host`, `port`, `url`, `username`, `database`, `public_key`): `upsert_secret_meta(project, "Postgres", description, fields: [{key: "host", value: "db.internal"}, {key: "port", value: "5432"}, {key: "username", value: "app"}])`. Any other key (e.g. `password`, `account_id`) is refused with "sensitive fields need secrets:write" — that is expected, not a scope problem; don't `pidb connect` to widen, request it instead (step 3).
+3. `secret_request_link(project, "Postgres", description, keys: [{key: "password", sensitive: true}])` → give the user the link and say what to type there. Don't ask for the value in chat. (Keys other than the non-sensitive ones always come out sensitive; the user can untick one in the form if it isn't secret.)
 4. Wait for the user to say it's done, then `list_secrets(project)` to verify the field exists, then use it with `pidb secret exec`.
 
 ## Keeping the project memory current
@@ -92,7 +92,7 @@ Never: `echo`/`printf`/`Write-Output` a `PIDB_*` variable, run `env`/`printenv`/
 After meaningful work — a new service, a changed deploy procedure, a decision with a reason, a gotcha that cost time — update the docs before finishing:
 - `read_document` first, then `write_document` with the full updated body (it replaces the doc). Use `architecture` for structure and data flow, `deploy` for runbooks (commands, hosts, `{{secret:Name}}` references — never values), `notes`/`conventions` for decisions and rules.
 - Keep `update_project` summary/tags accurate when the project's shape changes.
-- Record non-secret connection facts (host, port, username, database, URLs) as non-sensitive fields via `upsert_secret_meta` rather than in prose.
+- Record non-secret connection facts (`host`, `port`, `url`, `username`, `database`, `public_key`) as non-sensitive fields via `upsert_secret_meta` rather than in prose.
 
 ## Troubleshooting
 

@@ -31,7 +31,7 @@ const GOLDEN_RULES = [
   'Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.',
   'Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env PIDB_<KEY>), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.',
   'Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.',
-  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, username) go into non-sensitive fields via `upsert_secret_meta`.',
+  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, url, username, database, public_key) go into non-sensitive fields via `upsert_secret_meta`; any other key → `secret_request_link`.',
   '401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.',
   'Never use curl against the pidb server; use MCP tools / the CLI.',
 ] as const;
@@ -65,20 +65,23 @@ function bulletedList(items: string[], max: number): string[] {
   return shown;
 }
 
-/** `null` = the project doesn't exist (404); `'down'` = couldn't reach/parse the server in time. */
+/**
+ * A 401/403/404 status is reported as such (each gets its own hint, spec §2.5); `'down'` = couldn't
+ * reach/parse the server in time (or any other failure).
+ */
 async function fetchProjectDetail(
   url: string,
   token: string,
   project: string,
   deps: SessionStartDeps,
   deadline: number,
-): Promise<RemoteProjectDetail | null | 'down'> {
+): Promise<RemoteProjectDetail | 401 | 403 | 404 | 'down'> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   try {
     const client = new PidbClient({ url, token }, fetchImpl);
     return await withDeadline(client.json<RemoteProjectDetail>('GET', `/api/v1/projects/${encodeURIComponent(project)}`), deadline);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
+    if (err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 404)) return err.status;
     return 'down';
   }
 }
@@ -141,8 +144,19 @@ async function buildBody(deps: SessionStartDeps, deadline: number): Promise<stri
     lines.push(`pidb server (${profile.url}) is unreachable right now — project details unavailable this session.`);
     return lines;
   }
-  if (detail === null) {
-    lines.push(`Project "${binding.project}" was not found on the server (renamed or removed?).`);
+  if (detail === 401) {
+    lines.push('pidb: token expired or revoked — run `pidb connect`.');
+    return lines;
+  }
+  if (detail === 403) {
+    lines.push(`pidb: the token lacks access to project "${binding.project}" — run \`pidb connect\` to widen.`);
+    return lines;
+  }
+  if (detail === 404) {
+    // The server answers 404 both for a missing slug and for one this token wasn't approved for.
+    lines.push(
+      `Project "${binding.project}" not found or not approved for this token — run \`pidb connect\` to approve it, or \`pidb bind\` another.`,
+    );
     return lines;
   }
 

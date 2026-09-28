@@ -539,7 +539,17 @@ function targetsConfiguredServer(command: string, segments: Segment[], ctx: Guar
 
 // =================================================================================================
 
+/**
+ * Escaping agent mode (spec §2.3): a user-installed `pidb` runs in agent mode because Claude Code sets
+ * `CLAUDECODE=1`; `PIDB_ALLOW_USER_MODE=1` is the *user's* opt-out, and clearing/overriding
+ * `CLAUDECODE` would defeat it too — neither is for the agent.
+ */
+const AGENT_MODE_ESCAPE_RE = /\bPIDB_ALLOW_USER_MODE\b|\bCLAUDECODE\s*=|(?:\s-u\s*|--unset[=\s]\s*|\bunset\s+(?:-v\s+)?)CLAUDECODE\b|env:CLAUDECODE\b/i;
+
 function guardBashCommand(command: string, cwd: string, ctx: GuardContext): GuardDecision {
+  if (AGENT_MODE_ESCAPE_RE.test(command)) {
+    return deny('switching pidb out of agent mode (PIDB_ALLOW_USER_MODE / CLAUDECODE) is for the user only — ask the user to run this themselves.');
+  }
   const segments = expandSegments(command, cwd, ctx);
   if (runsDisabledPidbCommand(segments)) {
     return deny(

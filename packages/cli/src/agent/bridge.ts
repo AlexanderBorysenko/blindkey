@@ -18,6 +18,7 @@ import { resolveAgentConfig, type AgentConfig } from './context.js';
 import { resolveDataDir } from './datadir.js';
 import { loadBindings, loadProfiles, performBind, repoKey } from './state.js';
 import type { TokenStore } from './tokenstore.js';
+import { UPSTREAM_TOOL_DESCRIPTORS } from './upstream-tools.js';
 
 export interface BridgeDeps {
   /** Claude Code's project dir (its cwd when it launches the MCP server) — overridden by `env.CLAUDE_PROJECT_DIR` when set. */
@@ -26,11 +27,19 @@ export interface BridgeDeps {
   store: TokenStore;
   /** Overrides the derived plugin data dir (tests; production derives it via `resolveDataDir`, which itself honours `PIDB_PLUGIN_DATA`). */
   dataDir?: string;
+  /**
+   * While not connected, re-resolve the config every this many ms and send
+   * `notifications/tools/list_changed` once it becomes connected (best effort; the same transition is
+   * also detected on every tools/list and tools/call). Off when omitted (tests); `bridge-main.ts` sets it.
+   */
+  watchIntervalMs?: number;
 }
 
 const CONNECT_HINT = 'not connected — run `pidb connect`';
 const WIDEN_HINT = 'the token lacks access — run `pidb connect` to widen';
 const NOT_ALLOWED = 'tool not allowed by the pidb plugin';
+/** `secrets:write` is never grantable to an agent token, so "connect to widen" would be a dead end here. */
+const SENSITIVE_HINT = 'use secret_request_link for sensitive fields — the user types the value in the admin UI';
 
 const LOCAL_TOOLS: Tool[] = [
   {
@@ -66,19 +75,9 @@ const LOCAL_TOOL_NAMES = new Set(LOCAL_TOOLS.map((t) => t.name));
  * The exact tools the pidb server's own `/mcp` exposes (spec §1.5) — anything else the upstream
  * server happens to list (a future tool this bridge hasn't been reviewed against, a misbehaving or
  * malicious server) is dropped from `tools/list` and refused for `tools/call`, never forwarded.
+ * Always listed, from static descriptors, even when not connected (spec §2.4).
  */
-const ALLOWED_UPSTREAM_TOOLS = new Set([
-  'list_projects',
-  'get_project',
-  'list_documents',
-  'read_document',
-  'write_document',
-  'search',
-  'list_secrets',
-  'update_project',
-  'upsert_secret_meta',
-  'secret_request_link',
-]);
+const ALLOWED_UPSTREAM_TOOLS = new Set(UPSTREAM_TOOL_DESCRIPTORS.map((t) => t.name));
 
 function textResult(text: string, isError = false): CallToolResult {
   return { content: [{ type: 'text', text }], isError };
@@ -100,6 +99,15 @@ function isScopeError(result: CallToolResult): boolean {
   const first = result.content[0];
   const text = first && first.type === 'text' ? first.text : '';
   return /^(missing_scope|forbidden):/.test(text);
+}
+
+/** upsert_secret_meta touching a sensitive field — only `secrets:write` could, which an agent token
+ * can never hold, so this gets the secret_request_link hint instead of the widen hint. */
+function isSensitiveFieldError(result: CallToolResult): boolean {
+  if (result.isError !== true) return false;
+  const first = result.content[0];
+  const text = first && first.type === 'text' ? first.text : '';
+  return /^forbidden: sensitive fields need secrets:write\b/.test(text);
 }
 
 /**
@@ -176,11 +184,36 @@ export function createBridge(deps: BridgeDeps): Server {
    * other error (a broken keychain, a corrupt state file racing a concurrent write, ...) is rethrown
    * so it's reported with its own real message rather than silently read as "not connected". */
   async function resolveConfig(): Promise<AgentConfig | null> {
+    let cfg: AgentConfig | null;
     try {
-      return await resolveAgentConfig({ cwd, env, store, dataDir });
+      cfg = await resolveAgentConfig({ cwd, env, store, dataDir });
     } catch (err) {
-      if (err instanceof CliError) return null;
+      if (err instanceof CliError) {
+        noteConnected(false);
+        return null;
+      }
       throw err;
+    }
+    noteConnected(true);
+    return cfg;
+  }
+
+  // Connection-state tracking for `notifications/tools/list_changed` (spec §2.4): the tool *names*
+  // never change, but once connected the upstream's own schemas replace the static ones, so a client
+  // that listed tools while unconnected is told to re-list. Only the unconnected → connected edge
+  // notifies; `undefined` = not yet observed (a first observation never notifies).
+  let connected: boolean | undefined;
+  let watchTimer: ReturnType<typeof setInterval> | undefined;
+  function noteConnected(now: boolean): void {
+    const was = connected;
+    connected = now;
+    if (now && watchTimer) {
+      clearInterval(watchTimer);
+      watchTimer = undefined;
+    }
+    if (was === false && now) {
+      // Best effort: not connected to a client yet, or the client went away — nothing to do.
+      server.sendToolListChanged().catch(() => {});
     }
   }
 
@@ -197,6 +230,7 @@ export function createBridge(deps: BridgeDeps): Server {
   async function attemptUpstreamCall(cfg: AgentConfig, name: string, args: Record<string, unknown> | undefined): Promise<CallToolResult> {
     const client = await getUpstreamClient(cfg.url, cfg.token);
     const result = (await client.callTool({ name, arguments: args })) as CallToolResult;
+    if (isSensitiveFieldError(result)) return withHint(result, SENSITIVE_HINT);
     if (isScopeError(result)) return withWidenHint(result);
     return isProjectNotFound(result) ? withHint(result, PROJECT_NOT_FOUND_HINT) : result;
   }
@@ -271,7 +305,21 @@ export function createBridge(deps: BridgeDeps): Server {
     return textResult(JSON.stringify({ default: profiles.default, profiles: list }, null, 2));
   }
 
-  const server = new Server({ name: 'pidb-bridge', version: '0.1.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'pidb-bridge', version: '0.1.0' }, { capabilities: { tools: { listChanged: true } } });
+
+  if (deps.watchIntervalMs !== undefined && deps.watchIntervalMs > 0) {
+    watchTimer = setInterval(() => {
+      if (connected === true) return;
+      resolveConfig().catch(() => {});
+    }, deps.watchIntervalMs);
+    watchTimer.unref?.();
+    const prevOnClose = server.onclose;
+    server.onclose = () => {
+      if (watchTimer) clearInterval(watchTimer);
+      watchTimer = undefined;
+      prevOnClose?.();
+    };
+  }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     let cfg: AgentConfig | null = null;
@@ -293,10 +341,12 @@ export function createBridge(deps: BridgeDeps): Server {
         // Degrade to local tools only — tools/list has no per-call error channel.
       }
     }
-    // Allowlisted upstream tools only (never something the upstream server merely happens to list),
-    // and local tool names always win over any same-named upstream tool.
-    const allowedUpstream = upstreamTools.filter((t) => ALLOWED_UPSTREAM_TOOLS.has(t.name) && !LOCAL_TOOL_NAMES.has(t.name));
-    return { tools: [...allowedUpstream, ...LOCAL_TOOLS] };
+    // Always the full allowlist, from the static descriptors (spec §2.4 — so a first, unconnected
+    // session still sees every tool); an upstream tool's own schema replaces the static one when
+    // connected. Never anything the upstream merely happens to list beyond the allowlist.
+    const live = new Map(upstreamTools.filter((t) => ALLOWED_UPSTREAM_TOOLS.has(t.name)).map((t) => [t.name, t]));
+    const upstreamList = UPSTREAM_TOOL_DESCRIPTORS.map((t) => live.get(t.name) ?? t);
+    return { tools: [...upstreamList, ...LOCAL_TOOLS] };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {

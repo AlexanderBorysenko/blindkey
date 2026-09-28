@@ -10,11 +10,24 @@ import { buildProgram, exitCodeOf } from './program.js';
 
 export * from './program.js';
 
+/**
+ * Whether the normal entry runs in agent mode (spec §2.3):
+ *   - `PIDB_AGENT=1` (set by the plugin's bin shim) always selects it;
+ *   - `CLAUDECODE=1` (set by Claude Code for its Bash tool's commands) selects it too, because Claude
+ *     Code appends the plugin's `bin/` to the *end* of PATH — a user-installed `pidb` (npm link /
+ *     global install) earlier on PATH would otherwise run ungated, unredacted, as the user;
+ *   - `PIDB_ALLOW_USER_MODE=1` opts out of the `CLAUDECODE` rule (the user's own `!pidb …` runs).
+ */
+export function agentModeFromEnv(env: NodeJS.ProcessEnv): boolean {
+  if (env.PIDB_AGENT === '1') return true;
+  return env.CLAUDECODE === '1' && env.PIDB_ALLOW_USER_MODE !== '1';
+}
+
 export async function main(argv: string[] = process.argv): Promise<void> {
   try {
-    // Agent mode (spec §2.3) is entered via `PIDB_AGENT=1` (set by the plugin's bin shim) or by
-    // running the dedicated agent entry (agent/cli.ts), which always passes `{ agent: true }`.
-    await buildProgram({ agent: process.env.PIDB_AGENT === '1' }).parseAsync(argv);
+    // The dedicated agent entry (agent/cli.ts) always passes `{ agent: true }`; this one decides
+    // from the environment — see agentModeFromEnv.
+    await buildProgram({ agent: agentModeFromEnv(process.env) }).parseAsync(argv);
   } catch (err) {
     // Commander (via .exitOverride()) already wrote its own message/usage/help — for --help, a
     // missing argument, an unknown command, etc. — so printing another "error: ..." line here would

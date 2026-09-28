@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +59,63 @@ describe('normal entry (packages/cli/src/cli.ts) with PIDB_AGENT=1', () => {
     );
     expect(r.status).not.toBe(0);
     expect(r.stderr).not.toContain('not available to the Claude agent');
+  });
+});
+
+describe('normal entry (packages/cli/src/cli.ts) under Claude Code (CLAUDECODE=1) — PATH shadowing, spec §2.3', () => {
+  it('enters agent mode without PIDB_AGENT: `login` exits 2 with the spec message', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-claudecode-'));
+    const r = await runEntry(
+      'packages/cli/src/cli.ts',
+      ['login', 'https://x.example.com'],
+      { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_PLUGIN_DATA: dataDir, CLAUDECODE: '1' },
+    );
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('not available to the Claude agent — ask the user');
+  });
+
+  it('uses the agent config (plugin data dir under CLAUDE_CONFIG_DIR), ignoring PIDB_URL/PIDB_TOKEN', async () => {
+    const claudeDir = mkdtempSync(join(tmpdir(), 'pidb-claudecfg-'));
+    const r = await runEntry('packages/cli/src/cli.ts', ['profile', 'list'], {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      CLAUDE_CONFIG_DIR: claudeDir,
+      CLAUDECODE: '1',
+      PIDB_URL: 'http://127.0.0.1:1',
+      PIDB_TOKEN: 'pidb_should_not_be_used',
+    });
+    // `profile` exists only in agent mode; in normal mode commander would reject it as unknown.
+    expect(r.stderr).not.toContain('unknown command');
+    expect(r.status).toBe(0);
+    const add = await runEntry('packages/cli/src/cli.ts', ['profile', 'add', 'home', 'https://pidb.example.com'], {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      CLAUDE_CONFIG_DIR: claudeDir,
+      CLAUDECODE: '1',
+    });
+    expect(add.status).toBe(0);
+    expect(existsSync(join(claudeDir, 'plugins', 'data', 'pidb-pidb', 'profiles.json'))).toBe(true);
+  });
+
+  it('PIDB_ALLOW_USER_MODE=1 opts out: normal mode (`login` fails on the network, not refused)', async () => {
+    const configHome = mkdtempSync(join(tmpdir(), 'pidb-usermode-'));
+    const r = await runEntry(
+      'packages/cli/src/cli.ts',
+      ['login', 'http://127.0.0.1:1'],
+      { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_CONFIG_HOME: configHome, CLAUDECODE: '1', PIDB_ALLOW_USER_MODE: '1' },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).not.toContain('not available to the Claude agent');
+  });
+
+  it('PIDB_AGENT=1 still wins over PIDB_ALLOW_USER_MODE=1 (the plugin shim is always agent mode)', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-claudecode-'));
+    const r = await runEntry(
+      'packages/cli/src/cli.ts',
+      ['login', 'https://x.example.com'],
+      { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_PLUGIN_DATA: dataDir, PIDB_AGENT: '1', CLAUDECODE: '1', PIDB_ALLOW_USER_MODE: '1' },
+    );
+    expect(r.status).toBe(2);
   });
 });
 

@@ -51,4 +51,14 @@ describe('resolveDataDir', () => {
       join('/home/ann', '.claude', 'plugins', 'data', 'pidb-pidb'),
     );
   });
+
+  it('the fallback honours CLAUDE_CONFIG_DIR (a custom Claude config dir) over $HOME/.claude', () => {
+    expect(resolveDataDir({ HOME: '/home/ann', CLAUDE_CONFIG_DIR: '/cfg/claude' }, '')).toBe(
+      join('/cfg/claude', 'plugins', 'data', 'pidb-pidb'),
+    );
+  });
+
+  it('PIDB_PLUGIN_DATA still wins over CLAUDE_CONFIG_DIR', () => {
+    expect(resolveDataDir({ PIDB_PLUGIN_DATA: '/opt/d', CLAUDE_CONFIG_DIR: '/cfg/claude' }, '')).toBe('/opt/d');
+  });
 });

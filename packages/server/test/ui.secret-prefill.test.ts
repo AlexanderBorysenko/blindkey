@@ -44,6 +44,15 @@ describe('prefilled secret form (spec §1.4)', () => {
     expect(values).toEqual(['', '']);
   });
 
+  it('ignores a "!" suffix on a default-sensitive key: the row stays sensitive (spec §1.4, F4)', async () => {
+    const res = await page('/p/acme/secrets/new?keys=' + encodeURIComponent('password!,api_key!,host!'));
+    expect(res.statusCode).toBe(200);
+    const rows = rowsSection(res.body);
+    expect(rows).toContain('value="password"');
+    expect(rows).toContain('value="api_key"');
+    expect([...rows.matchAll(/name="sensitive" value="(\d)"/g)].map((m) => m[1])).toEqual(['1', '1', '0']);
+  });
+
   it('works for the global new-secret form too', async () => {
     const res = await page('/global/secrets/new?name=Root&keys=username!');
     expect(res.statusCode).toBe(200);

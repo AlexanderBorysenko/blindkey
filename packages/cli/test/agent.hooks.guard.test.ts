@@ -609,3 +609,26 @@ describe('Task 9 carried minors', () => {
     if (r.deny) expect(r.reason).not.toMatch(/overwrite/);
   });
 });
+
+describe('guardDecision — escaping agent mode (F1: PIDB_ALLOW_USER_MODE / CLAUDECODE are user-only)', () => {
+  it.each([
+    'PIDB_ALLOW_USER_MODE=1 pidb secret get acme Db',
+    'export PIDB_ALLOW_USER_MODE=1; pidb login https://x',
+    'env PIDB_ALLOW_USER_MODE=1 pidb token list',
+    'CLAUDECODE= pidb secret get acme Db',
+    'CLAUDECODE=0 pidb login https://x',
+    'env -u CLAUDECODE pidb secret get acme Db',
+    'env --unset=CLAUDECODE pidb token list',
+    'unset CLAUDECODE; pidb secret get acme Db',
+    '$env:PIDB_ALLOW_USER_MODE=1; pidb secret get acme Db',
+    'Remove-Item env:CLAUDECODE; pidb secret get acme Db',
+    '$env:CLAUDECODE=""; pidb token list',
+  ])('denies %s', (command) => {
+    expectDeny(bash(command));
+  });
+
+  it('allows ordinary commands that merely mention CLAUDE', () => {
+    expectAllow(bash('echo $CLAUDE_PROJECT_DIR'));
+    expectAllow(bash('pidb status'));
+  });
+});

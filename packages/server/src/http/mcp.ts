@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { DOC_CATEGORIES, PROJECT_STATUSES, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@pidb/shared';
+import { DOC_CATEGORIES, PROJECT_STATUSES, defaultSensitive, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@pidb/shared';
 import type { AppContext } from './context.js';
 import { actorOf, originOf, parseBody } from './helpers.js';
 import { hasScope, type Actor, type Principal } from '../auth/principal.js';
@@ -176,7 +176,9 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
         'Build a prefilled admin-UI link for creating or updating a secret\'s values: give this link to the user; they ' +
         'type the values; then call list_secrets to confirm. Points at the new-secret form for a name that does not ' +
         'exist yet, or at that existing secret\'s edit page otherwise (existing fields are left alone; only keys not ' +
-        'already on the secret get an empty row to fill in). Works with any secrets scope. Never returns or asks for a value.',
+        'already on the secret get an empty row to fill in). sensitive:false is honoured only for keys that are ' +
+        'non-sensitive by default (host, port, url, username, database, public_key); any other key stays sensitive. ' +
+        'Works with any secrets scope. Never returns or asks for a value.',
       inputSchema: {
         project: slugSchema.optional(),
         name: secretNameSchema,
@@ -198,7 +200,10 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
         qs.set('name', name);
         if (description) qs.set('description', description);
         if (tags && tags.length > 0) qs.set('tags', tags.join(','));
-        qs.set('keys', keys.map((k) => (k.sensitive ? k.key : `${k.key}!`)).join(','));
+        // `sensitive: false` is honoured only for keys that are non-sensitive by default (spec §1.5):
+        // an agent must not be able to make e.g. `password` a visible field, whose value list_secrets
+        // would then return to it. The user can still untick the row in the form themselves.
+        qs.set('keys', keys.map((k) => (k.sensitive || defaultSensitive(k.key) ? k.key : `${k.key}!`)).join(','));
         const path = existing ? `${prefix}/secrets/${encodeURIComponent(name)}/edit` : `${prefix}/secrets/new`;
         return { url: `${origin}${path}?${qs.toString()}` };
       }),

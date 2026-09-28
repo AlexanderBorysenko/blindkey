@@ -130,6 +130,8 @@ open http://localhost:8080/login
 - **`pidb` on the Bash PATH** — the agent-mode CLI (`bin/pidb`, `bin/pidb.cmd` → `dist/pidb.mjs`): `connect`, `profile`, `bind`/`unbind`, `status`, `projects`, `docs`, `secrets list`, `search`, and `secret exec|write|env`. The user-only commands (`login`, `token …`, `secret get|set`) are refused.
 - **Skill and commands** — the `pidb` skill (rules, tools, examples) and `/pidb:server`, `/pidb:connect`, `/pidb:bind`, `/pidb:status`.
 
+**Your own `pidb` inside Claude Code.** Claude Code appends the plugin's `bin/` to the *end* of PATH, so if you also installed `pidb` yourself (`npm link`, a global install), Claude's Bash commands would run *your* copy — ungated and unredacted. To prevent that, any `pidb` started with `CLAUDECODE=1` in its environment (Claude Code sets it for every Bash tool command) runs in agent mode: the same refusals, redaction and plugin state (`$CLAUDE_CONFIG_DIR` or `~/.claude`, `plugins/data/pidb-pidb`) as the plugin's shim. That includes commands you run yourself with `!pidb …` in a Claude Code session; for those, opt out explicitly with `!PIDB_ALLOW_USER_MODE=1 pidb …` (PowerShell: `$env:PIDB_ALLOW_USER_MODE='1'; pidb …`). Outside Claude Code nothing changes.
+
 Claude keeps the project docs current itself (`write_document`), stores non-secret facts itself (`update_project`, `upsert_secret_meta`), and uses secret values only by substitution. You approve logins in the browser and type secret values into the admin UI.
 
 ### Security model and its limits

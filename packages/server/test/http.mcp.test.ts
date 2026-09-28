@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { makeTestApp, type TestCtx } from './helpers.js';
 import { createSecret } from '../src/repos/secrets.js';
 import { upsertDocument } from '../src/repos/documents.js';
+import { listAudit } from '../src/repos/audit.js';
 
 let t: TestCtx;
 afterEach(async () => {
@@ -115,6 +116,11 @@ describe('mcp', () => {
       ),
     );
     expect(res).toMatchObject({ slug: 'alpha', name: 'Alpha II', status: 'paused', tags: ['x'], summary: 'updated' });
+
+    // F8: the audit meta lists only the fields actually provided, not every optional tool param.
+    await client.callTool({ name: 'update_project', arguments: { slug: 'alpha', summary: 'only summary' } });
+    const lastUpdate = listAudit(t.db, {}).find((a) => a.action === 'project.update');
+    expect(lastUpdate?.meta).toEqual({ fields: ['summary'] });
 
     const missing = await client.callTool({ name: 'update_project', arguments: { slug: 'nope', summary: 'x' } });
     expect(missing.isError).toBe(true);
@@ -276,6 +282,18 @@ describe('mcp', () => {
       textOf(await client.callTool({ name: 'secret_request_link', arguments: { name: 'GlobalExisting', keys: [{ key: 'password', sensitive: true }] } })),
     );
     expect(new URL(globalExistingLink.url).pathname).toBe('/global/secrets/GlobalExisting/edit');
+
+    // F4: `sensitive: false` is ignored for a default-sensitive key — no "!" marker, so the row
+    // stays sensitive and list_secrets can never later return what the user types there.
+    const forced = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: 'secret_request_link',
+          arguments: { name: 'Forced', keys: [{ key: 'password', sensitive: false }, { key: 'token', sensitive: false }, { key: 'port', sensitive: false }] },
+        }),
+      ),
+    );
+    expect(new URL(forced.url).searchParams.get('keys')).toBe('password,token,port!');
 
     const noScope = await connect(t.token(['projects:read'], ['alpha']));
     const denied = await noScope.callTool({ name: 'secret_request_link', arguments: { name: 'X', keys: [{ key: 'a', sensitive: true }] } });

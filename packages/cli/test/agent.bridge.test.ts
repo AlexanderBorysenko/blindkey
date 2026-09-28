@@ -8,10 +8,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { ToolListChangedNotificationSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createBridge } from '../src/agent/bridge.js';
 import { loadBindings, saveBindings, saveProfiles } from '../src/agent/state.js';
-import { memoryStore, type TokenStore } from '../src/agent/tokenstore.js';
+import { keyringStore, memoryStore, type TokenStore } from '../src/agent/tokenstore.js';
+import { UPSTREAM_TOOL_DESCRIPTORS } from '../src/agent/upstream-tools.js';
 import { createToken } from '../../server/src/repos/tokens.js';
 import { makeServer, type ServerFixture } from './helpers.js';
 
@@ -104,11 +105,77 @@ describe('MCP bridge (spec §2.4)', () => {
     expect(names).toEqual([...UPSTREAM_TOOL_NAMES, ...LOCAL_TOOL_NAMES].sort());
   });
 
-  it('not connected: tools/list returns only the local tools, nothing upstream', async () => {
+  it('not connected: tools/list still lists all 10 allowlisted upstream tools, from the static descriptors (F2)', async () => {
     // No profile configured at all.
     const client = await connectBridge();
+    const tools = (await client.listTools()).tools;
+    expect(tools.map((t) => t.name).sort()).toEqual([...UPSTREAM_TOOL_NAMES, ...LOCAL_TOOL_NAMES].sort());
+    const byName = new Map(tools.map((t) => [t.name, t]));
+    for (const d of UPSTREAM_TOOL_DESCRIPTORS) {
+      expect(byName.get(d.name)?.description).toBe(d.description);
+      expect(byName.get(d.name)?.inputSchema).toEqual(d.inputSchema);
+    }
+  });
+
+  it('not connected because the keyring dependency is still installing: static tools listed too (F2)', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+    store = keyringStore(dataDir, () => {
+      throw new Error('Cannot find module @napi-rs/keyring');
+    });
+    const client = await connectBridge();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual([...LOCAL_TOOL_NAMES].sort());
+    expect(names).toEqual([...UPSTREAM_TOOL_NAMES, ...LOCAL_TOOL_NAMES].sort());
+  });
+
+  it('connected: an allowlisted tool uses the upstream schema/description instead of the static one (F2)', async () => {
+    const fake = await startFakeUpstream(['list_projects']);
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: fake.url } } });
+    await store.set('work', 'irrelevant-fake-upstream-does-not-check-auth');
+    try {
+      const client = await connectBridge();
+      const tools = (await client.listTools()).tools;
+      // The fake's description is just the tool name; every other allowlisted tool keeps its static descriptor.
+      expect(tools.find((t) => t.name === 'list_projects')?.description).toBe('list_projects');
+      const staticSearch = UPSTREAM_TOOL_DESCRIPTORS.find((t) => t.name === 'search');
+      expect(tools.find((t) => t.name === 'search')?.description).toBe(staticSearch?.description);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it('declares tools.listChanged and sends notifications/tools/list_changed on the unconnected → connected edge (F2)', async () => {
+    const client = await connectBridge();
+    expect(client.getServerCapabilities()?.tools?.listChanged).toBe(true);
+    let notified = 0;
+    client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
+      notified += 1;
+    });
+    const before = (await client.callTool({ name: 'list_projects', arguments: {} })) as CallToolResult;
+    expect(before.isError).toBe(true); // not connected yet
+    expect(notified).toBe(0);
+    connectedProfile();
+    const after = (await client.callTool({ name: 'list_projects', arguments: {} })) as CallToolResult;
+    expect(after.isError).toBeFalsy();
+    await vi.waitFor(() => expect(notified).toBe(1));
+    // Staying connected never re-notifies.
+    await client.callTool({ name: 'list_projects', arguments: {} });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(notified).toBe(1);
+  });
+
+  it('watchIntervalMs: notices a connection made elsewhere (pidb connect) without any request (F2)', async () => {
+    const server = createBridge({ cwd, store, dataDir, watchIntervalMs: 10 });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    let notified = 0;
+    client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
+      notified += 1;
+    });
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+    await new Promise((r) => setTimeout(r, 40)); // a few unconnected polls
+    connectedProfile();
+    await vi.waitFor(() => expect(notified).toBe(1));
+    await client.close();
   });
 
   it('tools/call forwards to the upstream server with the bearer token', async () => {
@@ -154,6 +221,20 @@ describe('MCP bridge (spec §2.4)', () => {
     const text = textOf(res);
     expect(text).toMatch(/missing_scope|projects:write/);
     expect(text).toMatch(/pidb connect.*widen/);
+  });
+
+  it('upsert_secret_meta on a sensitive field gets the secret_request_link hint, not the widen hint (F3)', async () => {
+    connectedProfile(['projects:read', 'secrets:meta', 'secrets:meta-write']);
+    const client = await connectBridge();
+    const res = (await client.callTool({
+      name: 'upsert_secret_meta',
+      arguments: { project: 'acme', name: 'Db', fields: [{ key: 'password', value: 'x' }] },
+    })) as CallToolResult;
+    expect(res.isError).toBe(true);
+    const text = textOf(res);
+    expect(text).toMatch(/sensitive fields need secrets:write/);
+    expect(text).toMatch(/use secret_request_link for sensitive fields/);
+    expect(text).not.toMatch(/widen/);
   });
 
   it('project not found (missing OR not approved for this token) gets a connect-to-widen hint naming both possibilities', async () => {

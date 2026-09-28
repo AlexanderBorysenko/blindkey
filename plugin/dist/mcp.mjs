@@ -19425,7 +19425,8 @@ function derivedDataDir(selfPath) {
 }
 function resolveDataDir(env = process.env, selfPath = process.argv[1] ?? "") {
   if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
-  return derivedDataDir(selfPath) ?? join(env.HOME ?? homedir(), ".claude", "plugins", "data", "pidb-pidb");
+  const claudeDir = env.CLAUDE_CONFIG_DIR || join(env.HOME ?? homedir(), ".claude");
+  return derivedDataDir(selfPath) ?? join(claudeDir, "plugins", "data", "pidb-pidb");
 }
 
 // packages/cli/src/agent/state.ts
@@ -19519,10 +19520,311 @@ async function resolveAgentConfig(input) {
   return { profile: profileName, url: profile.url, token, project: binding?.project ?? null };
 }
 
+// packages/cli/src/agent/upstream-tools.ts
+var UPSTREAM_TOOL_DESCRIPTORS = [
+  {
+    "name": "list_projects",
+    "description": "List projects visible to this token (slug, name, status, tags, summary).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_project",
+    "description": "Get a project with its document index and secret metadata (no sensitive values).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "list_documents",
+    "description": "List documents of a project (or global documents when project is omitted).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        }
+      },
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "read_document",
+    "description": 'Read a Markdown document. Omit project for global documents (e.g. "guidelines"). Includes resolved secret refs (keys only).',
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "write_document",
+    "description": "Create or update a Markdown document. Rejected if it looks like it contains secret values or references unknown secrets; pass force=true to override.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "context",
+            "architecture",
+            "deploy",
+            "conventions",
+            "client",
+            "notes",
+            "guidelines"
+          ]
+        },
+        "body_md": {
+          "type": "string",
+          "maxLength": 2e6
+        },
+        "force": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "slug",
+        "title",
+        "category",
+        "body_md"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "search",
+    "description": "Search project names, document text and secret names. Never searches secret values.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "list_secrets",
+    "description": "List secret metadata for a project (or global when project omitted): name, description, tags, field keys and non-sensitive values.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        }
+      },
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "update_project",
+    "description": "Update a project's name, status, tags or summary (never its slug). Requires projects:write.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "paused",
+            "archived"
+          ]
+        },
+        "tags": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 5e3
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "upsert_secret_meta",
+    "description": "Create a secret (project omitted for global) or patch an existing one's description/tags/fields, by name. Requires secrets:meta-write. Fields may only be keys that are non-sensitive both before and after (e.g. host, port, url, username, database, public_key) — creating or touching a sensitive field is refused with a 403; use secret_request_link instead so the user types the value in.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 5e3
+        },
+        "tags": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "fields": {
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 1e6
+              }
+            },
+            "required": [
+              "key",
+              "value"
+            ]
+          }
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "secret_request_link",
+    "description": "Build a prefilled admin-UI link for creating or updating a secret's values: give this link to the user; they type the values; then call list_secrets to confirm. Points at the new-secret form for a name that does not exist yet, or at that existing secret's edit page otherwise (existing fields are left alone; only keys not already on the secret get an empty row to fill in). sensitive:false is honoured only for keys that are non-sensitive by default (host, port, url, username, database, public_key); any other key stays sensitive. Works with any secrets scope. Never returns or asks for a value.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 5e3
+        },
+        "tags": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "keys": {
+          "minItems": 1,
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+              },
+              "sensitive": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "key",
+              "sensitive"
+            ]
+          }
+        }
+      },
+      "required": [
+        "name",
+        "keys"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  }
+];
+
 // packages/cli/src/agent/bridge.ts
 var CONNECT_HINT = "not connected — run `pidb connect`";
 var WIDEN_HINT = "the token lacks access — run `pidb connect` to widen";
 var NOT_ALLOWED = "tool not allowed by the pidb plugin";
+var SENSITIVE_HINT = "use secret_request_link for sensitive fields — the user types the value in the admin UI";
 var LOCAL_TOOLS = [
   {
     name: "pidb_status",
@@ -19548,18 +19850,7 @@ var LOCAL_TOOLS = [
   }
 ];
 var LOCAL_TOOL_NAMES = new Set(LOCAL_TOOLS.map((t) => t.name));
-var ALLOWED_UPSTREAM_TOOLS = /* @__PURE__ */ new Set([
-  "list_projects",
-  "get_project",
-  "list_documents",
-  "read_document",
-  "write_document",
-  "search",
-  "list_secrets",
-  "update_project",
-  "upsert_secret_meta",
-  "secret_request_link"
-]);
+var ALLOWED_UPSTREAM_TOOLS = new Set(UPSTREAM_TOOL_DESCRIPTORS.map((t) => t.name));
 function textResult(text, isError = false) {
   return { content: [{ type: "text", text }], isError };
 }
@@ -19571,6 +19862,12 @@ function isScopeError(result) {
   const first = result.content[0];
   const text = first && first.type === "text" ? first.text : "";
   return /^(missing_scope|forbidden):/.test(text);
+}
+function isSensitiveFieldError(result) {
+  if (result.isError !== true) return false;
+  const first = result.content[0];
+  const text = first && first.type === "text" ? first.text : "";
+  return /^forbidden: sensitive fields need secrets:write\b/.test(text);
 }
 function isProjectNotFound(result) {
   if (result.isError !== true) return false;
@@ -19621,11 +19918,31 @@ function createBridge(deps) {
     return client;
   }
   async function resolveConfig() {
+    let cfg;
     try {
-      return await resolveAgentConfig({ cwd, env, store, dataDir });
+      cfg = await resolveAgentConfig({ cwd, env, store, dataDir });
     } catch (err) {
-      if (err instanceof CliError) return null;
+      if (err instanceof CliError) {
+        noteConnected(false);
+        return null;
+      }
       throw err;
+    }
+    noteConnected(true);
+    return cfg;
+  }
+  let connected;
+  let watchTimer;
+  function noteConnected(now) {
+    const was = connected;
+    connected = now;
+    if (now && watchTimer) {
+      clearInterval(watchTimer);
+      watchTimer = void 0;
+    }
+    if (was === false && now) {
+      server.sendToolListChanged().catch(() => {
+      });
     }
   }
   function statusCodeOf(err) {
@@ -19639,6 +19956,7 @@ function createBridge(deps) {
   async function attemptUpstreamCall(cfg, name, args) {
     const client = await getUpstreamClient(cfg.url, cfg.token);
     const result = await client.callTool({ name, arguments: args });
+    if (isSensitiveFieldError(result)) return withHint(result, SENSITIVE_HINT);
     if (isScopeError(result)) return withWidenHint(result);
     return isProjectNotFound(result) ? withHint(result, PROJECT_NOT_FOUND_HINT) : result;
   }
@@ -19699,7 +20017,21 @@ function createBridge(deps) {
     const list = Object.entries(profiles.profiles).map(([name, p]) => ({ name, url: p.url, default: name === profiles.default }));
     return textResult(JSON.stringify({ default: profiles.default, profiles: list }, null, 2));
   }
-  const server = new Server({ name: "pidb-bridge", version: "0.1.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "pidb-bridge", version: "0.1.0" }, { capabilities: { tools: { listChanged: true } } });
+  if (deps.watchIntervalMs !== void 0 && deps.watchIntervalMs > 0) {
+    watchTimer = setInterval(() => {
+      if (connected === true) return;
+      resolveConfig().catch(() => {
+      });
+    }, deps.watchIntervalMs);
+    watchTimer.unref?.();
+    const prevOnClose = server.onclose;
+    server.onclose = () => {
+      if (watchTimer) clearInterval(watchTimer);
+      watchTimer = void 0;
+      prevOnClose?.();
+    };
+  }
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     let cfg = null;
     try {
@@ -19717,8 +20049,9 @@ function createBridge(deps) {
         if (status === 401 || status === 403) dropUpstreamClient(cfg.url, cfg.token);
       }
     }
-    const allowedUpstream = upstreamTools.filter((t) => ALLOWED_UPSTREAM_TOOLS.has(t.name) && !LOCAL_TOOL_NAMES.has(t.name));
-    return { tools: [...allowedUpstream, ...LOCAL_TOOLS] };
+    const live = new Map(upstreamTools.filter((t) => ALLOWED_UPSTREAM_TOOLS.has(t.name)).map((t) => [t.name, t]));
+    const upstreamList = UPSTREAM_TOOL_DESCRIPTORS.map((t) => live.get(t.name) ?? t);
+    return { tools: [...upstreamList, ...LOCAL_TOOLS] };
   });
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
@@ -19781,7 +20114,7 @@ function keyringStore(dataDir, loader = defaultLoader(dataDir)) {
 async function main() {
   const env = process.env;
   const dataDir = resolveDataDir(env);
-  const server = createBridge({ cwd: process.cwd(), env, store: keyringStore(dataDir), dataDir });
+  const server = createBridge({ cwd: process.cwd(), env, store: keyringStore(dataDir), dataDir, watchIntervalMs: 15e3 });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

@@ -114,8 +114,37 @@ describe('sessionContext — connected and bound: fetches real project detail', 
 
     const context = await sessionContext({ cwd, dataDir, store });
 
-    expect(context).toContain('was not found on the server');
+    expect(context).toContain(
+      'Project "does-not-exist" not found or not approved for this token — run `pidb connect` to approve it, or `pidb bind` another.',
+    );
     expect(context.length).toBeLessThanOrEqual(4096);
+    expectGoldenRules(context);
+  });
+
+  it('401 (expired/revoked token) → connect hint (F5)', async () => {
+    s.project('acme');
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+    saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });
+    await store.set('work', 'pidb_revoked_or_bogus_token');
+
+    const context = await sessionContext({ cwd, dataDir, store });
+
+    expect(context).toContain('token expired or revoked — run `pidb connect`');
+    expect(context).not.toContain('pidb_revoked_or_bogus_token');
+    expect(context).not.toContain('unreachable');
+    expectGoldenRules(context);
+  });
+
+  it('403 (token lacks scope) → widen hint (F5)', async () => {
+    s.project('acme');
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+    saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });
+    await store.set('work', s.token(['docs:read']));
+
+    const context = await sessionContext({ cwd, dataDir, store });
+
+    expect(context).toContain('the token lacks access to project "acme" — run `pidb connect` to widen');
+    expect(context).not.toContain('unreachable');
     expectGoldenRules(context);
   });
 });

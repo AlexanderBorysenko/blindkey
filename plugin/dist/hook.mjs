@@ -153,7 +153,8 @@ function derivedDataDir(selfPath) {
 }
 function resolveDataDir(env = process.env, selfPath = process.argv[1] ?? "") {
   if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
-  return derivedDataDir(selfPath) ?? join2(env.HOME ?? homedir(), ".claude", "plugins", "data", "pidb-pidb");
+  const claudeDir = env.CLAUDE_CONFIG_DIR || join2(env.HOME ?? homedir(), ".claude");
+  return derivedDataDir(selfPath) ?? join2(claudeDir, "plugins", "data", "pidb-pidb");
 }
 
 // packages/cli/src/agent/hooks/index.ts
@@ -1211,7 +1212,11 @@ function targetsConfiguredServer(command, segments, ctx) {
   if (!segments.some((s) => NETWORK_WORDS.has(s.word ?? ""))) return false;
   return ctx.serverUrls.some((url) => commandMentionsUrl(command, url));
 }
+var AGENT_MODE_ESCAPE_RE = /\bPIDB_ALLOW_USER_MODE\b|\bCLAUDECODE\s*=|(?:\s-u\s*|--unset[=\s]\s*|\bunset\s+(?:-v\s+)?)CLAUDECODE\b|env:CLAUDECODE\b/i;
 function guardBashCommand(command, cwd, ctx) {
+  if (AGENT_MODE_ESCAPE_RE.test(command)) {
+    return deny("switching pidb out of agent mode (PIDB_ALLOW_USER_MODE / CLAUDECODE) is for the user only — ask the user to run this themselves.");
+  }
   const segments = expandSegments(command, cwd, ctx);
   if (runsDisabledPidbCommand(segments)) {
     return deny(
@@ -1449,7 +1454,7 @@ var GOLDEN_RULES = [
   "Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.",
   'Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env PIDB_<KEY>), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.',
   "Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.",
-  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, username) go into non-sensitive fields via `upsert_secret_meta`.',
+  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, url, username, database, public_key) go into non-sensitive fields via `upsert_secret_meta`; any other key → `secret_request_link`.',
   "401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.",
   "Never use curl against the pidb server; use MCP tools / the CLI."
 ];
@@ -1466,7 +1471,7 @@ async function fetchProjectDetail(url, token, project, deps, deadline) {
     const client = new PidbClient({ url, token }, fetchImpl);
     return await withDeadline(client.json("GET", `/api/v1/projects/${encodeURIComponent(project)}`), deadline);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
+    if (err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 404)) return err.status;
     return "down";
   }
 }
@@ -1515,8 +1520,18 @@ async function buildBody(deps, deadline) {
     lines.push(`pidb server (${profile.url}) is unreachable right now — project details unavailable this session.`);
     return lines;
   }
-  if (detail === null) {
-    lines.push(`Project "${binding.project}" was not found on the server (renamed or removed?).`);
+  if (detail === 401) {
+    lines.push("pidb: token expired or revoked — run `pidb connect`.");
+    return lines;
+  }
+  if (detail === 403) {
+    lines.push(`pidb: the token lacks access to project "${binding.project}" — run \`pidb connect\` to widen.`);
+    return lines;
+  }
+  if (detail === 404) {
+    lines.push(
+      `Project "${binding.project}" not found or not approved for this token — run \`pidb connect\` to approve it, or \`pidb bind\` another.`
+    );
     return lines;
   }
   if (detail.summary) lines.push(`Summary: ${detail.summary}`);

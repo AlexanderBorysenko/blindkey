@@ -47,7 +47,9 @@ export function updateProjectFor(ctx: AppContext, actor: Actor, slug: string, pa
   }
   const project = loadProjectFor(ctx, actor.principal, slug);
   const updated = updateProject(ctx.db, project.id, patch);
-  auditAs(ctx, actor, { action: 'project.update', target_type: 'project', target_id: project.id, meta: { fields: Object.keys(patch) } });
+  // Only the keys actually provided — MCP's update_project passes every optional param, undefined or not.
+  const providedFields = Object.keys(patch).filter((k) => patch[k as keyof ProjectPatch] !== undefined);
+  auditAs(ctx, actor, { action: 'project.update', target_type: 'project', target_id: project.id, meta: { fields: providedFields } });
   return publicProject(updated);
 }
 
