@@ -70,6 +70,19 @@ describe('hooks main.ts — real subprocess', () => {
     expect(r.stderr).toMatch(/unknown or missing kind/);
   });
 
+  it('redact: a >1 MB result piped through the real process arrives complete and valid JSON', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-hooks-main-'));
+    const stdout = `PASSWORD=hunter2\n${'lorem ipsum dolor\n'.repeat(70_000)}END-MARKER`;
+    const input = JSON.stringify({ hook_event_name: 'PostToolUse', cwd: '/repo', tool_name: 'Bash', tool_input: { command: 'x' }, tool_response: { stdout } });
+    const r = await runHookMain('redact', input, { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } as Record<string, string>);
+    expect(r.status).toBe(0);
+    expect(r.stdout.length).toBeGreaterThan(1_000_000);
+    const parsed = JSON.parse(r.stdout) as { hookSpecificOutput: { updatedToolOutput: { stdout: string } } };
+    const out = parsed.hookSpecificOutput.updatedToolOutput.stdout;
+    expect(out.startsWith('PASSWORD=[pidb:redacted]\n')).toBe(true);
+    expect(out.endsWith('END-MARKER')).toBe(true);
+  });
+
   it('malformed stdin still exits 0 (never crashes the process)', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'pidb-hooks-main-'));
     const r = await runHookMain('redact', 'not json', { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } as Record<string, string>);

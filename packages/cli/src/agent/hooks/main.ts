@@ -25,8 +25,8 @@ async function readStdin(): Promise<string> {
 /**
  * Reads the hook kind from argv[2], the hook JSON from stdin, runs it, and writes the result —
  * always exiting 0 regardless of outcome (a hook that fails Claude Code's tool loop is worse than
- * one that silently allows/skips/degrades, spec §3.1–§3.3). Calls `process.exit(0)` itself (Fix round
- * 2, reviewer-flagged out-of-scope note) rather than only setting `process.exitCode` — a
+ * one that silently allows/skips/degrades, spec §3.1–§3.3). Calls `process.exit(0)` itself — once the
+ * stdout write has flushed (Fix round 4) — rather than only setting `process.exitCode`: a
  * `withDeadline`-bounded timer or an in-flight `fetch` that "lost" the race can otherwise keep an
  * open handle alive and prevent Node from ever exiting on its own, hanging Claude Code's hook call
  * until *that* work finishes minutes later, long after the JSON result was already written.
@@ -47,9 +47,22 @@ export async function main(): Promise<void> {
   }
 
   const result = await runHook(kindArg, stdinText, process.env);
-  if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) console.error(result.stderr);
-  process.exit(0);
+  exitAfterWrite(result.stdout);
+}
+
+/**
+ * Writes `text` to stdout and exits 0 only once it has been fully flushed (Fix round 4): calling
+ * `process.exit` right after `stdout.write` truncates a large (>64 KB) payload when stdout is a pipe,
+ * since pipe writes are asynchronous on POSIX. Exiting from the write callback still guarantees a
+ * lingering timer/fetch can never keep the process alive once the result is out.
+ */
+function exitAfterWrite(text: string): void {
+  process.exitCode = 0;
+  if (!text) {
+    process.exit(0);
+  }
+  process.stdout.write(text, () => process.exit(0));
 }
 
 // Run only when this module is the entry point, so tests can import it freely. See `cli.ts`'s own

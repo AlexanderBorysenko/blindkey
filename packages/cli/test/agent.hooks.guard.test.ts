@@ -438,7 +438,8 @@ describe('guardDecision — rule 3: protected paths (Read/Grep/Glob/Edit/Write f
     });
 
     it('allows Grep whose pattern (not path) happens to look path-like', () => {
-      expectAllow(tool('Grep', { pattern: '/home/alex/.claude/plugins/data/pidb-pidb/profiles.json' }));
+      // explicit `path` — with none, Grep searches cwd, which (Fix round 4) holds a written file here.
+      expectAllow(tool('Grep', { pattern: '/home/alex/.claude/plugins/data/pidb-pidb/profiles.json', path: 'src' }));
     });
 
     it('denies a Glob whose pattern (no explicit `path`) resolves against cwd into the data dir', () => {
