@@ -52,6 +52,9 @@ interface ErrorBody {
 const MAX_WAIT_MS = 10 * 60_000;
 /** Fallback poll interval (seconds) when the server omits `interval` or sends something unusable. */
 const DEFAULT_INTERVAL_S = 5;
+/** Hard cap on the poll interval (seconds), fix round 2 — a malicious/broken `interval` (or one grown
+ * by repeated `slow_down` backoff) must never make a single `sleep()` absurdly long. */
+const MAX_INTERVAL_S = 60;
 /** Backoff added to the poll interval (seconds) on a `429`/`slow_down` response. */
 const SLOW_DOWN_BACKOFF_S = 5;
 /** Per-request network timeout — a hung connect/poll request must not block the CLI forever. */
@@ -61,43 +64,55 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Strips control characters (including ANSI escapes) before anything server-supplied is printed
- * to the terminal — a compromised/misbehaving server must not be able to smuggle escape sequences
- * or spoof extra lines into the CLI's own output. */
+/** Strips control characters (including ANSI escapes) and bidi-override/isolate/mark characters
+ * (fix round 2, Minor 4 — `U+202A`-`U+202E`, `U+2066`-`U+2069`, `U+200E`/`U+200F` can reorder how
+ * surrounding text *displays* without changing its content, another way a hostile server could spoof
+ * what the terminal shows) before anything server-supplied is printed to the terminal. */
 function sanitizeForTerminal(s: string): string {
-  return s.replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+  return s.replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, '');
 }
 
 const USER_CODE_RE = /^[A-Z]{4}-[A-Z]{4}$/;
 
 /**
- * Strict allowlist check (fix round 1, Critical 2) before ever opening a browser to a
- * server-supplied url: http(s) only, same origin as the profile's own configured server, path
- * exactly `/connect`, query exactly `?code=<the code we were just given>`, and the code itself
- * matches the server's own generation format. Anything else is refused — the verification line is
- * still printed (sanitized) so the user can decide for themselves whether to open it.
+ * Strict allowlist check (fix round 1, Critical 2; tightened in fix round 2) before ever opening a
+ * browser to a server-supplied url: http(s) only, no userinfo (`user:pass@`) and no fragment, same
+ * origin as the profile's own configured server, path exactly `/connect`, query exactly
+ * `?code=<the code we were just given>`, the code itself matching the server's own generation
+ * format, and the raw string identical to `URL`'s own canonical `.href` for it (the WHATWG URL parser
+ * silently strips embedded tabs/newlines and leading/trailing C0 controls, so a raw string that
+ * *doesn't* round-trip unchanged is evidence of exactly that kind of smuggling). Returns the parsed
+ * `URL` (so the caller opens its canonical `.href`, never the untrusted raw string) or `null`.
  */
-export function isSafeVerificationUrl(rawUrl: string, userCode: string, profileUrl: string): boolean {
-  if (!USER_CODE_RE.test(userCode)) return false;
+function parseSafeVerificationUrl(rawUrl: string, userCode: string, profileUrl: string): URL | null {
+  if (!USER_CODE_RE.test(userCode)) return null;
   let target: URL;
   let origin: URL;
   try {
     target = new URL(rawUrl);
     origin = new URL(profileUrl);
   } catch {
-    return false;
+    return null;
   }
-  if (target.protocol !== 'http:' && target.protocol !== 'https:') return false;
-  if (target.origin !== origin.origin) return false;
-  if (target.pathname !== '/connect') return false;
-  if (target.search !== `?code=${userCode}`) return false;
-  return true;
+  if (rawUrl !== target.href) return null;
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
+  if (target.username !== '' || target.password !== '') return null;
+  if (target.hash !== '') return null;
+  if (target.origin !== origin.origin) return null;
+  if (target.pathname !== '/connect') return null;
+  if (target.search !== `?code=${userCode}`) return null;
+  return target;
+}
+
+/** Boolean wrapper around {@link parseSafeVerificationUrl} for callers that only need the verdict. */
+export function isSafeVerificationUrl(rawUrl: string, userCode: string, profileUrl: string): boolean {
+  return parseSafeVerificationUrl(rawUrl, userCode, profileUrl) !== null;
 }
 
 function sanitizeInterval(raw: unknown): number {
   const n = typeof raw === 'number' ? raw : NaN;
   if (!Number.isFinite(n) || n < 1) return DEFAULT_INTERVAL_S;
-  return Math.floor(n);
+  return Math.min(MAX_INTERVAL_S, Math.floor(n));
 }
 
 function sanitizeExpiresIn(raw: unknown): number {
@@ -185,10 +200,14 @@ export async function runConnect(opts: ConnectOptions, deps: ConnectDeps): Promi
     throw new CliError(`could not start connect: ${body.error ?? `HTTP ${startRes.status}`}`);
   }
   const start = await readJson<StartResponse>(startRes);
+  if (typeof start.verification_url !== 'string' || typeof start.user_code !== 'string') {
+    throw new CliError('server returned a malformed connect response (non-string verification_url/user_code)');
+  }
 
   out.write(`Open ${sanitizeForTerminal(start.verification_url)} and approve code ${sanitizeForTerminal(start.user_code)}\n`);
-  if (isSafeVerificationUrl(start.verification_url, start.user_code, url)) {
-    openBrowserImpl(start.verification_url, platform);
+  const validatedUrl = parseSafeVerificationUrl(start.verification_url, start.user_code, url);
+  if (validatedUrl) {
+    openBrowserImpl(validatedUrl.href, platform);
   } else {
     out.write('warning: the server-provided verification url looks unexpected — not opening a browser automatically\n');
   }
@@ -198,7 +217,10 @@ export async function runConnect(opts: ConnectOptions, deps: ConnectDeps): Promi
   let interval = sanitizeInterval(start.interval);
   let result: PollSuccess | undefined;
   while (now() < deadline) {
-    await sleep(interval * 1000);
+    // Never sleep past the deadline (fix round 2, Important 2 follow-up): a capped-but-still-large
+    // interval (or one grown by repeated backoff below) must not make the final wait overshoot the
+    // point where this loop would otherwise have already given up.
+    await sleep(Math.min(interval * 1000, deadline - now()));
     const pollRes = await fetchImpl(`${url}/api/v1/connect/poll`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -211,12 +233,12 @@ export async function runConnect(opts: ConnectOptions, deps: ConnectDeps): Promi
     }
     if (pollRes.status === 428) continue; // authorization_pending — keep polling
     if (pollRes.status === 429) {
-      interval += SLOW_DOWN_BACKOFF_S; // rate limited — slow down, don't give up
+      interval = Math.min(MAX_INTERVAL_S, interval + SLOW_DOWN_BACKOFF_S); // rate limited — slow down, don't give up
       continue;
     }
     const body = await readJson<ErrorBody>(pollRes).catch(() => ({}) as ErrorBody);
     if (body.error === 'slow_down') {
-      interval += SLOW_DOWN_BACKOFF_S;
+      interval = Math.min(MAX_INTERVAL_S, interval + SLOW_DOWN_BACKOFF_S);
       continue;
     }
     if (pollRes.status === 403) throw new CliError('the connect request was denied', EXIT_AUTH);

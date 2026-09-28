@@ -111,6 +111,29 @@ describe('createRedactor', () => {
   });
 });
 
+describe('createRedactor: fix round 2 (lone surrogate must not crash)', () => {
+  it('a value containing a lone surrogate does not throw when building the redactor', () => {
+    const value = `secret-\uD800-value`; // lone high surrogate, no low surrogate pair
+    expect(() => createRedactor([value])).not.toThrow();
+  });
+
+  it('still redacts the raw occurrence of a value containing a lone surrogate', () => {
+    const value = `secret-\uD800-value`;
+    const r = createRedactor([value]);
+    const out = r.push(`before ${value} after`) + r.flush();
+    expect(out).toBe(`before ${REDACTED} after`);
+  });
+
+  it('does not throw even when pushing chunks (encodeURIComponent is only ever called at construction)', () => {
+    const value = `secret-\uD800-value`;
+    const r = createRedactor([value]);
+    expect(() => {
+      r.push('some output');
+      r.flush();
+    }).not.toThrow();
+  });
+});
+
 describe('createRedactor: fix round 1 repros (complete match overlapping the held-back tail)', () => {
   it('repro 1: a complete match followed by a partial-lookalike tail, split across chunks', () => {
     const r = createRedactor(['hunter2hunter2']);

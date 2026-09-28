@@ -151,4 +151,22 @@ describe('isPathInside (fix round 1, Minor 7)', () => {
     symlinkSync(realDir, linkedDataDir, 'dir');
     expect(isPathInside(linkedDataDir, join(realDir, 'secret.txt'))).toBe(true);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'fix round 2, Minor 3: a data dir that does not exist yet, reached through a symlinked ancestor, still matches its own descendants',
+    () => {
+      const realBase = mkdtempSync(join(tmpdir(), 'pidb-agent-state-realbase-'));
+      const symlinkedBase = join(tmpdir(), `pidb-agent-state-symlinkbase-${process.pid}-${Date.now()}`);
+      symlinkSync(realBase, symlinkedBase, 'dir');
+      // Neither the data dir itself nor the candidate file exist yet — only `symlinkedBase` (a
+      // symlink to `realBase`) does.
+      const notYetCreatedDataDir = join(symlinkedBase, 'plugin-data');
+      const out = join(notYetCreatedDataDir, 'secret.txt');
+      expect(isPathInside(notYetCreatedDataDir, out)).toBe(true);
+      // A path that only looks related textually (same symlinked prefix, different subdirectory)
+      // is still correctly rejected.
+      const sibling = join(symlinkedBase, 'other-dir', 'secret.txt');
+      expect(isPathInside(notYetCreatedDataDir, sibling)).toBe(false);
+    },
+  );
 });

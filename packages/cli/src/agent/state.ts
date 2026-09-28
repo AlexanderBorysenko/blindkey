@@ -99,15 +99,6 @@ export function recordWritten(dataDir: string, absPath: string): void {
   writeJsonAtomic(writtenPath(dataDir), data);
 }
 
-/** Resolves symlinks in `p` (an existing path); returns `p` itself, unresolved, when that fails. */
-function safeRealpath(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-}
-
 /**
  * Realpath-resolves `p` as far as the filesystem allows: walks up to the nearest existing ancestor
  * (the target itself usually doesn't exist yet — we're about to create it), resolves *that*
@@ -134,14 +125,17 @@ function realCandidatePath(p: string): string {
 }
 
 /**
- * True when `candidate` is `dir` itself or nested inside it. Both sides are realpath-resolved (fix
- * round 1, Minor 7) so a symlink cannot be used to make a path that's textually inside `dir` actually
- * land somewhere else, or vice versa. `rel === '..'`/`rel.startsWith('..' + sep)` is the precise
- * "escaped upward" check — testing `rel.startsWith('..')` alone would misfire on a legitimately
- * nested entry whose name happens to start with two dots (e.g. `dir/..hidden`).
+ * True when `candidate` is `dir` itself or nested inside it. Both sides go through
+ * `realCandidatePath` (fix round 1, Minor 7; `dir` also, fix round 2, Minor 3 — a data dir that
+ * doesn't exist yet, or that's reached through a symlinked ancestor such as a symlinked `tmp`, needs
+ * the same nearest-existing-ancestor walk as the candidate does) so a symlink cannot be used to make
+ * a path that's textually inside `dir` actually land somewhere else, or vice versa. `rel === '..'`/
+ * `rel.startsWith('..' + sep)` is the precise "escaped upward" check — testing `rel.startsWith('..')`
+ * alone would misfire on a legitimately nested entry whose name happens to start with two dots (e.g.
+ * `dir/..hidden`).
  */
 export function isPathInside(dir: string, candidate: string): boolean {
-  const base = safeRealpath(resolve(dir));
+  const base = realCandidatePath(dir);
   const target = realCandidatePath(candidate);
   if (base === target) return true;
   const rel = relative(base, target);

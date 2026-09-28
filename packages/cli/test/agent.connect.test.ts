@@ -305,6 +305,23 @@ describe('isSafeVerificationUrl (fix round 1, Critical 2)', () => {
   it('rejects when the profile url itself is unparseable', () => {
     expect(isSafeVerificationUrl(`https://good.example.com/connect?code=${code}`, code, 'not a url')).toBe(false);
   });
+
+  it('rejects userinfo (fix round 2, Minor 1)', () => {
+    expect(isSafeVerificationUrl(`https://user:pass@good.example.com/connect?code=${code}`, code, profileUrl)).toBe(false);
+  });
+
+  it('rejects a fragment (fix round 2, Minor 1)', () => {
+    expect(isSafeVerificationUrl(`https://good.example.com/connect?code=${code}#frag`, code, profileUrl)).toBe(false);
+  });
+
+  it('rejects a raw string that does not round-trip through URL unchanged (fix round 2, Minor 1 — whitespace/tab smuggling)', () => {
+    // A tab embedded in the url: WHATWG URL parsing silently strips it, so `target.href` would
+    // differ from the raw string that actually arrived.
+    const withTab = `https://good.example.com/con\tnect?code=${code}`;
+    expect(isSafeVerificationUrl(withTab, code, profileUrl)).toBe(false);
+    const leadingWhitespace = ` https://good.example.com/connect?code=${code}`;
+    expect(isSafeVerificationUrl(leadingWhitespace, code, profileUrl)).toBe(false);
+  });
 });
 
 describe('runConnect: verification url validation gates the browser open (Critical 2)', () => {
@@ -691,5 +708,174 @@ describe('runConnect: expires_at null (Minor 9)', () => {
     expect(result.text).toContain('expires: never');
     expect(result.json).toMatchObject({ expires_at: null });
     expect(loadProfiles(dataDir).profiles.work!.expires_at).toBeNull();
+  });
+});
+
+describe('runConnect: fix round 2', () => {
+  it('a non-string verification_url raises a CliError instead of misbehaving silently (Minor 4)', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://fake.invalid' } } });
+    const { now, sleep } = fakeClock(0);
+    const out = fakeOut();
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({ device_code: 'dc', user_code: 'AAAA-BBBB', verification_url: 12345, expires_in: 30, interval: 3 }),
+        { status: 201, headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof fetch;
+    await expect(
+      runConnect({}, { cwd: dataDir, store, dataDir, now, sleep, out, fetchImpl, openBrowserImpl: () => ({ cmd: 'open', args: [] }) }),
+    ).rejects.toBeInstanceOf(CliError);
+  });
+
+  it('a non-string user_code raises a CliError', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://fake.invalid' } } });
+    const { now, sleep } = fakeClock(0);
+    const out = fakeOut();
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          device_code: 'dc',
+          user_code: null,
+          verification_url: 'https://fake.invalid/connect?code=AAAA-BBBB',
+          expires_in: 30,
+          interval: 3,
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof fetch;
+    await expect(
+      runConnect({}, { cwd: dataDir, store, dataDir, now, sleep, out, fetchImpl, openBrowserImpl: () => ({ cmd: 'open', args: [] }) }),
+    ).rejects.toBeInstanceOf(CliError);
+  });
+
+  it('sanitizeForTerminal strips bidi override/isolate/mark characters, not just ASCII controls (Minor 4)', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://fake.invalid' } } });
+    const { now, sleep } = fakeClock(0);
+    const out = fakeOut();
+    const fetchImpl = (async (url: string | URL) => {
+      const href = String(url);
+      if (href.endsWith('/connect/start')) {
+        return new Response(
+          JSON.stringify({
+            device_code: 'dc',
+            user_code: 'AAAA‮BBBB', // RLO (right-to-left override)
+            verification_url: 'https://fake.invalid/connect?code=AAAA⁦BBBB', // LRI
+            expires_in: 5,
+            interval: 5,
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ error: 'authorization_pending' }), { status: 428 });
+    }) as unknown as typeof fetch;
+
+    const connectPromise = runConnect(
+      {},
+      { cwd: dataDir, store, dataDir, now, sleep, out, fetchImpl, openBrowserImpl: () => ({ cmd: 'open', args: [] }) },
+    );
+    const settlement = connectPromise.catch((e: unknown) => e);
+    const line = await waitForLine(out);
+    expect(line).not.toContain('‮');
+    expect(line).not.toContain('⁦');
+    expect(line).toContain('AAAABBBB');
+    const err = await settlement;
+    expect(err).toBeInstanceOf(CliError);
+  });
+
+  it('opens the canonically-parsed URL (.href), matching the raw string for anything that validates', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+    const { now, sleep } = fakeClock();
+    const out = fakeOut();
+    let openedWith = '';
+    const connectPromise = runConnect(
+      {},
+      {
+        cwd: dataDir,
+        store,
+        dataDir,
+        now,
+        sleep,
+        out,
+        openBrowserImpl: (u) => {
+          openedWith = u;
+          return { cmd: 'open', args: [u] };
+        },
+      },
+    );
+    const line = await waitForLine(out);
+    approveByLine(line, ['projects:read'], ['acme']);
+    await connectPromise;
+    const printedUrl = line.split(' ')[1]!;
+    expect(openedWith).toBe(new URL(printedUrl).href);
+  });
+
+  it('poll interval is capped at 60s even after repeated slow_down backoff (Important 2 follow-up)', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://fake.invalid' } } });
+    let clock = 0;
+    const now = () => clock;
+    const sleepCalls: number[] = [];
+    const sleep = async (ms: number) => {
+      sleepCalls.push(ms);
+      clock += ms;
+    };
+    const out = fakeOut();
+    let pollCount = 0;
+    const fetchImpl = (async (url: string | URL) => {
+      const href = String(url);
+      if (href.endsWith('/connect/start')) {
+        return new Response(
+          JSON.stringify({
+            device_code: 'dc',
+            user_code: 'AAAA-BBBB',
+            verification_url: 'https://fake.invalid/connect?code=AAAA-BBBB',
+            expires_in: 600,
+            interval: 55,
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      pollCount++;
+      if (pollCount <= 3) return new Response(JSON.stringify({ error: 'rate_limited' }), { status: 429 });
+      return new Response(
+        JSON.stringify({ token: 'pidb_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: null }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    await runConnect({}, { cwd: dataDir, store, dataDir, now, sleep, out, fetchImpl, openBrowserImpl: () => ({ cmd: 'open', args: [] }) });
+    // 55s, then +5s would be 60s (still allowed), then +5s again would be 65s — capped to 60s.
+    expect(sleepCalls).toEqual([55000, 60000, 60000, 60000]);
+  });
+
+  it('each sleep is capped at the time left before the deadline, never overshooting it', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://fake.invalid' } } });
+    let clock = 0;
+    const now = () => clock;
+    const sleepCalls: number[] = [];
+    const sleep = async (ms: number) => {
+      sleepCalls.push(ms);
+      clock += ms;
+    };
+    const out = fakeOut();
+    const fetchImpl = (async (url: string | URL) => {
+      const href = String(url);
+      if (href.endsWith('/connect/start')) {
+        return new Response(
+          JSON.stringify({
+            device_code: 'dc',
+            user_code: 'AAAA-BBBB',
+            verification_url: 'https://fake.invalid/connect?code=AAAA-BBBB',
+            expires_in: 25, // not a clean multiple of interval
+            interval: 10,
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ error: 'authorization_pending' }), { status: 428 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      runConnect({}, { cwd: dataDir, store, dataDir, now, sleep, out, fetchImpl, openBrowserImpl: () => ({ cmd: 'open', args: [] }) }),
+    ).rejects.toMatchObject({ message: expect.stringMatching(/timed out/) });
+    // 10s, 10s, then only the remaining 5s — never a 4th sleep, never overshooting 25s.
+    expect(sleepCalls).toEqual([10000, 10000, 5000]);
   });
 });

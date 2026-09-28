@@ -19,10 +19,20 @@ const MIN_VALUE_LEN = 4;
  * JSON-escaped forms, when those differ from the raw value (an all-alphanumeric value's base64 form
  * usually differs, but a value that's already URL-safe might not have a distinct `encodeURIComponent`
  * form, so only add it when it does).
+ *
+ * `encodeURIComponent` throws a `URIError` on a lone (unpaired) surrogate — a value containing one
+ * (however it got there) must not crash redaction entirely; that one form is just skipped (fix
+ * round 2, Minor 5). `Buffer.from(value, 'utf8')` and `JSON.stringify` both tolerate lone surrogates
+ * without throwing, so only the `encodeURIComponent` call needs guarding.
  */
 function encodedForms(value: string): string[] {
   const buf = Buffer.from(value, 'utf8');
-  const forms = new Set<string>([value, buf.toString('base64'), buf.toString('base64url'), encodeURIComponent(value)]);
+  const forms = new Set<string>([value, buf.toString('base64'), buf.toString('base64url')]);
+  try {
+    forms.add(encodeURIComponent(value));
+  } catch {
+    // lone surrogate — skip this encoded form rather than throw out of createRedactor entirely
+  }
   const jsonEscaped = JSON.stringify(value).slice(1, -1);
   forms.add(jsonEscaped);
   return Array.from(forms).filter((f) => f.length > 0);
