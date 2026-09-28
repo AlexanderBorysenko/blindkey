@@ -70,13 +70,19 @@ export async function runSecretWrite(
 ): Promise<CommandResult> {
   const mode = parseMode(opts.mode);
   const absOut = guardAgentOut(opts.out, opts);
-  const value = opts.agent
-    ? (
-        await client.json<RevealedFields>('POST', scopedPath(target, 'secrets', `/${seg(name)}/use`), {
-          body: { purpose: 'write', fields: [field] },
-        })
-      ).fields[field]!
-    : await client.text('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields/${seg(field)}`));
+  let value: string;
+  if (opts.agent) {
+    const revealed = await client.json<RevealedFields>('POST', scopedPath(target, 'secrets', `/${seg(name)}/use`), {
+      body: { purpose: 'write', fields: [field] },
+    });
+    const fieldValue = revealed.fields[field];
+    if (fieldValue === undefined) {
+      throw new CliError(`server did not return field "${field}" for secret "${name}"`);
+    }
+    value = fieldValue;
+  } else {
+    value = await client.text('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields/${seg(field)}`));
+  }
   writeSecretFile(opts.out, value, mode, opts.force === true);
   if (opts.agent && opts.dataDir) recordWritten(opts.dataDir, absOut);
   return {

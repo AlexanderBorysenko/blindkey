@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import path from 'node:path';
 import {
+  isPathInside,
   loadBindings,
   loadProfiles,
   repoKey,
@@ -99,5 +100,55 @@ describe('repoKey', () => {
     const b = repoKey('x', { gitTopLevel: () => 'd:\\Repo\\Thing', pathMod: path.win32 });
     expect(a).toBe(b);
     expect(a).toBe('d:/Repo/Thing');
+  });
+});
+
+describe('isPathInside (fix round 1, Minor 7)', () => {
+  it('the dir itself is inside itself', () => {
+    expect(isPathInside(dataDir, dataDir)).toBe(true);
+  });
+
+  it('a direct child is inside', () => {
+    expect(isPathInside(dataDir, join(dataDir, 'secret.txt'))).toBe(true);
+  });
+
+  it('a nested descendant is inside', () => {
+    expect(isPathInside(dataDir, join(dataDir, 'a', 'b', 'secret.txt'))).toBe(true);
+  });
+
+  it('a sibling directory is not inside', () => {
+    expect(isPathInside(dataDir, `${dataDir}-sibling/secret.txt`)).toBe(false);
+  });
+
+  it('a genuine parent-traversal escape is not inside', () => {
+    expect(isPathInside(dataDir, join(dataDir, '..', 'outside.txt'))).toBe(false);
+  });
+
+  it('a relative --out of "../<data dir name>/x" that resolves back inside is inside', () => {
+    const out = join(dataDir, '..', path.basename(dataDir), 'secret.txt');
+    expect(isPathInside(dataDir, out)).toBe(true);
+  });
+
+  it('a legitimately nested entry whose name merely starts with ".." is inside, not an escape', () => {
+    // Regression: an earlier check (`rel.startsWith('..')`) misfired on this — a subpath like
+    // "..hidden" isn't the traversal token "..", it's just a filename that happens to start with it.
+    expect(isPathInside(dataDir, join(dataDir, '..hidden', 'secret.txt'))).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'a symlinked directory inside the data dir that actually points outside it is not inside (realpath escape)',
+    () => {
+      const outsideDir = mkdtempSync(join(tmpdir(), 'pidb-agent-state-outside-'));
+      const linkPath = join(dataDir, 'looks-safe');
+      symlinkSync(outsideDir, linkPath, 'dir');
+      expect(isPathInside(dataDir, join(linkPath, 'secret.txt'))).toBe(false);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')('a symlinked data dir itself is still matched via realpath', () => {
+    const realDir = mkdtempSync(join(tmpdir(), 'pidb-agent-state-real-'));
+    const linkedDataDir = join(tmpdir(), `pidb-agent-state-link-${process.pid}-${Date.now()}`);
+    symlinkSync(realDir, linkedDataDir, 'dir');
+    expect(isPathInside(linkedDataDir, join(realDir, 'secret.txt'))).toBe(true);
   });
 });

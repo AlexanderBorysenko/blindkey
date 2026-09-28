@@ -35,52 +35,80 @@ function encodedForms(value: string): string[] {
  * match leftover fragments; works on decoded text (via `StringDecoder`) so a multibyte UTF-8
  * character split across a chunk boundary is never corrupted.
  *
- * `push` only ever holds back a *suffix of the currently available text that is itself a proper
- * prefix of some pattern* — i.e. text that might still turn into a match once more data arrives —
- * rather than a blind fixed-length tail. A complete match whose last character happens to be the
- * very last character seen so far is still a complete match (nothing more is needed to confirm it)
- * and is redacted immediately; only a genuinely incomplete, still-growing prefix is deferred to the
- * next `push`/`flush`.
+ * Algorithm (fix round 1 — the prior "hold back a risky suffix" heuristic leaked complete matches
+ * that overlapped the held-back tail, e.g. one pattern's suffix coinciding with a longer, unrelated
+ * pattern's prefix): `push` scans `held + decoded` strictly left to right, one position at a time.
+ * At each position, before committing to anything, it asks "could a pattern *longer than what's
+ * currently available* still be forming here?" — i.e. is the entire remaining buffer a prefix of
+ * some pattern too long to fully fit yet. If so (and this isn't the final flush), the scan stops and
+ * holds everything from this position onward for the next `push`/`flush`: committing to a shorter,
+ * already-complete match here could otherwise pre-empt a longer match that the next chunk would have
+ * completed (longest-match-wins must hold identically whether the text arrives in one chunk or many).
+ * Otherwise the position is fully resolved: the longest pattern that *fully fits* in the buffer and
+ * matches here (patterns are tried longest-first) is redacted and the scan jumps past it; if nothing
+ * matches, the character is emitted literally and the scan advances by one. `flush()` runs the same
+ * scan as `isFinal`, skipping the "could still be forming" check entirely — nothing more is ever
+ * coming, so every remaining character is resolved one way or the other.
  */
 export function createRedactor(values: string[]): Redactor {
   const patterns = Array.from(new Set(values.filter((v) => v.length >= MIN_VALUE_LEN).flatMap(encodedForms))).sort(
     (a, b) => b.length - a.length,
   );
-  const maxPatternLength = patterns.reduce((max, p) => Math.max(max, p.length), 0);
 
   const decoder = new StringDecoder('utf8');
   let held = '';
 
-  function redact(text: string): string {
-    let out = text;
-    for (const pattern of patterns) out = out.split(pattern).join(REDACTED);
-    return out;
-  }
-
-  /** Longest suffix of `text` that is a proper prefix of some pattern (a partial match still in progress). */
-  function riskyTailLength(text: string): number {
-    const upper = Math.min(text.length, maxPatternLength - 1);
-    for (let len = upper; len > 0; len--) {
-      const suffix = text.slice(text.length - len);
-      if (patterns.some((p) => p.startsWith(suffix))) return len;
+  /**
+   * Scans `buffer` left to right and returns the redacted-and-safe-to-emit prefix plus whatever must
+   * still be held back. When `isFinal` (flush), the whole buffer is treated as safe to resolve, since
+   * no more data is ever coming.
+   */
+  function scan(buffer: string, isFinal: boolean): { output: string; remainder: string } {
+    const n = buffer.length;
+    if (patterns.length === 0) return { output: buffer, remainder: '' };
+    let out = '';
+    let literalStart = 0;
+    let i = 0;
+    while (i < n) {
+      const remaining = n - i;
+      if (!isFinal) {
+        // A pattern longer than what's currently available, whose prefix matches the entire
+        // remaining buffer, might still complete once more data arrives — this position (and
+        // everything after it) is not yet resolvable.
+        const tail = buffer.slice(i, n);
+        const stillForming = patterns.some((p) => p.length > remaining && p.startsWith(tail));
+        if (stillForming) break;
+      }
+      let matchLen = 0;
+      for (const p of patterns) {
+        if (p.length <= remaining && buffer.startsWith(p, i)) {
+          matchLen = p.length;
+          break; // patterns are longest-first, so the first fit is the longest match here
+        }
+      }
+      if (matchLen > 0) {
+        out += buffer.slice(literalStart, i) + REDACTED;
+        i += matchLen;
+        literalStart = i;
+        continue;
+      }
+      i += 1;
     }
-    return 0;
+    out += buffer.slice(literalStart, i);
+    return { output: out, remainder: buffer.slice(i) };
   }
 
   return {
     push(chunk) {
       const decoded = typeof chunk === 'string' ? chunk : decoder.write(chunk);
-      if (patterns.length === 0) return decoded; // nothing to ever match or hold back
-      const text = held + decoded;
-      const risky = riskyTailLength(text);
-      const safeLength = text.length - risky;
-      held = text.slice(safeLength);
-      return redact(text.slice(0, safeLength));
+      const { output, remainder } = scan(held + decoded, false);
+      held = remainder;
+      return output;
     },
     flush() {
-      const text = held + decoder.end();
+      const { output } = scan(held + decoder.end(), true);
       held = '';
-      return redact(text);
+      return output;
     },
   };
 }

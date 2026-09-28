@@ -5,12 +5,23 @@ export interface SpawnSpec {
   args: string[];
 }
 
-/** The platform-specific way to open a URL in the default browser (spec §2.3). */
+/**
+ * The platform-specific way to open a URL in the default browser (spec §2.3).
+ *
+ * win32 (fix round 1): deliberately does **not** go through `cmd /c start` — even with `spawn`
+ * (no `shell: true`), `cmd.exe` itself re-parses whatever it's handed as a command line and treats
+ * `&`, `|`, `%NAME%`, etc. as special, so a hostile/malformed url could still smuggle a second
+ * command past `start`'s own quirky argument handling. `rundll32 url.dll,FileProtocolHandler <url>`
+ * opens a url the same way Explorer does, without invoking any shell interpreter at all.
+ *
+ * darwin: `open` is a plain program, not a shell, so `spawn` (no `shell: true`) is already immune to
+ * shell-metacharacter injection here; `openBrowser`'s caller additionally only ever calls this with a
+ * url that passed strict validation (http(s), matching origin/path/code shape), which can never begin
+ * with `-`, so there is no `open`-level flag-injection risk either.
+ */
 export function browserSpawnSpec(url: string, platform: NodeJS.Platform): SpawnSpec {
   if (platform === 'darwin') return { cmd: 'open', args: [url] };
-  // `start` treats its first quoted argument as the window title, so an empty title must be passed
-  // explicitly or `start` would otherwise treat the url itself as the title and fail to open it.
-  if (platform === 'win32') return { cmd: 'cmd', args: ['/c', 'start', '""', url] };
+  if (platform === 'win32') return { cmd: 'rundll32', args: ['url.dll,FileProtocolHandler', url] };
   return { cmd: 'xdg-open', args: [url] };
 }
 

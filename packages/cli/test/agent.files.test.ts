@@ -69,6 +69,14 @@ describe('secret write (agent mode)', () => {
     await runSecretWrite(client(['secrets:use']), 'acme', 'DB', 'password', { out, agent: true, dataDir, force: true });
     expect(loadWritten(dataDir).paths).toEqual([out]);
   });
+
+  it('raises a CliError (not a TypeError) when the server omits the requested field (fix round 1, Minor 9)', async () => {
+    const out = join(dir, 'password.txt');
+    const fakeClient = { json: async () => ({ name: 'DB', fields: {} }) } as unknown as PidbClient;
+    const err = await runSecretWrite(fakeClient, 'acme', 'DB', 'password', { out, agent: true, dataDir }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect((err as CliError).message).toMatch(/did not return field "password"/);
+  });
 });
 
 describe('secret env (agent mode)', () => {

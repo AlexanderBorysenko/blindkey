@@ -12,10 +12,10 @@ describe('browserSpawnSpec', () => {
   it('darwin uses `open`', () => {
     expect(browserSpawnSpec('https://example.com/connect', 'darwin')).toEqual({ cmd: 'open', args: ['https://example.com/connect'] });
   });
-  it('win32 uses `cmd /c start "" <url>`', () => {
+  it('win32 uses `rundll32 url.dll,FileProtocolHandler <url>` (no shell, unlike `cmd /c start`)', () => {
     expect(browserSpawnSpec('https://example.com/connect', 'win32')).toEqual({
-      cmd: 'cmd',
-      args: ['/c', 'start', '""', 'https://example.com/connect'],
+      cmd: 'rundll32',
+      args: ['url.dll,FileProtocolHandler', 'https://example.com/connect'],
     });
   });
   it('anything else (linux, etc.) uses `xdg-open`', () => {

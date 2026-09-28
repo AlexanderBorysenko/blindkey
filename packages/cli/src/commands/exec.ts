@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess, type StdioOptions } from 'node:child_process';
 import { scopedPath, seg, type PidbClient } from '../client.js';
 import type { RevealedFields } from '../api-types.js';
 import { CliError } from '../errors.js';
@@ -38,6 +38,36 @@ export interface RunSecretExecOptions {
   agent?: boolean;
 }
 
+/**
+ * Spawns `bin args` with `stdio`/`env`, optionally wiring up stdout/stderr listeners (`attach`, called
+ * right after spawn, before any data can arrive) and a hook to run just before resolving (`beforeExit`,
+ * e.g. to flush pending redactor output) — shared by both the normal and agent-mode paths of
+ * `runSecretExec` (fix round 1, Minor 8) so the error/close/signal-to-exit-code bookkeeping exists in
+ * exactly one place.
+ */
+function spawnAndAwaitExit(
+  bin: string,
+  args: string[],
+  spawnOpts: { stdio: StdioOptions; env: NodeJS.ProcessEnv },
+  attach?: (child: ChildProcess) => void,
+  beforeExit?: () => void,
+): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const child = spawn(bin, args, spawnOpts);
+    attach?.(child);
+    child.on('error', (err) => reject(new CliError(`cannot run ${bin}: ${err.message}`)));
+    child.on('close', (code, signal) => {
+      beforeExit?.();
+      if (signal) {
+        // Report the conventional 128+signal code without printing anything of the secret.
+        resolve(128 + (typeof signal === 'string' ? signalNumber(signal) : 0));
+        return;
+      }
+      resolve(code ?? 1);
+    });
+  });
+}
+
 export async function runSecretExec(
   client: PidbClient,
   target: string,
@@ -56,18 +86,7 @@ export async function runSecretExec(
   const env = buildEnv(revealed.fields, process.env);
 
   if (!opts.agent) {
-    return await new Promise<number>((resolve, reject) => {
-      const child = spawn(bin, args, { stdio: 'inherit', env });
-      child.on('error', (err) => reject(new CliError(`cannot run ${bin}: ${err.message}`)));
-      child.on('close', (code, signal) => {
-        if (signal) {
-          // Report the conventional 128+signal code without printing anything of the secret.
-          resolve(128 + (typeof signal === 'string' ? signalNumber(signal) : 0));
-          return;
-        }
-        resolve(code ?? 1);
-      });
-    });
+    return await spawnAndAwaitExit(bin, args, { stdio: 'inherit', env });
   }
 
   // Agent mode: stdin is still inherited, but stdout/stderr are piped through a redactor (each stream
@@ -76,23 +95,21 @@ export async function runSecretExec(
   const values = Object.values(revealed.fields);
   const stdoutRedactor = createRedactor(values);
   const stderrRedactor = createRedactor(values);
-  return await new Promise<number>((resolve, reject) => {
-    const child = spawn(bin, args, { stdio: ['inherit', 'pipe', 'pipe'], env });
-    child.stdout.on('data', (chunk: Buffer) => process.stdout.write(stdoutRedactor.push(chunk)));
-    child.stderr.on('data', (chunk: Buffer) => process.stderr.write(stderrRedactor.push(chunk)));
-    child.on('error', (err) => reject(new CliError(`cannot run ${bin}: ${err.message}`)));
-    child.on('close', (code, signal) => {
+  return await spawnAndAwaitExit(
+    bin,
+    args,
+    { stdio: ['inherit', 'pipe', 'pipe'], env },
+    (child) => {
+      child.stdout!.on('data', (chunk: Buffer) => process.stdout.write(stdoutRedactor.push(chunk)));
+      child.stderr!.on('data', (chunk: Buffer) => process.stderr.write(stderrRedactor.push(chunk)));
+    },
+    () => {
       const tailOut = stdoutRedactor.flush();
       if (tailOut) process.stdout.write(tailOut);
       const tailErr = stderrRedactor.flush();
       if (tailErr) process.stderr.write(tailErr);
-      if (signal) {
-        resolve(128 + (typeof signal === 'string' ? signalNumber(signal) : 0));
-        return;
-      }
-      resolve(code ?? 1);
-    });
-  });
+    },
+  );
 }
 
 function signalNumber(signal: NodeJS.Signals): number {

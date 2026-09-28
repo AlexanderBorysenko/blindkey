@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import nodePath from 'node:path';
 import { CliError } from '../errors.js';
 
@@ -99,10 +99,55 @@ export function recordWritten(dataDir: string, absPath: string): void {
   writeJsonAtomic(writtenPath(dataDir), data);
 }
 
-/** True when `candidate` is `dir` itself or nested inside it (both resolved to absolute paths first). */
+/** Resolves symlinks in `p` (an existing path); returns `p` itself, unresolved, when that fails. */
+function safeRealpath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * Realpath-resolves `p` as far as the filesystem allows: walks up to the nearest existing ancestor
+ * (the target itself usually doesn't exist yet — we're about to create it), resolves *that*
+ * (following any symlinked directories along the way), and re-appends the non-existent tail
+ * unresolved. This is what lets `isPathInside` catch a symlinked directory planted inside the data
+ * dir that actually points somewhere else on disk — a plain textual `resolve()` would be fooled by
+ * it, since `resolve()` never touches the filesystem.
+ */
+function realCandidatePath(p: string): string {
+  let current = resolve(p);
+  const tail: string[] = [];
+  while (true) {
+    try {
+      const real = realpathSync(current);
+      return tail.length > 0 ? join(real, ...tail) : real;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return join(current, ...tail); // unexpected — don't throw from a safety check
+      const parent = dirname(current);
+      if (parent === current) return join(current, ...tail); // reached the filesystem root
+      tail.unshift(basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * True when `candidate` is `dir` itself or nested inside it. Both sides are realpath-resolved (fix
+ * round 1, Minor 7) so a symlink cannot be used to make a path that's textually inside `dir` actually
+ * land somewhere else, or vice versa. `rel === '..'`/`rel.startsWith('..' + sep)` is the precise
+ * "escaped upward" check — testing `rel.startsWith('..')` alone would misfire on a legitimately
+ * nested entry whose name happens to start with two dots (e.g. `dir/..hidden`).
+ */
 export function isPathInside(dir: string, candidate: string): boolean {
-  const rel = relative(resolve(dir), resolve(candidate));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  const base = safeRealpath(resolve(dir));
+  const target = realCandidatePath(candidate);
+  if (base === target) return true;
+  const rel = relative(base, target);
+  if (rel === '..' || rel.startsWith(`..${sep}`)) return false;
+  if (isAbsolute(rel)) return false; // e.g. a different drive letter on win32 — relative() can't express it
+  return true;
 }
 
 export interface RepoKeyOptions {
