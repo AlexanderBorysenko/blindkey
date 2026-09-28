@@ -2,7 +2,7 @@ import type { AuthTokenRequest, TokenInput } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, type Actor, type Principal } from '../auth/principal.js';
 import { NotFoundError, ValidationError } from '../errors.js';
-import { createToken, listTokens, revokeToken, setTokenProjects, DAY_MS, type TokenKind, type TokenRow } from '../repos/tokens.js';
+import { createToken, listTokens, revokeToken, setTokenLabel, setTokenProjects, DAY_MS, type TokenKind, type TokenRow } from '../repos/tokens.js';
 import { listApprovedConnectRequests } from '../repos/connect.js';
 import { getProjectBySlug, listProjects } from '../repos/projects.js';
 import { listAudit, writeAudit, type AuditQuery, type AuditRow } from '../repos/audit.js';
@@ -22,6 +22,7 @@ export interface PublicToken {
   revoked_at: number | null;
   created_at: number;
   kind: TokenKind;
+  label: string | null;
 }
 
 function publicToken(ctx: AppContext, t: TokenRow): PublicToken {
@@ -73,6 +74,23 @@ export function listPendingAgentTokensFor(ctx: AppContext, principal: Principal)
     projects: listProjects(ctx.db, r.approved_project_ids ?? []).map((p) => p.slug),
     expires_at: r.expires_at,
   }));
+}
+
+export const TOKEN_LABEL_MAX = 100;
+
+/** Trimmed label, or null for blank; longer than TOKEN_LABEL_MAX is a validation error. */
+export function parseTokenLabel(raw: string): string | null {
+  const label = raw.trim().replace(/\s+/g, ' ');
+  if (label.length > TOKEN_LABEL_MAX) throw new ValidationError([{ path: ['label'], message: `at most ${TOKEN_LABEL_MAX} characters` }]);
+  return label || null;
+}
+
+/** Renames a token for display (its `name`, used to supersede agent sessions, never changes). Blank clears it. */
+export function renameTokenFor(ctx: AppContext, actor: Actor, id: number, rawLabel: string): void {
+  assertScope(actor.principal, 'admin');
+  const label = parseTokenLabel(rawLabel);
+  if (!setTokenLabel(ctx.db, id, label)) throw new NotFoundError('token not found');
+  auditAs(ctx, actor, { action: 'token.rename', target_type: 'token', target_id: id, meta: { label } });
 }
 
 /** Replaces which projects an active token can reach; `null` = all projects. */

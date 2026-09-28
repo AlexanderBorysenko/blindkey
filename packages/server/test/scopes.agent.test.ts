@@ -70,11 +70,12 @@ describe('agent token kind (spec §1.1)', () => {
     const res = await t.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: session } });
     expect(res.statusCode).toBe(200);
     const body = res.body;
+    // Each token is a card; its title line ends at the first </div> after the name.
     const agentRowStart = body.indexOf('the-agent-token');
-    const agentRowEnd = body.indexOf('</tr>', agentRowStart);
+    const agentRowEnd = body.indexOf('</div>', agentRowStart);
     expect(body.slice(agentRowStart, agentRowEnd)).toContain('class="pill kind-agent"');
     const userRowStart = body.indexOf('the-user-token');
-    const userRowEnd = body.indexOf('</tr>', userRowStart);
+    const userRowEnd = body.indexOf('</div>', userRowStart);
     expect(body.slice(userRowStart, userRowEnd)).not.toContain('kind-agent');
   });
 

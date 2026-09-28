@@ -30,7 +30,7 @@ describe('db', () => {
     // Applies migration 3 (this test's subject), migration 4 (api_tokens.kind, spec §1.1) and
     // migration 5 (connect_requests, spec §1.3) — all three are pending from this seeded
     // "post-migration-2" state.
-    expect(runMigrations(db)).toBe(3);
+    expect(runMigrations(db)).toBe(4); // + migration 6 (token labels)
     expect(db.prepare(`SELECT failed_count, locked_until FROM admin_totp WHERE admin_id = 1`).get()).toEqual({ failed_count: 0, locked_until: null });
   });
   it('migration 4 adds api_tokens.kind defaulting to user', () => {
@@ -43,7 +43,7 @@ describe('db', () => {
     db.prepare(`INSERT INTO api_tokens (name, prefix, token_hash, scopes, project_ids, expires_at, created_at) VALUES ('t', 'p', 'h', '[]', NULL, NULL, 0)`).run();
     // Applies migration 4 (this test's subject) and migration 5 (connect_requests, spec §1.3) —
     // both are pending from this seeded "post-migration-3" state.
-    expect(runMigrations(db)).toBe(2);
+    expect(runMigrations(db)).toBe(3); // + migration 6 (token labels)
     expect(db.prepare(`SELECT kind FROM api_tokens`).get()).toEqual({ kind: 'user' });
   });
   it('migration 5 creates connect_requests (spec §1.3)', () => {
@@ -53,7 +53,7 @@ describe('db', () => {
       db.exec(m.sql);
       db.prepare(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, 0)`).run(m.id);
     }
-    expect(runMigrations(db)).toBe(1);
+    expect(runMigrations(db)).toBe(2); // + migration 6 (token labels)
     const cols = db.prepare(`SELECT name FROM pragma_table_info('connect_requests')`).all().map((r) => (r as { name: string }).name);
     for (const c of [
       'id', 'device_hash', 'user_code', 'name', 'scopes', 'projects', 'expires_days', 'status',

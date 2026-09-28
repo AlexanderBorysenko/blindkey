@@ -266,4 +266,20 @@ describe('tokens page', () => {
     const r = await post(`/tokens/${id}/projects`, { projects: ['alpha'] });
     expect(r.statusCode).toBe(404);
   });
+
+  it('a label given at approval is used, and a reconnect of the same session keeps the latest label', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    const { post } = await adminSession(t);
+    const first = await startConnect(t, 'claude-prod@box');
+    await post('/connect/approve', { code: first.user_code, scopes: ['projects:read'], projects: ['alpha'], expires_days: '90', label: 'Home PC' });
+    await t.app.inject({ method: 'POST', url: '/api/v1/connect/poll', payload: { device_code: first.device_code } });
+    expect(listTokens(t.db).find((x) => x.revoked_at === null)!.label).toBe('Home PC');
+    const again = await startConnect(t, 'claude-prod@box');
+    await post('/connect/approve', { code: again.user_code, scopes: ['projects:read'], projects: ['alpha'], expires_days: '90' });
+    await t.app.inject({ method: 'POST', url: '/api/v1/connect/poll', payload: { device_code: again.device_code } });
+    const live = listTokens(t.db).filter((x) => x.revoked_at === null);
+    expect(live).toHaveLength(1);
+    expect(live[0]!.label).toBe('Home PC');
+  });
 });

@@ -178,6 +178,13 @@ CREATE TABLE connect_requests (
 );
 `,
   },
+  {
+    id: 6,
+    sql: `
+ALTER TABLE api_tokens ADD COLUMN label TEXT;
+ALTER TABLE connect_requests ADD COLUMN approved_label TEXT;
+`,
+  },
 ];
 
 export function runMigrations(db: Database.Database): number {

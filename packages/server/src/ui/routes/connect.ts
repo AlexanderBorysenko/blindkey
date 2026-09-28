@@ -15,6 +15,7 @@ interface Selection {
   scopes: string[];
   projects: string[];
   expiresDays: string;
+  label: string;
 }
 
 export function registerConnectRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -24,7 +25,7 @@ export function registerConnectRoutes(app: FastifyInstance, ctx: AppContext): vo
     // On a validation error the form is re-rendered with what the approver actually ticked
     // (Review: don't silently reset their selection back to the original request's checkboxes).
     const fallback: Selection | undefined =
-      view.state === 'form' ? { scopes: view.row.scopes, projects: view.row.projects, expiresDays: String(view.row.expires_days) } : undefined;
+      view.state === 'form' ? { scopes: view.row.scopes, projects: view.row.projects, expiresDays: String(view.row.expires_days), label: '' } : undefined;
     return {
       status,
       html: renderPage('connect', { ...pageContext(ctx, req, 'Connect'), ...view, code, error, selected: selected ?? fallback }),
@@ -44,11 +45,12 @@ export function registerConnectRoutes(app: FastifyInstance, ctx: AppContext): vo
     const scopes = list(b, 'scopes');
     const projects = list(b, 'projects');
     const expiresDays = str(b, 'expires_days');
+    const label = str(b, 'label');
     try {
-      approveConnect(ctx, actor, code, scopes, projects, expiresDays);
+      approveConnect(ctx, actor, code, scopes, projects, expiresDays, label);
     } catch (err) {
       if (err instanceof AppError && err.status < 500) {
-        const { status, html } = page(req, code, errorText(err), err.status, { scopes, projects, expiresDays });
+        const { status, html } = page(req, code, errorText(err), err.status, { scopes, projects, expiresDays, label });
         return reply.status(status).type('text/html').send(html);
       }
       throw err;

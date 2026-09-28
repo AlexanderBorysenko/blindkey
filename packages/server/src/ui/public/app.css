@@ -1006,3 +1006,41 @@ tr.act-auth td:nth-child(4) { color: var(--muted); }
   margin: 0;
   padding-left: 12px;
 }
+
+/* ---------- API tokens ---------- */
+.token-list { list-style: none; margin: 0 0 20px; padding: 0; display: grid; gap: 10px; }
+.token-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+  align-items: start;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.token-main { min-width: 0; display: grid; gap: 6px; }
+.token-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.token-title strong { font-size: 15px; overflow-wrap: anywhere; }
+.token-sub { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.token-facts { margin: 2px 0 0; display: grid; gap: 4px; }
+.token-facts > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.token-facts dt { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.token-facts dd { margin: 0; min-width: 0; }
+.token-access { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.token-access b { font-weight: 600; }
+.token-times { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--muted); font-size: 12.5px; }
+.token-manage { width: min(560px, calc(100vw - 32px)); }
+.token-manage form + form { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.danger-zone { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.danger-zone .note { margin: 2px 0 0; }
+.revoked-tokens { margin: 0 0 20px; color: var(--muted); }
+.revoked-tokens summary { cursor: pointer; padding: 6px 0; }
+.revoked-tokens ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.revoked-tokens li { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+@media (max-width: 640px) {
+  .token-card { grid-template-columns: 1fr; }
+  .token-actions { justify-self: start; }
+  .danger-zone { flex-direction: column; align-items: flex-start; }
+}
+.token-manage .form-grid .note { margin: -4px 0 0; }

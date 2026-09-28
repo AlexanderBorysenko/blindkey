@@ -8,7 +8,8 @@ import { auditAs } from './common.js';
 import { writeAudit } from '../repos/audit.js';
 import { isUniqueViolation } from '../repos/util.js';
 import { getProjectBySlug, listProjects, type ProjectRow } from '../repos/projects.js';
-import { createToken, revokeAgentTokensByName, DAY_MS } from '../repos/tokens.js';
+import { createToken, revokeAgentTokensByName, DAY_MS, latestAgentLabel } from '../repos/tokens.js';
+import { parseTokenLabel } from './admin.js';
 import {
   approveConnectRequest,
   claimApprovedConnectRequest,
@@ -125,6 +126,8 @@ function issueAgentToken(ctx: AppContext, requestId: number, ip: string, userAge
     // Lost the race to another (or replayed) claim on the same row (Review Focus 3): the row is
     // gone or was no longer `approved` by the time this transaction ran.
     if (!claimed) throw new AppError(400, 'invalid_request', 'this request was already used');
+    // A reconnect under the same name keeps the label the admin gave the session it supersedes.
+    const label = claimed.approved_label ?? latestAgentLabel(ctx.db, claimed.name);
     revokeAgentTokensByName(ctx.db, claimed.name);
     const expiresAt = Date.now() + (claimed.approved_expires_days ?? claimed.expires_days) * DAY_MS;
     const { token, row: tokenRow } = createToken(ctx.db, {
@@ -133,6 +136,7 @@ function issueAgentToken(ctx: AppContext, requestId: number, ip: string, userAge
       projectIds: claimed.approved_project_ids ?? [],
       expiresAt,
       kind: 'agent',
+      label,
     });
     writeAudit(ctx.db, {
       actor_type: 'token',
@@ -217,8 +221,10 @@ export function approveConnect(
   scopeInputs: string[],
   projectSlugInputs: string[],
   expiresDaysInput: string,
+  labelInput = '',
 ): void {
   const row = mustPendingConnectRequest(ctx, code);
+  const label = parseTokenLabel(labelInput);
   const parsedScopes = agentScopesSchema.safeParse(scopeInputs);
   if (!parsedScopes.success) throw new ValidationError(parsedScopes.error.issues);
   const scopes = Array.from(new Set(parsedScopes.data));
@@ -239,13 +245,13 @@ export function approveConnect(
   }
   const parsedExpiresDays = expiresDaysSchema.safeParse(expiresDaysInput);
   if (!parsedExpiresDays.success) throw new ValidationError(parsedExpiresDays.error.issues);
-  const ok = approveConnectRequest(ctx.db, row.id, { scopes, projectIds, expiresDays: parsedExpiresDays.data });
+  const ok = approveConnectRequest(ctx.db, row.id, { scopes, projectIds, expiresDays: parsedExpiresDays.data, label });
   if (!ok) throw new NotFoundError('connect request not found or already decided');
   auditAs(ctx, actor, {
     action: 'connect.approved',
     target_type: 'connect_request',
     target_id: row.id,
-    meta: { name: row.name, scopes, projects: matchedSlugs, expires_days: parsedExpiresDays.data },
+    meta: { name: row.name, label, scopes, projects: matchedSlugs, expires_days: parsedExpiresDays.data },
   });
 }
 

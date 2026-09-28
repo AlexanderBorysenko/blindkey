@@ -16,6 +16,8 @@ export interface TokenRow {
   revoked_at: number | null;
   created_at: number;
   kind: TokenKind;
+  /** Admin-chosen display name (e.g. "Easy Renovation · home PC"); `name` stays the machine identity. */
+  label: string | null;
 }
 
 interface RawToken extends Omit<TokenRow, 'scopes' | 'project_ids' | 'kind'> {
@@ -25,7 +27,7 @@ interface RawToken extends Omit<TokenRow, 'scopes' | 'project_ids' | 'kind'> {
   kind: string;
 }
 
-const COLS = 'id, name, prefix, token_hash, scopes, project_ids, expires_at, last_used_at, revoked_at, created_at, kind';
+const COLS = 'id, name, prefix, token_hash, scopes, project_ids, expires_at, last_used_at, revoked_at, created_at, kind, label';
 
 function toRow(r: RawToken): TokenRow {
   const { token_hash: _hash, ...rest } = r;
@@ -39,11 +41,11 @@ function toRow(r: RawToken): TokenRow {
 
 export function createToken(
   db: Db,
-  input: { name: string; scopes: Scope[]; projectIds: number[] | null; expiresAt: number | null; kind?: TokenKind },
+  input: { name: string; scopes: Scope[]; projectIds: number[] | null; expiresAt: number | null; kind?: TokenKind; label?: string | null },
 ): { token: string; row: TokenRow } {
   const t = generateToken();
   const info = db
-    .prepare(`INSERT INTO api_tokens (name, prefix, token_hash, scopes, project_ids, expires_at, created_at, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .prepare(`INSERT INTO api_tokens (name, prefix, token_hash, scopes, project_ids, expires_at, created_at, kind, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(
       input.name,
       t.prefix,
@@ -53,6 +55,7 @@ export function createToken(
       input.expiresAt,
       now(),
       input.kind ?? 'user',
+      input.label ?? null,
     );
   const row = db.prepare(`SELECT ${COLS} FROM api_tokens WHERE id = ?`).get(Number(info.lastInsertRowid)) as RawToken;
   return { token: t.token, row: toRow(row) };
@@ -121,4 +124,17 @@ export function setTokenProjects(db: Db, id: number, projectIds: number[] | null
       .prepare(`UPDATE api_tokens SET project_ids = ? WHERE id = ? AND revoked_at IS NULL`)
       .run(projectIds === null ? null : JSON.stringify(projectIds), id).changes > 0
   );
+}
+
+/** Sets (or clears, with null) a token's display label. Returns false when the token does not exist. */
+export function setTokenLabel(db: Db, id: number, label: string | null): boolean {
+  return db.prepare(`UPDATE api_tokens SET label = ? WHERE id = ?`).run(label, id).changes > 0;
+}
+
+/** The label of the newest agent token with this name — carried over when a reconnect supersedes it. */
+export function latestAgentLabel(db: Db, name: string): string | null {
+  const r = db
+    .prepare(`SELECT label FROM api_tokens WHERE name = ? AND kind = 'agent' AND label IS NOT NULL ORDER BY id DESC LIMIT 1`)
+    .get(name) as { label: string } | undefined;
+  return r?.label ?? null;
 }

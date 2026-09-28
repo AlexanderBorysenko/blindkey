@@ -16,6 +16,7 @@ export interface ConnectRequestRow {
   approved_scopes: Scope[] | null;
   approved_project_ids: number[] | null;
   approved_expires_days: number | null;
+  approved_label: string | null;
   ip: string;
   user_agent: string;
   created_at: number;
@@ -34,6 +35,7 @@ interface RawRow {
   approved_scopes: string | null;
   approved_project_ids: string | null;
   approved_expires_days: number | null;
+  approved_label: string | null;
   ip: string;
   user_agent: string;
   created_at: number;
@@ -41,7 +43,7 @@ interface RawRow {
 }
 
 const COLS =
-  'id, device_hash, user_code, name, scopes, projects, expires_days, status, approved_scopes, approved_project_ids, approved_expires_days, ip, user_agent, created_at, expires_at';
+  'id, device_hash, user_code, name, scopes, projects, expires_days, status, approved_scopes, approved_project_ids, approved_expires_days, approved_label, ip, user_agent, created_at, expires_at';
 
 function toRow(r: RawRow): ConnectRequestRow {
   return {
@@ -107,6 +109,7 @@ export interface ApproveConnectRequestInput {
   scopes: Scope[];
   projectIds: number[];
   expiresDays: number;
+  label?: string | null;
 }
 
 /** Only transitions a still-`pending` row; returns false if it was already decided or is gone. */
@@ -114,10 +117,10 @@ export function approveConnectRequest(db: Db, id: number, approved: ApproveConne
   return (
     db
       .prepare(
-        `UPDATE connect_requests SET status = 'approved', approved_scopes = ?, approved_project_ids = ?, approved_expires_days = ?
+        `UPDATE connect_requests SET status = 'approved', approved_scopes = ?, approved_project_ids = ?, approved_expires_days = ?, approved_label = ?
          WHERE id = ? AND status = 'pending'`,
       )
-      .run(JSON.stringify(approved.scopes), JSON.stringify(approved.projectIds), approved.expiresDays, id).changes > 0
+      .run(JSON.stringify(approved.scopes), JSON.stringify(approved.projectIds), approved.expiresDays, approved.label ?? null, id).changes > 0
   );
 }
 

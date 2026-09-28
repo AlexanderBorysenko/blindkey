@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { SCOPES, tokenInputSchema } from '@pidb/shared';
 import type { AppContext } from '../../http/context.js';
-import { createTokenFor, listAuditFor, listPendingAgentTokensFor, listTokensFor, revokeTokenFor, updateTokenProjectsFor } from '../../services/admin.js';
+import { createTokenFor, listAuditFor, listPendingAgentTokensFor, listTokensFor, renameTokenFor, revokeTokenFor, updateTokenProjectsFor } from '../../services/admin.js';
 import { AppError } from '../../errors.js';
 import { listProjectsFor } from '../../services/projects.js';
 import { adminActor, requireAdmin } from '../session.js';
@@ -86,6 +86,20 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     const projects = bool(b, 'all') ? null : list(b, 'projects');
     try {
       updateTokenProjectsFor(ctx, adminActor(req), Number.parseInt(req.params.id, 10), projects);
+    } catch (err) {
+      if (err instanceof AppError && err.status < 500) {
+        return reply.status(err.status).type('text/html').send(tokensPage(req, { listError: errorText(err) }));
+      }
+      throw err;
+    }
+    return reply.redirect('/tokens?done=saved', 302);
+  });
+
+  app.post<{ Params: { id: string } }>('/tokens/:id/label', async (req, reply) => {
+    assertCsrf(ctx, req);
+    requireAdmin(req);
+    try {
+      renameTokenFor(ctx, adminActor(req), Number.parseInt(req.params.id, 10), str(body(req), 'label'));
     } catch (err) {
       if (err instanceof AppError && err.status < 500) {
         return reply.status(err.status).type('text/html').send(tokensPage(req, { listError: errorText(err) }));

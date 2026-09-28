@@ -38,76 +38,104 @@
 </div>
 <% } %>
 
-<div class="table-wrap">
-  <table>
-    <thead><tr><th>ID</th><th>Name</th><th>Prefix</th><th>Scopes</th><th>Projects</th><th>Expires</th><th>Last used</th><th>State</th><th></th></tr></thead>
-    <tbody>
-      <% if (it.tokens.length === 0) { %>
-      <tr>
-        <td colspan="9">
-          <div class="empty">
-            <p>No API tokens yet.</p>
-            <button class="btn primary" type="button" data-open-dialog="new-token">New token</button>
-          </div>
-        </td>
-      </tr>
-      <% } %>
-      <% it.tokens.forEach(function (t) { %>
-      <tr<%~ t.revoked_at !== null ? ' class="is-archived"' : '' %>>
-        <td><%= t.id %></td>
-        <td><%= t.name %><% if (t.kind === 'agent') { %> <span class="pill kind-agent">agent</span><% } %></td>
-        <td class="mono"><%= t.prefix %></td>
-        <td><% t.scopes.forEach(function (s) { %><span class="chip"><%= s %></span> <% }) %></td>
-        <td><% if (t.projects === null) { %><span class="muted">all</span><% } else if (t.projects.length === 0) { %><span class="muted">none</span><% } else { %><% t.projects.forEach(function (p) { %><span class="tag"><%= p %></span> <% }) %><% } %></td>
-        <td><% if (t.expires_at === null && t.revoked_at === null) { %><span class="pill status-paused">never expires</span><% } else if (t.expires_at === null) { %>never<% } else { %><time datetime="<%= it.fmt.iso(t.expires_at) %>" title="<%= it.fmt.iso(t.expires_at) %>"><%= it.fmt.ago(t.expires_at) %></time><% } %></td>
-        <td><% if (t.last_used_at === null) { %>—<% } else { %><time datetime="<%= it.fmt.iso(t.last_used_at) %>" title="<%= it.fmt.iso(t.last_used_at) %>"><%= it.fmt.ago(t.last_used_at) %></time><% } %></td>
-        <td><% if (t.revoked_at === null) { %><span class="pill status-active">active</span><% } else { %><span class="pill status-archived">revoked</span><% } %></td>
-        <td>
-          <% if (t.revoked_at === null) { %>
-          <button class="btn sm ghost" type="button" data-open-dialog="projects-<%= t.id %>">Projects</button>
-          <dialog class="confirm" id="projects-<%= t.id %>">
-            <h2>Projects for <%= t.name %></h2>
-            <form method="post" action="/tokens/<%= t.id %>/projects" class="form-grid">
-              <input type="hidden" name="csrf" value="<%= it.csrf %>" />
-              <label class="check"><input type="checkbox" name="all"<%~ t.projects === null ? ' checked' : '' %> /> All projects (including future ones)</label>
-              <fieldset class="chip-grid">
-                <legend>Or only these</legend>
-                <% it.projects.forEach(function (p) { %>
-                <label class="chip"><input type="checkbox" name="projects" value="<%= p.slug %>"<%~ t.projects !== null && t.projects.includes(p.slug) ? ' checked' : '' %> /> <%= p.slug %></label>
-                <% }) %>
-              </fieldset>
-              <div class="actions">
-                <button class="btn" type="button" data-close-dialog>Cancel</button>
-                <button class="btn primary" type="submit">Save</button>
-              </div>
-            </form>
-          </dialog>
-          <button class="btn sm danger" type="button" data-open-dialog="revoke-<%= t.id %>">Revoke</button>
-          <dialog class="confirm" id="revoke-<%= t.id %>">
-            <h2>Revoke token</h2>
-            <p>Revoke <%= t.name %>? Clients using it stop working immediately.</p>
-            <form method="post" action="/tokens/<%= t.id %>/revoke">
-              <input type="hidden" name="csrf" value="<%= it.csrf %>" />
-              <div class="actions">
-                <button class="btn" type="button" data-close-dialog>Cancel</button>
-                <button class="btn danger solid" type="submit">Revoke</button>
-              </div>
-            </form>
-          </dialog>
-          <% } %>
-        </td>
-      </tr>
-      <% }) %>
-    </tbody>
-  </table>
+<%
+  var GROUPS = [['projects', 'Projects'], ['docs', 'Docs'], ['secrets', 'Secrets']];
+  function access(scopes) {
+    if (scopes.indexOf('admin') !== -1) return [['Admin', 'full access']];
+    var out = [];
+    GROUPS.forEach(function (g) {
+      var verbs = scopes.filter(function (s) { return s.indexOf(g[0] + ':') === 0; }).map(function (s) { return s.slice(g[0].length + 1); });
+      if (verbs.length) out.push([g[1], verbs.join(' · ')]);
+    });
+    return out;
+  }
+  var active = it.tokens.filter(function (t) { return t.revoked_at === null; }).slice().reverse();
+  var revoked = it.tokens.filter(function (t) { return t.revoked_at !== null; }).slice().reverse();
+%>
+
+<% if (active.length === 0) { %>
+<div class="empty">
+  <p>No active API tokens.</p>
+  <button class="btn primary" type="button" data-open-dialog="new-token">New token</button>
 </div>
+<% } %>
+
+<ul class="token-list">
+  <% active.forEach(function (t) { %>
+  <li class="token-card">
+    <div class="token-main">
+      <div class="token-title">
+        <strong><%= t.label || t.name %></strong>
+        <% if (t.kind === 'agent') { %><span class="pill kind-agent">agent</span><% } %>
+        <% if (t.expires_at === null) { %><span class="pill status-paused">never expires</span><% } %>
+      </div>
+      <div class="token-sub"><% if (t.label) { %><span><%= t.name %></span><% } %><span class="mono"><%= t.prefix %>…</span></div>
+      <dl class="token-facts">
+        <div><dt>Projects</dt><dd><% if (t.projects === null) { %><span class="muted">all projects</span><% } else if (t.projects.length === 0) { %><span class="muted">none yet</span><% } else { %><% t.projects.forEach(function (p) { %><span class="tag"><%= p %></span> <% }) %><% } %></dd></div>
+        <div><dt>Access</dt><dd class="token-access"><% access(t.scopes).forEach(function (g) { %><span><b><%= g[0] %></b> <%= g[1] %></span><% }) %></dd></div>
+      </dl>
+      <div class="token-times">
+        <span>Last used <% if (t.last_used_at === null) { %>never<% } else { %><time datetime="<%= it.fmt.iso(t.last_used_at) %>" title="<%= it.fmt.iso(t.last_used_at) %>"><%= it.fmt.ago(t.last_used_at) %></time><% } %></span>
+        <% if (t.expires_at !== null) { %><span>Expires <time datetime="<%= it.fmt.iso(t.expires_at) %>" title="<%= it.fmt.iso(t.expires_at) %>"><%= it.fmt.ago(t.expires_at) %></time></span><% } %>
+        <span>Created <time datetime="<%= it.fmt.iso(t.created_at) %>" title="<%= it.fmt.iso(t.created_at) %>"><%= it.fmt.ago(t.created_at) %></time></span>
+      </div>
+    </div>
+    <div class="token-actions">
+      <button class="btn sm" type="button" data-open-dialog="manage-<%= t.id %>">Manage</button>
+    </div>
+
+    <dialog class="confirm token-manage" id="manage-<%= t.id %>">
+      <h2><%= t.label || t.name %></h2>
+      <p class="note"><%= t.name %> · <span class="mono"><%= t.prefix %>…</span></p>
+
+      <form method="post" action="/tokens/<%= t.id %>/label" class="form-grid">
+        <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+        <label>Name shown here <input name="label" value="<%= t.label || '' %>" maxlength="100" placeholder="e.g. Easy Renovation · home PC" /></label>
+        <p class="note">Only for telling tokens apart. Leave empty to show <%= t.name %>.<% if (t.kind === 'agent') { %> A reconnect of the same session keeps it.<% } %></p>
+        <div class="actions"><button class="btn primary" type="submit">Save name</button></div>
+      </form>
+
+      <form method="post" action="/tokens/<%= t.id %>/projects" class="form-grid">
+        <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+        <fieldset class="chip-grid">
+          <legend>Projects</legend>
+          <label class="chip"><input type="checkbox" name="all"<%~ t.projects === null ? ' checked' : '' %> /> all projects</label>
+          <% it.projects.forEach(function (p) { %>
+          <label class="chip"><input type="checkbox" name="projects" value="<%= p.slug %>"<%~ t.projects !== null && t.projects.includes(p.slug) ? ' checked' : '' %> /> <%= p.slug %></label>
+          <% }) %>
+        </fieldset>
+        <div class="actions"><button class="btn primary" type="submit">Save projects</button></div>
+      </form>
+
+      <form method="post" action="/tokens/<%= t.id %>/revoke" class="danger-zone">
+        <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+        <div><strong>Revoke</strong><p class="note">Clients using this token stop working immediately. This cannot be undone.</p></div>
+        <button class="btn danger solid" type="submit">Revoke token</button>
+      </form>
+
+      <div class="actions"><button class="btn" type="button" data-close-dialog>Close</button></div>
+    </dialog>
+  </li>
+  <% }) %>
+</ul>
+
+<% if (revoked.length > 0) { %>
+<details class="revoked-tokens">
+  <summary>Revoked tokens (<%= revoked.length %>)</summary>
+  <ul>
+    <% revoked.forEach(function (t) { %>
+    <li><span><%= t.label || t.name %></span> <span class="mono muted"><%= t.prefix %>…</span> <span class="muted">revoked <time datetime="<%= it.fmt.iso(t.revoked_at) %>"><%= it.fmt.ago(t.revoked_at) %></time></span></li>
+    <% }) %>
+  </ul>
+</details>
+<% } %>
 
 <dialog class="confirm" id="new-token"<%~ it.error ? ' data-open-on-load' : '' %>>
   <h2>New token</h2>
   <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
   <form method="post" action="/tokens" class="form-grid">
     <input type="hidden" name="csrf" value="<%= it.csrf %>" />
-    <label>Name <input name="name" required /></label>
+    <label>Name <input name="name" required maxlength="100" placeholder="e.g. CI deploy" /></label>
     <fieldset class="chip-grid">
       <legend>Scopes</legend>
       <% it.scopes.forEach(function (s) { %>

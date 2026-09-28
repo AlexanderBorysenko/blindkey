@@ -236,7 +236,7 @@ Claude Code caches an installed plugin by its `version` (`plugin/.claude-plugin/
 ### Admin side
 
 - **Approval page.** `/connect?code=…` is reached from the link `pidb connect` prints, and requires the admin session. It lists the requesting name, IP and user agent. Only agent scopes are offered: `projects:read`, `projects:write`, `projects:create`, `docs:read`, `docs:write`, `secrets:meta`, `secrets:meta-write`, `secrets:use`. Global docs and secrets are visible to any project-scoped token. With `projects:create` the approval may pick no project at all: projects the agent creates are added to its token. Deny refuses the request.
-- **Tokens page.** An approved request shows under "Approved — waiting for the agent" until the agent's next poll mints the token (the page refreshes itself). **Projects** on a token row changes which projects it can reach, including "all projects".
+- **Tokens page.** An approved request shows under "Approved — waiting for the agent" until the agent's next poll mints the token (the page refreshes itself). Each token is a card; **Manage** renames it (a display name, e.g. "Easy Renovation · home PC" — a reconnect of the same agent session keeps it), changes which projects it can reach (including "all projects"), or revokes it. The approval page can set that name up front. Revoked tokens are folded away at the bottom.
 - **Tokens.** `/tokens` lists agent tokens with an `agent` pill, next to user tokens. Revoke one there to cut the agent off immediately; its next call gets 401, and Claude will ask for `/pidb:connect`.
 - **Audit.** `/audit` records `connect.started`, `connect.approved`, `connect.denied`, `connect.token_issued` and every `secret.used` (purpose, field keys, whether an agent made the call).
 

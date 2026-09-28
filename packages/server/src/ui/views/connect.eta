@@ -41,6 +41,8 @@
       <% }) %>
     </fieldset>
 
+    <label>Name for this session (optional) <input name="label" maxlength="100" value="<%= it.selected.label %>" placeholder="e.g. Easy Renovation · home PC" /></label>
+
     <label>Expires in (days) <input type="number" name="expires_days" min="1" max="365" value="<%= it.selected.expiresDays %>" required /></label>
 
     <div class="actions">

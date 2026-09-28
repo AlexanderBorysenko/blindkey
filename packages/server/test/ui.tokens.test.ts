@@ -26,11 +26,11 @@ afterAll(async () => {
 });
 
 describe('ui tokens', () => {
-  it('lists every scope as a checkbox and shows the table', async () => {
+  it('lists every scope as a checkbox and shows the token list', async () => {
     const res = await page('/tokens');
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('secrets:reveal');
-    expect(res.body).toContain('<th>Prefix</th>');
+    expect(res.body).toContain('class="token-list"');
   });
 
   it('creates a token, shows the value once, and never shows it again', async () => {
@@ -116,8 +116,27 @@ describe('ui tokens', () => {
     const revokedId = listTokens(t.db).find((r) => r.name === 'style-revoked')!.id;
     await post(`/tokens/${revokedId}/revoke`, { csrf });
     const res = await page('/tokens');
-    expect(res.body).toContain('class="pill status-active"');
-    expect(res.body).toContain('class="pill status-archived"');
+    const [activePart, revokedPart = ''] = res.body.split('class="revoked-tokens"');
+    expect(activePart).toContain('style-active');
+    expect(activePart).toContain(`/tokens/${listTokens(t.db).find((r) => r.name === 'style-active')!.id}/revoke`);
+    expect(activePart).not.toContain('style-revoked');
+    expect(revokedPart).toContain('style-revoked');
+    expect(revokedPart).toContain('Revoked tokens (');
+  });
+
+  it('renames a token (label), shows it instead of the name, and clears it when blank', async () => {
+    await post('/tokens', { csrf, name: 'machine-name', scopes: 'docs:read' });
+    const id = listTokens(t.db).find((r) => r.name === 'machine-name')!.id;
+    const r = await post(`/tokens/${id}/label`, { csrf, label: '  Easy   Renovation · home <b>PC</b> ' });
+    expect(r.statusCode).toBe(302);
+    expect(listTokens(t.db).find((x) => x.id === id)!.label).toBe('Easy Renovation · home <b>PC</b>');
+    const body = (await page('/tokens')).body;
+    expect(body).toContain('<strong>Easy Renovation · home &lt;b&gt;PC&lt;/b&gt;</strong>');
+    expect(body).not.toContain('<b>PC</b>');
+    await post(`/tokens/${id}/label`, { csrf, label: '   ' });
+    expect(listTokens(t.db).find((x) => x.id === id)!.label).toBeNull();
+    expect((await post(`/tokens/${id}/label`, { csrf, label: 'x'.repeat(101) })).statusCode).toBe(400);
+    expect((await post(`/tokens/${id}/label`, { label: 'no csrf' })).statusCode).toBe(403);
   });
 
   it('rejects create and revoke without a CSRF token', async () => {
