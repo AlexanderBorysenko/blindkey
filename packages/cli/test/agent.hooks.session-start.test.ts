@@ -150,6 +150,21 @@ describe('sessionContext — server down / unreachable', () => {
     expectGoldenRules(context);
   });
 
+  it('caps a caller-supplied timeoutMs at 4000ms — it can shrink the budget but never grow it (Fix round 2 N5)', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+    saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });
+    await store.set('work', s.token(['projects:read']));
+
+    const hangingFetch: typeof fetch = () => new Promise(() => {}); // never resolves
+    const start = Date.now();
+    // Asking for a 10s budget must still give up at the spec's hard 4s ceiling, not wait the full 10s.
+    const context = await sessionContext({ cwd, dataDir, store, fetchImpl: hangingFetch, timeoutMs: 10_000 });
+    expect(Date.now() - start).toBeLessThan(4500);
+
+    expect(context).toContain('is unreachable right now');
+    expectGoldenRules(context);
+  });
+
   it('a slow store.get eats into the same shared budget the fetch would otherwise get (Fix round 1 Minor #10)', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
     saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });

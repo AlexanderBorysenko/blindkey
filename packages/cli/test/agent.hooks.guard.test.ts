@@ -80,6 +80,34 @@ describe('guardDecision — rule 1: pidb + disabled subcommand', () => {
     expectDeny(bash('echo hi && pidb login https://x'));
     expectDeny(bash('true; pidb token list'));
   });
+
+  describe('Fix round 2 N3 — only pidb\'s OWN args (before its own first " -- ") are checked', () => {
+    it.each([
+      ['pidb secret exec acme DB -- npm run get-data'],
+      ['pidb secret exec acme DB -- curl https://api.example.com/get'],
+      ['pidb secret exec acme DB -- node scripts/get-users.js'],
+      ['pidb secret exec acme "get token" -- npm test'],
+      ['pidb secret exec acme DB -- ./deploy.sh --print-summary'],
+    ])('allows: %s', (command) => {
+      expectAllow(bash(command));
+    });
+
+    it('denies a real invocation on its own line after an unrelated earlier command', () => {
+      expectDeny(bash('cd x\npidb login'));
+    });
+
+    it('denies "npx pidb login"', () => {
+      expectDeny(bash('npx pidb login'));
+    });
+
+    it('denies a parenthesized subshell invocation', () => {
+      expectDeny(bash('(pidb token list)'));
+    });
+
+    it('denies a command-substitution invocation', () => {
+      expectDeny(bash('echo $(pidb secret get acme DB)'));
+    });
+  });
 });
 
 describe('guardDecision — rule 2: pidb secret exec whose child prints the environment (Fix round 1 Important #2)', () => {
@@ -155,6 +183,32 @@ describe('guardDecision — rule 2: pidb secret exec whose child prints the envi
 
   it('a docker/node --env flag is never confused with the bare `env` command', () => {
     expectAllow(bash('pidb secret exec acme DB -- docker run --env DEBUG=1 image'));
+  });
+
+  describe('Fix round 2 N2/N3 — segment model over the secret-exec child', () => {
+    it.each([
+      // env-dump, unwrapped through a shell -c wrapper and/or a pipe segment
+      [`sh -c 'env | grep PIDB'`],
+      [`bash -c "printenv | sort"`],
+      [`sh -c 'set | grep PIDB'`],
+      [`sh -c 'export -p'`],
+      ['env|grep PIDB'],
+      ['printenv|grep PIDB'],
+      [`node -pe 'process.env.PIDB_X'`],
+      [`python3 -c 'import os;print(os.getenv("PIDB_X"))'`],
+      [`bash -c 'set -o posix; set'`],
+      ['cat /proc/$$/environ'],
+    ])('denies: %s', (child) => {
+      expectDeny(bash(`pidb secret exec acme DB -- ${child}`));
+    });
+
+    it.each([
+      [`sh -c 'curl -H "Content-Type: application/json" -u "$PIDB_USER:$PIDB_PASSWORD" https://api'`],
+      [`sh -c 'psql "postgres://x:$PIDB_PASSWORD@h/db" -c "select 1" && echo ok'`],
+      [`sh -c 'cat schema.sql | psql "postgresql://$PIDB_USER:$PIDB_PASSWORD@h/db"'`],
+    ])('allows (print verb only on a segment that never references $PIDB_*): %s', (child) => {
+      expectAllow(bash(`pidb secret exec acme DB -- ${child}`));
+    });
   });
 });
 
@@ -265,6 +319,64 @@ describe('guardDecision — rule 3: cwd-relative resolution + path-segment bound
   });
 });
 
+describe('guardDecision — rule 3: ancestor direction restricted to recursive search only (Fix round 2 N1)', () => {
+  const ctx: GuardContext = { ...posixCtx, written: ['/repo/.env'] };
+  const cwd = '/repo';
+
+  it('a PLAIN grep (no -r/-R/--recursive) over a directory that merely CONTAINS a written file is allowed', () => {
+    expectAllow(bash('grep DATABASE_URL .', ctx, cwd), ctx);
+  });
+
+  it.each([['ag DATABASE_URL .'], ['ack DATABASE_URL .'], ['git grep DATABASE_URL .'], ['grep -R DATABASE_URL .'], ['grep --recursive DATABASE_URL .']])(
+    'denies a recursive search tool over the ancestor directory: %s',
+    (command) => {
+      expectDeny(bash(command, ctx, cwd), ctx);
+    },
+  );
+
+  it('denies `find . -exec grep` piped into a read command over the written file\'s directory', () => {
+    expectDeny(bash('find . -type f -exec cat {} \\;', ctx, cwd), ctx);
+  });
+
+  it('denies `find . | xargs cat`', () => {
+    expectDeny(bash('find . | xargs cat', ctx, cwd), ctx);
+  });
+
+  it('a `find` without -exec/xargs is not treated as recursive (no ancestor direction)', () => {
+    expectAllow(bash('find . -name "*.ts"', ctx, cwd), ctx);
+  });
+});
+
+describe('guardDecision — rule 3: cwd/home/root/\'\' tokens never trigger unless recursive (Fix round 2 N4)', () => {
+  const ctx: GuardContext = { ...posixCtx, written: ['/repo/.env'] };
+  const cwd = '/repo';
+
+  it.each([
+    ['curl -s localhost:3000/api | jq .'],
+    ['find . -name "*.ts" | head'],
+    ['du -sh . | tail -1'],
+    ['git add . && git commit'],
+    ['sed -i \'\' "s/a/b/" src/x.ts'],
+    ['ls .. | head'],
+  ])('allows: %s', (command) => {
+    expectAllow(bash(command, ctx, cwd), ctx);
+  });
+
+  it('BUT `git add` of an explicit written file path still denies', () => {
+    expectDeny(bash('git add /repo/.env', ctx, cwd), ctx);
+  });
+
+  it('denies `cat .env*` — a glob token whose non-glob prefix matches a written basename in cwd', () => {
+    expectDeny(bash('cat .env*', ctx, cwd), ctx);
+  });
+
+  it('tracks `cd <dir>` so a later segment resolves against the new effective cwd', () => {
+    // written is /repo/.env; cwd starts at /elsewhere, but `cd /repo` before the read makes it reachable.
+    expectDeny(bash('cd /repo && cat .env', ctx, '/elsewhere'), ctx);
+    expectAllow(bash('cd /elsewhere && cat .env', ctx, '/repo'), ctx);
+  });
+});
+
 describe('guardDecision — rule 3: protected paths (Read/Grep/Glob/Edit/Write file_path/path args)', () => {
   it('denies Read of a file inside the plugin data dir', () => {
     expectDeny(tool('Read', { file_path: '/home/alex/.claude/plugins/data/pidb-pidb/profiles.json' }));
@@ -348,6 +460,38 @@ describe('guardDecision — rule 3: protected paths (Read/Grep/Glob/Edit/Write f
       );
     });
   });
+
+  describe('Grep gets the ancestor direction; Glob/Read/Edit/Write and mcp__* never do (Fix round 2 N1)', () => {
+    const ctx: GuardContext = { ...posixCtx, written: ['/repo/.env'] };
+
+    it('denies a Grep whose `path` is a directory that merely CONTAINS a written file', () => {
+      expectDeny(tool('Grep', { pattern: 'X', path: '/repo' }, ctx), ctx);
+    });
+
+    it.each([
+      ['Glob', { pattern: '*', path: '/repo' }],
+      ['Read', { file_path: '/repo' }],
+      ['Edit', { file_path: '/repo', old_string: 'a', new_string: 'b' }],
+      ['Write', { file_path: '/repo', content: 'x' }],
+      ['LS', { path: '/repo' }],
+    ])('allows %s whose path is only an ANCESTOR of a written file (not nested inside one)', (name, input) => {
+      expectAllow(tool(name, input, ctx), ctx);
+    });
+
+    it("an mcp__* tool's non-path-like string (no / or \\, doesn't start with ~) is never treated as a path", () => {
+      // "env" happens to be a written-file basename's prefix, but as a bare word (no separator) it
+      // isn't path-like at all, so it must never be resolved/compared.
+      expectAllow(tool('mcp__pidb__some_future_tool', { name: 'env' }, ctx), ctx);
+    });
+
+    it("an mcp__* tool's '' / '.' string args are never treated as the effective cwd", () => {
+      expectAllow(tool('mcp__pidb__some_future_tool', { a: '', b: '.' }, ctx), ctx);
+    });
+
+    it('an mcp__* tool call never gets the ancestor direction either, even with a path-like arg', () => {
+      expectAllow(tool('mcp__pidb__some_future_tool', { target: '/repo' }, ctx), ctx);
+    });
+  });
 });
 
 describe('guardDecision — rule 4: reading an OS credential store', () => {
@@ -405,6 +549,10 @@ describe('guardDecision — rule 5: direct HTTP against a configured pidb server
 
     it('denies curl against ::1:8080 when the configured server is 127.0.0.1:8080', () => {
       expectDeny(bash('curl http://::1:8080/api/v1/projects', ctx), ctx);
+    });
+
+    it('denies the correct bracketed IPv6 URL literal form [::1]:8080 (Fix round 2 minor)', () => {
+      expectDeny(bash('curl http://[::1]:8080/api/v1/projects', ctx), ctx);
     });
 
     it('denies a scheme-less mention of host:port', () => {

@@ -202,7 +202,9 @@ export function fallbackContext(message: string): string {
  * saves the day, this is redundant with it — belt and braces for a hook that must never crash).
  */
 export async function sessionContext(deps: SessionStartDeps): Promise<string> {
-  const deadline = Date.now() + (deps.timeoutMs ?? 4000);
+  // Fix round 2 N5: restore the hard ≤4s cap — a caller-supplied `timeoutMs` can shrink the budget
+  // but never grow it past the spec's own ceiling.
+  const deadline = Date.now() + Math.min(deps.timeoutMs ?? 4000, 4000);
   if (deps.ensureDeps) {
     try {
       await withDeadline(Promise.resolve(deps.ensureDeps()), deadline);

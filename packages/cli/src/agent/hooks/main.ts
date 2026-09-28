@@ -25,14 +25,17 @@ async function readStdin(): Promise<string> {
 /**
  * Reads the hook kind from argv[2], the hook JSON from stdin, runs it, and writes the result —
  * always exiting 0 regardless of outcome (a hook that fails Claude Code's tool loop is worse than
- * one that silently allows/skips/degrades, spec §3.1–§3.3).
+ * one that silently allows/skips/degrades, spec §3.1–§3.3). Calls `process.exit(0)` itself (Fix round
+ * 2, reviewer-flagged out-of-scope note) rather than only setting `process.exitCode` — a
+ * `withDeadline`-bounded timer or an in-flight `fetch` that "lost" the race can otherwise keep an
+ * open handle alive and prevent Node from ever exiting on its own, hanging Claude Code's hook call
+ * until *that* work finishes minutes later, long after the JSON result was already written.
  */
 export async function main(): Promise<void> {
   const kindArg = process.argv[2];
   if (!isValidKind(kindArg)) {
     console.error(`pidb hook: unknown or missing kind "${kindArg ?? ''}" (expected guard|redact|session-start)`);
-    process.exitCode = 0;
-    return;
+    process.exit(0);
   }
 
   let stdinText = '';
@@ -46,7 +49,7 @@ export async function main(): Promise<void> {
   const result = await runHook(kindArg, stdinText, process.env);
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) console.error(result.stderr);
-  process.exitCode = 0;
+  process.exit(0);
 }
 
 // Run only when this module is the entry point, so tests can import it freely. See `cli.ts`'s own
@@ -66,6 +69,6 @@ if (isEntryPoint()) {
     // `runHook` itself is documented to never throw, but guard the process boundary too — a bug that
     // somehow escapes it must still never crash Claude Code's tool loop.
     console.error(`pidb hook: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
-    process.exitCode = 0;
+    process.exit(0);
   });
 }
