@@ -200,12 +200,12 @@ If the install fails, the output is in `deps-install.log` in that directory. It 
 
 ```bash
 cd ~/src/projects-info-db && git pull
-npm install && npm run build:plugin     # only if you changed packages/cli/src/agent/** yourself
+npm install && npm run build:plugin     # only if you changed packages/cli/src/** or packages/shared/src/** yourself
 claude plugin marketplace update pidb
 claude plugin update pidb@pidb           # then restart Claude Code
 ```
 
-Claude Code caches an installed plugin by its `version` (`plugin/.claude-plugin/plugin.json`). When you change the plugin, bump that version; otherwise `claude plugin uninstall pidb@pidb` and install it again. CI fails if `plugin/dist` is stale: `packages/cli/test/plugin.bundle.test.ts` rebuilds the bundles and compares them, so run `npm run build:plugin` and commit `plugin/dist` along with any change to the agent sources.
+Claude Code caches an installed plugin by its `version` (`plugin/.claude-plugin/plugin.json`). When you change the plugin, bump that version; otherwise `claude plugin uninstall pidb@pidb` and install it again. The committed bundles are checked by the local test run: `npm test` (`packages/cli/test/plugin.bundle.test.ts`) rebuilds them and fails when `plugin/dist` is stale. After any change under `packages/cli/src/**` or `packages/shared/src/**`, run `npm run build:plugin` and commit `plugin/dist` with it.
 
 ### First use
 

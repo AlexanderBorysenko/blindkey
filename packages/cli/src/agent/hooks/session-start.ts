@@ -190,8 +190,8 @@ function finalize(bodyLines: string[]): string {
  * (e.g. the dispatcher's `keyringStore(dataDir)` construction). Exported so `index.ts`'s outermost
  * safety net can produce the exact same shape rather than a hand-rolled, possibly-incomplete one.
  */
-export function fallbackContext(message: string): string {
-  return finalize([`pidb: session context unavailable (${message}).`]);
+export function fallbackContext(message: string, notes: readonly string[] = []): string {
+  return finalize([...notes, `pidb: session context unavailable (${message}).`]);
 }
 
 /**
@@ -219,6 +219,6 @@ export async function sessionContext(deps: SessionStartDeps): Promise<string> {
     return finalize([...notes, ...(await buildBody(deps, deadline))]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return finalize([...notes, `pidb: session context unavailable (${message}).`]);
+    return fallbackContext(message, notes);
   }
 }

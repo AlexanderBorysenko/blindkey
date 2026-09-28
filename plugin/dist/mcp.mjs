@@ -19572,11 +19572,21 @@ function isScopeError(result) {
   const text = first && first.type === "text" ? first.text : "";
   return /^(missing_scope|forbidden):/.test(text);
 }
-function withWidenHint(result) {
+function isProjectNotFound(result) {
+  if (result.isError !== true) return false;
+  const first = result.content[0];
+  const text = first && first.type === "text" ? first.text : "";
+  return /^not_found: project not found\b/.test(text);
+}
+var PROJECT_NOT_FOUND_HINT = "the project does not exist or the token was not approved for it — run `pidb connect` and approve that project in the browser, or check the slug with list_projects";
+function withHint(result, hint) {
   return {
     ...result,
-    content: result.content.map((c) => c.type === "text" ? { ...c, text: `${c.text} — ${WIDEN_HINT}` } : c)
+    content: result.content.map((c) => c.type === "text" ? { ...c, text: `${c.text} — ${hint}` } : c)
   };
+}
+function withWidenHint(result) {
+  return withHint(result, WIDEN_HINT);
 }
 function createBridge(deps) {
   const env = deps.env ?? process.env;
@@ -19629,7 +19639,8 @@ function createBridge(deps) {
   async function attemptUpstreamCall(cfg, name, args) {
     const client = await getUpstreamClient(cfg.url, cfg.token);
     const result = await client.callTool({ name, arguments: args });
-    return isScopeError(result) ? withWidenHint(result) : result;
+    if (isScopeError(result)) return withWidenHint(result);
+    return isProjectNotFound(result) ? withHint(result, PROJECT_NOT_FOUND_HINT) : result;
   }
   async function callUpstreamTool(cfg, name, args) {
     try {

@@ -156,6 +156,18 @@ describe('MCP bridge (spec §2.4)', () => {
     expect(text).toMatch(/pidb connect.*widen/);
   });
 
+  it('project not found (missing OR not approved for this token) gets a connect-to-widen hint naming both possibilities', async () => {
+    connectedProfile(['projects:read']);
+    const client = await connectBridge();
+    const res = (await client.callTool({ name: 'get_project', arguments: { slug: 'no-such-project' } })) as CallToolResult;
+    expect(res.isError).toBe(true);
+    const text = textOf(res);
+    expect(text).toMatch(/not_found/);
+    expect(text).toMatch(/does not exist or the token was not approved for it/);
+    expect(text).toMatch(/pidb connect/);
+    expect(text).toMatch(/list_projects/);
+  });
+
   it('drops the cached upstream client on a 401 so a later call with a refreshed token succeeds', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
     const expired = createToken(s.db, {

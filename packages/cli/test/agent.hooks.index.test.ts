@@ -188,4 +188,16 @@ describe('runHook — CLAUDE_PLUGIN_DATA vs resolveDataDir precedence', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toContain('work');
     expect(parsed.hookSpecificOutput.additionalContext).not.toContain('other-profile');
   });
+
+  it('treats an empty CLAUDE_PLUGIN_DATA as unset (falls back to PIDB_PLUGIN_DATA via resolveDataDir), same as main.ts', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } });
+    const result = await runHook(
+      'session-start',
+      JSON.stringify({ hook_event_name: 'SessionStart', cwd: '/repo' }),
+      { CLAUDE_PLUGIN_DATA: '', PIDB_PLUGIN_DATA: dataDir },
+      { store: memoryStore() },
+    );
+    const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { additionalContext: string } };
+    expect(parsed.hookSpecificOutput.additionalContext).toContain('profile "work"');
+  });
 });

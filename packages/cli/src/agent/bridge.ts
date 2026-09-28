@@ -102,11 +102,29 @@ function isScopeError(result: CallToolResult): boolean {
   return /^(missing_scope|forbidden):/.test(text);
 }
 
-function withWidenHint(result: CallToolResult): CallToolResult {
+/**
+ * The server answers "project not found" both for a slug that doesn't exist and for one the token
+ * wasn't approved for (it never reveals which — `loadProjectFor`), so that error gets a hint too.
+ */
+function isProjectNotFound(result: CallToolResult): boolean {
+  if (result.isError !== true) return false;
+  const first = result.content[0];
+  const text = first && first.type === 'text' ? first.text : '';
+  return /^not_found: project not found\b/.test(text);
+}
+
+const PROJECT_NOT_FOUND_HINT =
+  'the project does not exist or the token was not approved for it — run `pidb connect` and approve that project in the browser, or check the slug with list_projects';
+
+function withHint(result: CallToolResult, hint: string): CallToolResult {
   return {
     ...result,
-    content: result.content.map((c) => (c.type === 'text' ? { ...c, text: `${c.text} — ${WIDEN_HINT}` } : c)),
+    content: result.content.map((c) => (c.type === 'text' ? { ...c, text: `${c.text} — ${hint}` } : c)),
   };
+}
+
+function withWidenHint(result: CallToolResult): CallToolResult {
+  return withHint(result, WIDEN_HINT);
 }
 
 export function createBridge(deps: BridgeDeps): Server {
@@ -179,7 +197,8 @@ export function createBridge(deps: BridgeDeps): Server {
   async function attemptUpstreamCall(cfg: AgentConfig, name: string, args: Record<string, unknown> | undefined): Promise<CallToolResult> {
     const client = await getUpstreamClient(cfg.url, cfg.token);
     const result = (await client.callTool({ name, arguments: args })) as CallToolResult;
-    return isScopeError(result) ? withWidenHint(result) : result;
+    if (isScopeError(result)) return withWidenHint(result);
+    return isProjectNotFound(result) ? withHint(result, PROJECT_NOT_FOUND_HINT) : result;
   }
 
   /**

@@ -7,14 +7,162 @@ import { fileURLToPath } from "node:url";
 
 // packages/cli/src/agent/deps.ts
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync as mkdirSync2, openSync, closeSync, readFileSync as readFileSync2 } from "node:fs";
-import { dirname as dirname2, join as join2 } from "node:path";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+var NPM_ARGS = ["install", "--omit=dev", "--no-audit", "--no-fund"];
+var RETRY_MS = 10 * 6e4;
+var MARKER = "deps-install.json";
+var LOG = "deps-install.log";
+function npmSpawnSpec(platform, env) {
+  if (platform === "win32") {
+    return { command: env.ComSpec ?? env.COMSPEC ?? "cmd.exe", args: ["/d", "/s", "/c", `npm.cmd ${NPM_ARGS.join(" ")}`], windowsVerbatimArguments: true };
+  }
+  return { command: "npm", args: [...NPM_ARGS] };
+}
+var WRAPPER_SCRIPT = [
+  "const { spawn } = require('child_process');",
+  "const fs = require('fs');",
+  "const spec = JSON.parse(process.argv[1]);",
+  "const startedAt = Number(process.argv[2]);",
+  "let recorded = false;",
+  "const done = (exitCode) => {",
+  "  if (recorded) return;",
+  "  recorded = true;",
+  `  const tmp = ${JSON.stringify(MARKER)} + '.' + process.pid + '.tmp';`,
+  "  fs.writeFileSync(tmp, JSON.stringify({ startedAt, finishedAt: Date.now(), exitCode }));",
+  `  fs.renameSync(tmp, ${JSON.stringify(MARKER)});`,
+  "};",
+  "let child;",
+  "try {",
+  "  child = spawn(spec.command, spec.args, { stdio: 'inherit', windowsHide: true, windowsVerbatimArguments: !!spec.windowsVerbatimArguments });",
+  "} catch (err) { console.error(String(err)); done(-1); process.exit(0); }",
+  "child.on('error', (err) => { console.error(String(err)); done(-1); });",
+  "child.on('close', (code) => done(code === null ? -1 : code));"
+].join("\n");
+function pluginRootFrom(env, selfPath = process.argv[1] ?? "") {
+  return env.CLAUDE_PLUGIN_ROOT || dirname(dirname(selfPath));
+}
+function defaultCanLoad(dataDir) {
+  try {
+    createRequire(join(dataDir, "package.json"))("@napi-rs/keyring");
+    return true;
+  } catch {
+    return false;
+  }
+}
+function depsInstalled(dataDir, canLoad = defaultCanLoad) {
+  return existsSync(join(dataDir, "node_modules", "@napi-rs", "keyring", "package.json")) && canLoad(dataDir);
+}
+function readMarker(path) {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof parsed.startedAt !== "number") return null;
+    return {
+      startedAt: parsed.startedAt,
+      finishedAt: typeof parsed.finishedAt === "number" ? parsed.finishedAt : void 0,
+      exitCode: typeof parsed.exitCode === "number" ? parsed.exitCode : void 0
+    };
+  } catch {
+    return null;
+  }
+}
+function claimMarker(path, startedAt) {
+  let fd;
+  try {
+    fd = openSync(path, "wx", 384);
+  } catch (err) {
+    if (err.code === "EEXIST") return false;
+    throw err;
+  }
+  try {
+    writeSync(fd, JSON.stringify({ startedAt }));
+  } finally {
+    closeSync(fd);
+  }
+  return true;
+}
+function ensureDeps(opts) {
+  const { dataDir, pluginRoot } = opts;
+  const now = opts.now ?? Date.now;
+  const markerPath = join(dataDir, MARKER);
+  const logPath = join(dataDir, LOG);
+  try {
+    if (depsInstalled(dataDir, opts.canLoad)) return void 0;
+    const pkg = join(pluginRoot, "package.json");
+    if (!existsSync(pkg) || !existsSync(join(pluginRoot, ".claude-plugin", "plugin.json"))) return void 0;
+    const marker = existsSync(markerPath) ? readMarker(markerPath) : null;
+    if (marker) {
+      const running = marker.exitCode === void 0;
+      const since = running ? marker.startedAt : marker.finishedAt ?? marker.startedAt;
+      const age = now() - since;
+      if (age >= 0 && age < RETRY_MS) {
+        if (running) {
+          return `pidb: plugin dependencies are still installing (started ${Math.round(age / 1e3)}s ago) — \`pidb connect\` and token access work once npm finishes.`;
+        }
+        const retryMin = Math.max(1, Math.ceil((RETRY_MS - age) / 6e4));
+        return `pidb: plugin dependency install failed (npm exit ${marker.exitCode}) — see ${logPath}; it is retried on a session start in ~${retryMin} min, or the user can run \`npm install --omit=dev\` in ${dataDir}.`;
+      }
+    }
+    if (existsSync(markerPath)) unlinkSync(markerPath);
+    mkdirSync(dataDir, { recursive: true });
+    const startedAt = now();
+    if (!claimMarker(markerPath, startedAt)) {
+      return "pidb: plugin dependencies are being installed by another session — `pidb connect` and token access work once npm finishes.";
+    }
+    try {
+      copyFileSync(pkg, join(dataDir, "package.json"));
+      const spec = npmSpawnSpec(opts.platform ?? process.platform, opts.env ?? process.env);
+      const logFd = openSync(logPath, "a");
+      try {
+        const child = (opts.spawnImpl ?? spawn)(
+          opts.nodePath ?? process.execPath,
+          ["-e", WRAPPER_SCRIPT, JSON.stringify(spec), String(startedAt)],
+          { cwd: dataDir, detached: true, stdio: ["ignore", logFd, logFd], windowsHide: true }
+        );
+        child.on("error", () => {
+        });
+        child.unref();
+      } finally {
+        closeSync(logFd);
+      }
+    } catch (err) {
+      try {
+        unlinkSync(markerPath);
+      } catch {
+      }
+      throw err;
+    }
+    return "pidb: installing plugin dependencies (@napi-rs/keyring) in the background — `pidb connect` and token access work once it finishes (usually under a minute; otherwise next session).";
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `pidb: could not start the plugin dependency install (${message}) — ask the user to run \`npm install --omit=dev\` in the plugin data dir (${dataDir}).`;
+  }
+}
+
+// packages/cli/src/agent/datadir.ts
+import { homedir } from "node:os";
+import { join as join2 } from "node:path";
+var PLUGIN_CACHE_PATH = /^(.*[\\/]plugins)([\\/])cache[\\/]([^\\/]+)[\\/]([^\\/]+)[\\/]([^\\/]+)[\\/]dist[\\/][^\\/]+$/;
+function derivedDataDir(selfPath) {
+  const m = PLUGIN_CACHE_PATH.exec(selfPath);
+  if (!m) return null;
+  const [, pluginsDir, sep2, marketplace, plugin, version] = m;
+  if (!pluginsDir || !sep2 || !marketplace || !plugin || !version) return null;
+  return `${pluginsDir}${sep2}data${sep2}${plugin}-${marketplace}`;
+}
+function resolveDataDir(env = process.env, selfPath = process.argv[1] ?? "") {
+  if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
+  return derivedDataDir(selfPath) ?? join2(env.HOME ?? homedir(), ".claude", "plugins", "data", "pidb-pidb");
+}
+
+// packages/cli/src/agent/hooks/index.ts
+import { homedir as homedir2 } from "node:os";
 
 // packages/cli/src/agent/state.ts
 import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { basename, dirname as dirname2, isAbsolute, join as join3, relative, resolve, sep } from "node:path";
 import nodePath from "node:path";
 
 // packages/cli/src/errors.ts
@@ -34,7 +182,7 @@ var CliError = class extends Error {
 function readJsonFile(path, fallback) {
   let raw;
   try {
-    raw = readFileSync(path, "utf8");
+    raw = readFileSync2(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return fallback;
     throw new CliError(`cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`);
@@ -45,18 +193,11 @@ function readJsonFile(path, fallback) {
     throw new CliError(`${path} is not valid JSON`);
   }
 }
-function writeJsonAtomic(path, data) {
-  mkdirSync(dirname(path), { recursive: true, mode: 448 });
-  const tmp = `${path}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}
-`, { mode: 384 });
-  renameSync(tmp, path);
-}
 function profilesPath(dataDir) {
-  return join(dataDir, "profiles.json");
+  return join3(dataDir, "profiles.json");
 }
 function bindingsPath(dataDir) {
-  return join(dataDir, "bindings.json");
+  return join3(dataDir, "bindings.json");
 }
 function loadProfiles(dataDir) {
   return readJsonFile(profilesPath(dataDir), { default: null, profiles: {} });
@@ -65,7 +206,7 @@ function loadBindings(dataDir) {
   return readJsonFile(bindingsPath(dataDir), {});
 }
 function writtenPath(dataDir) {
-  return join(dataDir, "written.json");
+  return join3(dataDir, "written.json");
 }
 function loadWritten(dataDir) {
   return readJsonFile(writtenPath(dataDir), { paths: [] });
@@ -88,99 +229,17 @@ function repoKey(cwd, opts = {}) {
   return resolved.replace(/^([A-Za-z]):/, (_m, drive) => `${drive.toLowerCase()}:`);
 }
 
-// packages/cli/src/agent/deps.ts
-var NPM_ARGS = ["install", "--omit=dev", "--no-audit", "--no-fund"];
-var STALE_MS = 10 * 6e4;
-var MARKER = "deps-install.json";
-var LOG = "deps-install.log";
-function npmSpawnSpec(platform, env) {
-  if (platform === "win32") {
-    return { command: env.ComSpec ?? env.COMSPEC ?? "cmd.exe", args: ["/d", "/s", "/c", `npm.cmd ${NPM_ARGS.join(" ")}`], windowsVerbatimArguments: true };
-  }
-  return { command: "npm", args: [...NPM_ARGS] };
-}
-function pluginRootFrom(env, selfPath = process.argv[1] ?? "") {
-  return env.CLAUDE_PLUGIN_ROOT || dirname2(dirname2(selfPath));
-}
-function depsInstalled(dataDir) {
-  return existsSync(join2(dataDir, "node_modules", "@napi-rs", "keyring", "package.json"));
-}
-function markerStartedAt(dataDir) {
-  try {
-    const parsed = JSON.parse(readFileSync2(join2(dataDir, MARKER), "utf8"));
-    return typeof parsed.startedAt === "number" ? parsed.startedAt : null;
-  } catch {
-    return null;
-  }
-}
-function ensureDeps(opts) {
-  const { dataDir, pluginRoot } = opts;
-  const now = opts.now ?? Date.now;
-  try {
-    if (depsInstalled(dataDir)) return void 0;
-    const pkg = join2(pluginRoot, "package.json");
-    if (!existsSync(pkg) || !existsSync(join2(pluginRoot, ".claude-plugin", "plugin.json"))) return void 0;
-    const startedAt = markerStartedAt(dataDir);
-    if (startedAt !== null && now() - startedAt >= 0 && now() - startedAt < STALE_MS) {
-      const secs = Math.round((now() - startedAt) / 1e3);
-      return `pidb: plugin dependencies are still installing (started ${secs}s ago) — \`pidb connect\` and token access work once npm finishes.`;
-    }
-    mkdirSync2(dataDir, { recursive: true });
-    copyFileSync(pkg, join2(dataDir, "package.json"));
-    const spec = npmSpawnSpec(opts.platform ?? process.platform, opts.env ?? process.env);
-    const logFd = openSync(join2(dataDir, LOG), "a");
-    try {
-      const child = (opts.spawnImpl ?? spawn)(spec.command, spec.args, {
-        cwd: dataDir,
-        detached: true,
-        stdio: ["ignore", logFd, logFd],
-        windowsHide: true,
-        ...spec.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}
-      });
-      child.on("error", () => {
-      });
-      child.unref();
-    } finally {
-      closeSync(logFd);
-    }
-    writeJsonAtomic(join2(dataDir, MARKER), { startedAt: now() });
-    return "pidb: installing plugin dependencies (@napi-rs/keyring) in the background — `pidb connect` and token access work once it finishes (usually under a minute; otherwise next session).";
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return `pidb: could not start npm to install plugin dependencies (${message}) — ask the user to run \`npm install --omit=dev\` in the plugin data dir (${dataDir}).`;
-  }
-}
-
-// packages/cli/src/agent/datadir.ts
-import { homedir } from "node:os";
-import { join as join3 } from "node:path";
-var PLUGIN_CACHE_PATH = /^(.*[\\/]plugins)([\\/])cache[\\/]([^\\/]+)[\\/]([^\\/]+)[\\/]([^\\/]+)[\\/]dist[\\/][^\\/]+$/;
-function derivedDataDir(selfPath) {
-  const m = PLUGIN_CACHE_PATH.exec(selfPath);
-  if (!m) return null;
-  const [, pluginsDir, sep2, marketplace, plugin, version] = m;
-  if (!pluginsDir || !sep2 || !marketplace || !plugin || !version) return null;
-  return `${pluginsDir}${sep2}data${sep2}${plugin}-${marketplace}`;
-}
-function resolveDataDir(env = process.env, selfPath = process.argv[1] ?? "") {
-  if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
-  return derivedDataDir(selfPath) ?? join3(env.HOME ?? homedir(), ".claude", "plugins", "data", "pidb-pidb");
-}
-
-// packages/cli/src/agent/hooks/index.ts
-import { homedir as homedir2 } from "node:os";
-
 // packages/cli/src/agent/tokenstore.ts
-import { createRequire } from "node:module";
+import { createRequire as createRequire2 } from "node:module";
 import { join as join4 } from "node:path";
 var SERVICE = "pidb";
 var account = (profile) => `profile:${profile}`;
 function defaultLoader(dataDir) {
   return () => {
     try {
-      return createRequire(join4(dataDir, "package.json"))("@napi-rs/keyring");
+      return createRequire2(join4(dataDir, "package.json"))("@napi-rs/keyring");
     } catch {
-      return createRequire(import.meta.url)("@napi-rs/keyring");
+      return createRequire2(import.meta.url)("@napi-rs/keyring");
     }
   };
 }
@@ -1489,8 +1548,8 @@ function finalize(bodyLines) {
   return `${body}
 ${GOLDEN_RULES_BLOCK}`;
 }
-function fallbackContext(message) {
-  return finalize([`pidb: session context unavailable (${message}).`]);
+function fallbackContext(message, notes = []) {
+  return finalize([...notes, `pidb: session context unavailable (${message}).`]);
 }
 async function sessionContext(deps) {
   const deadline = Date.now() + Math.min(deps.timeoutMs ?? 4e3, 4e3);
@@ -1506,7 +1565,7 @@ async function sessionContext(deps) {
     return finalize([...notes, ...await buildBody(deps, deadline)]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return finalize([...notes, `pidb: session context unavailable (${message}).`]);
+    return fallbackContext(message, notes);
   }
 }
 
@@ -1555,7 +1614,7 @@ function sessionStartOutput(additionalContext) {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } });
 }
 async function dispatch(kind, stdinText, env, deps) {
-  const dataDir = env.CLAUDE_PLUGIN_DATA ?? resolveDataDir(env);
+  const dataDir = env.CLAUDE_PLUGIN_DATA || resolveDataDir(env);
   if (kind === "session-start") {
     let cwd = process.cwd();
     try {

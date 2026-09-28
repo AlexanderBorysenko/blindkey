@@ -101,7 +101,7 @@ function sessionStartOutput(additionalContext: string): string {
 }
 
 async function dispatch(kind: HookKind, stdinText: string, env: NodeJS.ProcessEnv, deps: RunHookDeps): Promise<RunHookResult> {
-  const dataDir = env.CLAUDE_PLUGIN_DATA ?? resolveDataDir(env);
+  const dataDir = env.CLAUDE_PLUGIN_DATA || resolveDataDir(env);
 
   if (kind === 'session-start') {
     // Even a stdin we can't parse still gets a real session-start attempt (falling back to

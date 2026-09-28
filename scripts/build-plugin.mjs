@@ -4,8 +4,9 @@
 // Everything is bundled except the native `@napi-rs/keyring`, which the SessionStart hook installs
 // into the plugin data dir on first run and the bundles load via createRequire(<data>/package.json).
 // Only these three entry modules self-execute (each guards on isEntryPoint()); never add a bundle
-// entry that imports another entry module. The output is committed — `npm run build:plugin` after
-// changing agent sources (packages/cli/test/plugin.bundle.test.ts fails on a stale bundle).
+// entry that imports another entry module. The output is committed — run `npm run build:plugin`
+// after any change under packages/cli/src/** or packages/shared/src/**; the local test run
+// (packages/cli/test/plugin.bundle.test.ts) fails on a stale bundle.
 import { build } from 'esbuild';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';

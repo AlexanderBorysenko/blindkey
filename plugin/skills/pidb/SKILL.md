@@ -98,7 +98,8 @@ After meaningful work — a new service, a changed deploy procedure, a decision 
 
 - **"no server configured"** → ask the user for the server URL, then `pidb profile add <name> <url>` (or `/pidb:server <name> <url>`), then `pidb connect`.
 - **"not connected" / 401 / `token_expired`** → `pidb connect` (run it in the background or with a long timeout: it waits up to 10 minutes while the user approves in the browser). Tell the user to open the printed URL and check the code matches.
-- **403 on a project** → the token wasn't approved for it: `pidb connect` again and ask the user to tick that project on the approval page.
+- **"project not found" (`not_found`) from `get_project`, `pidb_bind` checks or any project tool** → the server says this both when the project doesn't exist and when the token wasn't approved for it (it never reveals which). First offer `pidb connect` (`/pidb:connect`) and ask the user to tick that project on the approval page; check the slug with `list_projects` as the secondary step.
+- **`missing_scope` / `forbidden` (403)** → the token lacks a scope: `pidb connect` again to widen.
 - **"not bound"** → `pidb_bind(project)` if the user named the project, otherwise ask which project this repo is.
 - **"no OS credential store available" / "installing plugin dependencies"** → first session after install: npm is installing `@napi-rs/keyring` into the plugin data dir in the background. Wait a minute or start a new session. If it keeps failing, the user can run `npm install --omit=dev` in `~/.claude/plugins/data/pidb-pidb` (Windows: `%USERPROFILE%\.claude\plugins\data\pidb-pidb`).
 - **A command was denied by the pidb guard** → read the reason; it names the allowed alternative (e.g. pass a Grep `path`/`glob` that excludes a secret file).

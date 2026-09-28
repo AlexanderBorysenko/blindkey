@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -165,39 +165,86 @@ describe('sessionContext — server down / unreachable', () => {
     expectGoldenRules(context);
   });
 
+  // Fake timers + a settled-flag instead of wall-clock bounds (Task 9 fix round 1): the assertions
+  // are about *when, on the budget's own clock,* the call gives up — immune to machine load.
+  async function settledFlag<T>(p: Promise<T>): Promise<{ done: () => boolean; value: Promise<T> }> {
+    let settled = false;
+    const value = p.finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    return { done: () => settled, value };
+  }
+
   it('a slow store.get eats into the same shared budget the fetch would otherwise get (Fix round 1 Minor #10)', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
     saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });
-    const slowStore: TokenStore = {
-      get: () => new Promise((resolve) => setTimeout(() => resolve('a-token'), 250)),
-      set: async () => {},
-      delete: async () => {},
-    };
-    const hangingFetch: typeof fetch = () => new Promise(() => {}); // never resolves
-    const start = Date.now();
-    const context = await sessionContext({ cwd, dataDir, store: slowStore, fetchImpl: hangingFetch, timeoutMs: 500 });
-    const elapsed = Date.now() - start;
-    // The whole call (store.get's 250ms + whatever's left of the 500ms budget for the hanging fetch)
-    // must stay close to the 500ms total budget, not 250ms + a fresh 500ms fetch timeout (750ms).
-    // (Margins sized so a loaded machine's slow `git rev-parse` in repoKey doesn't starve store.get.)
-    expect(elapsed).toBeLessThan(700);
-    expect(context).toContain('is unreachable right now');
-    expectGoldenRules(context);
+    const events: string[] = [];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const slowStore: TokenStore = {
+        get: () => {
+          events.push('store.get');
+          return new Promise((resolve) => setTimeout(() => resolve('a-token'), 300));
+        },
+        set: async () => {},
+        delete: async () => {},
+      };
+      const hangingFetch: typeof fetch = () => {
+        events.push('fetch');
+        return new Promise(() => {}); // never resolves
+      };
+      const run = await settledFlag(sessionContext({ cwd, dataDir, store: slowStore, fetchImpl: hangingFetch, timeoutMs: 500 }));
+      await vi.advanceTimersByTimeAsync(300); // store.get resolves; the fetch starts with 200ms left
+      expect(events).toEqual(['store.get', 'fetch']);
+      await vi.advanceTimersByTimeAsync(199);
+      expect(run.done()).toBe(false);
+      // At 500ms total the shared budget is spent. (Separate budgets would wait until 800ms.)
+      await vi.advanceTimersByTimeAsync(1);
+      expect(run.done()).toBe(true);
+      const context = await run.value;
+      expect(context).toContain('is unreachable right now');
+      expectGoldenRules(context);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a slow/hanging ensureDeps also draws down the same shared budget', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
-    const start = Date.now();
-    const context = await sessionContext({
-      cwd,
-      dataDir,
-      store,
-      timeoutMs: 60,
-      ensureDeps: () => new Promise(() => {}), // never resolves
-    });
-    const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(500);
-    expectGoldenRules(context);
+    const events: string[] = [];
+    const recordingStore: TokenStore = {
+      get: async (profile) => {
+        events.push('store.get');
+        return store.get(profile);
+      },
+      set: (p, t) => store.set(p, t),
+      delete: (p) => store.delete(p),
+    };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const run = await settledFlag(
+        sessionContext({
+          cwd,
+          dataDir,
+          store: recordingStore,
+          timeoutMs: 60,
+          ensureDeps: () => {
+            events.push('ensureDeps');
+            return new Promise(() => {}); // never resolves
+          },
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(59);
+      expect(run.done()).toBe(false);
+      expect(events).toEqual(['ensureDeps']);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(run.done()).toBe(true);
+      expect(events).toEqual(['ensureDeps', 'store.get']);
+      expectGoldenRules(await run.value);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
