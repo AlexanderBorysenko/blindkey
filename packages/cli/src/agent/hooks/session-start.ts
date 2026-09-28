@@ -31,7 +31,7 @@ const GOLDEN_RULES = [
   'Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.',
   'Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env PIDB_<KEY>), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.',
   'Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.',
-  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, url, username, database, public_key) go into non-sensitive fields via `upsert_secret_meta`; any other key → `secret_request_link`.',
+  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret connection facts (host, port, url, username, database, public_key) go into non-sensitive fields via `upsert_secret_meta`; any other key → `secret_request_link`.',
   '401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.',
   'Never use curl against the pidb server; use MCP tools / the CLI.',
 ] as const;
@@ -86,6 +86,39 @@ async function fetchProjectDetail(
   }
 }
 
+interface GlobalListing {
+  docs: RemoteDocSummary[];
+  secrets: RemoteSecretSummary[];
+}
+
+/** Global docs + secrets (shared across projects); a list that can't be fetched in time (or lacks scope) is empty. */
+async function fetchGlobals(url: string, token: string, deps: SessionStartDeps, deadline: number): Promise<GlobalListing> {
+  const client = new PidbClient({ url, token }, deps.fetchImpl ?? fetch);
+  // Each list on its own: a token without secrets:meta still gets the global documents.
+  const list = async <T>(path: string): Promise<T[]> => {
+    try {
+      const v = await withDeadline(client.json<T[]>('GET', path), deadline);
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  };
+  const [docs, secrets] = await Promise.all([list<RemoteDocSummary>('/api/v1/docs'), list<RemoteSecretSummary>('/api/v1/secrets')]);
+  return { docs, secrets };
+}
+
+function secretLine(s: RemoteSecretSummary): string {
+  return `${s.name} (${s.fields.map((f) => (f.sensitive ? `${f.key}*` : f.key)).join(', ') || 'no fields'})`;
+}
+
+function globalLines(g: GlobalListing): string[] {
+  if (g.docs.length === 0 && g.secrets.length === 0) return [];
+  const lines = ['', 'Global (shared across all projects — servers, conventions; use tools with `project` omitted):'];
+  if (g.docs.length > 0) lines.push('Global documents:', ...bulletedList(g.docs.map((d) => `${d.slug} — ${d.title}`), MAX_LIST_ITEMS));
+  if (g.secrets.length > 0) lines.push('Global secrets:', ...bulletedList(g.secrets.map(secretLine), MAX_LIST_ITEMS));
+  return lines;
+}
+
 /** Rejects once `deadline` (an absolute `Date.now()`-scale timestamp) passes, whatever's left of it. */
 function withDeadline<T>(p: Promise<T>, deadline: number): Promise<T> {
   const ms = Math.max(deadline - Date.now(), 0);
@@ -133,15 +166,30 @@ async function buildBody(deps: SessionStartDeps, deadline: number): Promise<stri
   }
   lines.push('Connected.');
 
-  if (!binding?.project) {
+  // Globals are fetched alongside the project and shown whether or not the repo is bound.
+  const globals = fetchGlobals(profile.url, token, deps, deadline);
+  lines.push(...(await projectSection(profile.url, token, binding?.project, deps, deadline)));
+  lines.push(...globalLines(await globals));
+  return lines;
+}
+
+async function projectSection(
+  url: string,
+  token: string,
+  project: string | undefined,
+  deps: SessionStartDeps,
+  deadline: number,
+): Promise<string[]> {
+  const lines: string[] = [];
+  if (!project) {
     lines.push('This repo is not bound to a pidb project — call `pidb_bind` or ask the user which project this is.');
     return lines;
   }
-  lines.push(`Bound project: ${binding.project}`);
+  lines.push(`Bound project: ${project}`);
 
-  const detail = await fetchProjectDetail(profile.url, token, binding.project, deps, deadline);
+  const detail = await fetchProjectDetail(url, token, project, deps, deadline);
   if (detail === 'down') {
-    lines.push(`pidb server (${profile.url}) is unreachable right now — project details unavailable this session.`);
+    lines.push(`pidb server (${url}) is unreachable right now — project details unavailable this session.`);
     return lines;
   }
   if (detail === 401) {
@@ -149,13 +197,13 @@ async function buildBody(deps: SessionStartDeps, deadline: number): Promise<stri
     return lines;
   }
   if (detail === 403) {
-    lines.push(`pidb: the token lacks access to project "${binding.project}" — run \`pidb connect\` to widen.`);
+    lines.push(`pidb: the token lacks access to project "${project}" — run \`pidb connect\` to widen.`);
     return lines;
   }
   if (detail === 404) {
     // The server answers 404 both for a missing slug and for one this token wasn't approved for.
     lines.push(
-      `Project "${binding.project}" not found or not approved for this token — run \`pidb connect\` to approve it, or \`pidb bind\` another.`,
+      `Project "${project}" not found or not approved for this token — run \`pidb connect\` to approve it, or \`pidb bind\` another.`,
     );
     return lines;
   }
@@ -173,7 +221,7 @@ async function buildBody(deps: SessionStartDeps, deadline: number): Promise<stri
     lines.push(
       'Secrets:',
       ...bulletedList(
-        detail.secrets.map((s) => `${s.name} (${s.fields.map((f) => (f.sensitive ? `${f.key}*` : f.key)).join(', ') || 'no fields'})`),
+        detail.secrets.map(secretLine),
         MAX_LIST_ITEMS,
       ),
     );

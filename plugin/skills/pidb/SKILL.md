@@ -25,7 +25,7 @@ pidb is a self-hosted server that holds, per project, **documents** (Markdown: a
 1. Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.
 2. Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env `PIDB_<KEY>`), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.
 3. Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.
-4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts go into non-sensitive fields via `upsert_secret_meta` (keys `host`, `port`, `url`, `username`, `database`, `public_key` only).
+4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret connection facts go into non-sensitive fields via `upsert_secret_meta` (keys `host`, `port`, `url`, `username`, `database`, `public_key` only).
 5. 401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.
 6. Never use curl against the pidb server; use MCP tools / the CLI.
 
@@ -93,6 +93,13 @@ After meaningful work — a new service, a changed deploy procedure, a decision 
 - `read_document` first, then `write_document` with the full updated body (it replaces the doc). Use `architecture` for structure and data flow, `deploy` for runbooks (commands, hosts, `{{secret:Name}}` references — never values), `notes`/`conventions` for decisions and rules.
 - Keep `update_project` summary/tags accurate when the project's shape changes.
 - Record non-secret connection facts (`host`, `port`, `url`, `username`, `database`, `public_key`) as non-sensitive fields via `upsert_secret_meta` rather than in prose.
+
+## Shared infrastructure memory (global docs)
+
+Servers, domains and cross-project conventions are **global** documents (listed under "Global documents" in the session context), e.g. `hacon-vps-1` for Hacon VPS #1, with credentials in the matching global secret.
+- Before touching a server: `read_document` (no `project`) and follow its conventions and "Connecting" section.
+- After changing it (new site, port, service, fix): `write_document` (no `project`) with the full updated body — update the relevant section and append a dated line to its change log. Never put a secret value in it; reference `{{secret:global/Name}}`.
+- A new server gets its own global doc (category `deploy`) plus a global secret (`host`/`port`/`username`/`public_key` via `upsert_secret_meta`, the private key via `secret_request_link`).
 
 ## Troubleshooting
 

@@ -1455,7 +1455,7 @@ var GOLDEN_RULES = [
   "Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.",
   'Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env PIDB_<KEY>), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.',
   "Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.",
-  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); update project summary/tags with `update_project`; non-secret connection facts (host, port, url, username, database, public_key) go into non-sensitive fields via `upsert_secret_meta`; any other key → `secret_request_link`.',
+  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret connection facts (host, port, url, username, database, public_key) go into non-sensitive fields via `upsert_secret_meta`; any other key → `secret_request_link`.',
   "401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.",
   "Never use curl against the pidb server; use MCP tools / the CLI."
 ];
@@ -1475,6 +1475,29 @@ async function fetchProjectDetail(url, token, project, deps, deadline) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 404)) return err.status;
     return "down";
   }
+}
+async function fetchGlobals(url, token, deps, deadline) {
+  const client = new PidbClient({ url, token }, deps.fetchImpl ?? fetch);
+  const list = async (path) => {
+    try {
+      const v = await withDeadline(client.json("GET", path), deadline);
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  };
+  const [docs, secrets] = await Promise.all([list("/api/v1/docs"), list("/api/v1/secrets")]);
+  return { docs, secrets };
+}
+function secretLine(s) {
+  return `${s.name} (${s.fields.map((f) => f.sensitive ? `${f.key}*` : f.key).join(", ") || "no fields"})`;
+}
+function globalLines(g) {
+  if (g.docs.length === 0 && g.secrets.length === 0) return [];
+  const lines = ["", "Global (shared across all projects — servers, conventions; use tools with `project` omitted):"];
+  if (g.docs.length > 0) lines.push("Global documents:", ...bulletedList(g.docs.map((d) => `${d.slug} — ${d.title}`), MAX_LIST_ITEMS));
+  if (g.secrets.length > 0) lines.push("Global secrets:", ...bulletedList(g.secrets.map(secretLine), MAX_LIST_ITEMS));
+  return lines;
 }
 function withDeadline(p, deadline) {
   const ms = Math.max(deadline - Date.now(), 0);
@@ -1511,14 +1534,21 @@ async function buildBody(deps, deadline) {
     return lines;
   }
   lines.push("Connected.");
-  if (!binding?.project) {
+  const globals = fetchGlobals(profile.url, token, deps, deadline);
+  lines.push(...await projectSection(profile.url, token, binding?.project, deps, deadline));
+  lines.push(...globalLines(await globals));
+  return lines;
+}
+async function projectSection(url, token, project, deps, deadline) {
+  const lines = [];
+  if (!project) {
     lines.push("This repo is not bound to a pidb project — call `pidb_bind` or ask the user which project this is.");
     return lines;
   }
-  lines.push(`Bound project: ${binding.project}`);
-  const detail = await fetchProjectDetail(profile.url, token, binding.project, deps, deadline);
+  lines.push(`Bound project: ${project}`);
+  const detail = await fetchProjectDetail(url, token, project, deps, deadline);
   if (detail === "down") {
-    lines.push(`pidb server (${profile.url}) is unreachable right now — project details unavailable this session.`);
+    lines.push(`pidb server (${url}) is unreachable right now — project details unavailable this session.`);
     return lines;
   }
   if (detail === 401) {
@@ -1526,12 +1556,12 @@ async function buildBody(deps, deadline) {
     return lines;
   }
   if (detail === 403) {
-    lines.push(`pidb: the token lacks access to project "${binding.project}" — run \`pidb connect\` to widen.`);
+    lines.push(`pidb: the token lacks access to project "${project}" — run \`pidb connect\` to widen.`);
     return lines;
   }
   if (detail === 404) {
     lines.push(
-      `Project "${binding.project}" not found or not approved for this token — run \`pidb connect\` to approve it, or \`pidb bind\` another.`
+      `Project "${project}" not found or not approved for this token — run \`pidb connect\` to approve it, or \`pidb bind\` another.`
     );
     return lines;
   }
@@ -1546,7 +1576,7 @@ async function buildBody(deps, deadline) {
     lines.push(
       "Secrets:",
       ...bulletedList(
-        detail.secrets.map((s) => `${s.name} (${s.fields.map((f) => f.sensitive ? `${f.key}*` : f.key).join(", ") || "no fields"})`),
+        detail.secrets.map(secretLine),
         MAX_LIST_ITEMS
       )
     );
