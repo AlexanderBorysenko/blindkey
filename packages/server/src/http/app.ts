@@ -66,6 +66,12 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
 
   await app.register(rateLimit, { global: false });
   await app.register(cookie);
+  // HSTS for every HTTPS response (req.protocol honours X-Forwarded-Proto under trustProxy), so a
+  // deployment behind any reverse proxy gets it without relying on that proxy's config.
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (req.protocol === 'https') reply.header('strict-transport-security', 'max-age=31536000');
+    return payload;
+  });
   registerSessionResolver(app, ctx);
   registerUiGuard(app);
   registerAuth(app, ctx);

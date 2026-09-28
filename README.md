@@ -493,7 +493,7 @@ clpctl site:add:reverse-proxy --domainName=pidb.example.com --reverseProxyUrl='h
 clpctl lets-encrypt:install:certificate --domainName=pidb.example.com
 ```
 
-Add `add_header Strict-Transport-Security "max-age=31536000" always;` to the site's vhost (CloudPanel: Vhost editor) — Caddy did that for you in the default setup. Everything else in this section (first run, backups, rotation, upgrades) is unchanged; the commands pick up `COMPOSE_FILE` from `docker/.env`.
+The server itself sends `Strict-Transport-Security` on every HTTPS response (it trusts `X-Forwarded-Proto` from the proxy), so no vhost edit is needed. Everything else in this section (first run, backups, rotation, upgrades) is unchanged; the commands pick up `COMPOSE_FILE` from `docker/.env`.
 
 ### Upgrading
 
