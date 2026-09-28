@@ -1,0 +1,11 @@
+{
+  "name": "pidb",
+  "owner": { "name": "Alexander Borysenko" },
+  "plugins": [
+    {
+      "name": "pidb",
+      "source": "./plugin",
+      "description": "pidb (Projects Info DB) for Claude Code: project docs and memory, secrets used only by substitution, browser-approved agent tokens"
+    }
+  ]
+}

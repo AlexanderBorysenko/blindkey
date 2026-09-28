@@ -9,3 +9,4 @@ coverage/
 .claude/worktrees/
 docker/.env
 docker/secrets/
+!plugin/dist/

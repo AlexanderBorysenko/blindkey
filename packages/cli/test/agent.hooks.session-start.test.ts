@@ -169,17 +169,18 @@ describe('sessionContext — server down / unreachable', () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
     saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });
     const slowStore: TokenStore = {
-      get: () => new Promise((resolve) => setTimeout(() => resolve('a-token'), 40)),
+      get: () => new Promise((resolve) => setTimeout(() => resolve('a-token'), 250)),
       set: async () => {},
       delete: async () => {},
     };
     const hangingFetch: typeof fetch = () => new Promise(() => {}); // never resolves
     const start = Date.now();
-    const context = await sessionContext({ cwd, dataDir, store: slowStore, fetchImpl: hangingFetch, timeoutMs: 60 });
+    const context = await sessionContext({ cwd, dataDir, store: slowStore, fetchImpl: hangingFetch, timeoutMs: 500 });
     const elapsed = Date.now() - start;
-    // The whole call (store.get's 40ms + whatever's left of the 60ms budget for the hanging fetch)
-    // must stay close to the 60ms total budget, not 40ms + a fresh 60ms fetch timeout on top of it.
-    expect(elapsed).toBeLessThan(500);
+    // The whole call (store.get's 250ms + whatever's left of the 500ms budget for the hanging fetch)
+    // must stay close to the 500ms total budget, not 250ms + a fresh 500ms fetch timeout (750ms).
+    // (Margins sized so a loaded machine's slow `git rev-parse` in repoKey doesn't starve store.get.)
+    expect(elapsed).toBeLessThan(700);
     expect(context).toContain('is unreachable right now');
     expectGoldenRules(context);
   });

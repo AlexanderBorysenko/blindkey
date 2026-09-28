@@ -1,0 +1,10 @@
+{
+  "name": "pidb-plugin-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runtime dependencies of the pidb Claude Code plugin, installed into the plugin data dir on first session start",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@napi-rs/keyring": "^2.1.0"
+  }
+}

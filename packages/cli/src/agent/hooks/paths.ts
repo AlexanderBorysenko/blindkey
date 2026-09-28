@@ -104,7 +104,10 @@ export function hasWildcard(token: string): boolean {
  * leading dot (zsh `GLOB_DOTS`/PowerShell semantics — biased toward catching `*.env` against `.env`);
  * `**` crosses directories; `[...]` is a character class.
  */
-export function globToRegExp(glob: string, platform: NodeJS.Platform): RegExp {
+export function globToRegExp(rawGlob: string, platform: NodeJS.Platform): RegExp {
+  // Collapse runs before translating (Task 9): `***…` behaves like `**`, and `**/**/…` like one `**/`;
+  // left as-is, each extra `*` adds a nested quantifier and matching goes catastrophically slow.
+  const glob = rawGlob.replace(/\*{3,}/g, '**').replace(/(?:\*\*\/)+/g, '**/').replace(/(?:\*\*\/)+\*\*(?![^/])/g, '**');
   let re = '';
   for (let i = 0; i < glob.length; i++) {
     const ch = glob[i]!;

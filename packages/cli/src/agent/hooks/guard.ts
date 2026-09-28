@@ -334,15 +334,24 @@ function operandsOf(args: string[], argFlags: Set<string>, windowsSlashFlags: bo
 
 /** Whether a protected file under `root` survives the search's glob/type filters (true when unfiltered). */
 function filtersAdmitProtected(root: string, globs: string[], types: string[], ctx: GuardContext): boolean {
-  if (globs.length === 0 && types.length === 0) return true;
+  return admittedProtected(root, globs, types, ctx).length > 0;
+}
+
+/**
+ * The protected roots / written files under (or around) `root` that survive the search's glob/type
+ * filters — everything overlapping `root` when unfiltered. Used to name the offending file in the
+ * Grep tool's deny message (Task 9).
+ */
+function admittedProtected(root: string, globs: string[], types: string[], ctx: GuardContext): string[] {
   const pm = pathModFor(ctx.platform);
   const rootN = normalizeForCompare(root, ctx.platform);
   // A protected directory's contents are unknown — never considered filtered out.
-  if (protectedRoots(ctx).some((r) => overlapEither(rootN, normalizeForCompare(r, ctx.platform)))) return true;
+  const roots = protectedRoots(ctx).filter((r) => overlapEither(rootN, normalizeForCompare(r, ctx.platform)));
   const files = writtenFiles(ctx).filter((w) => overlapEither(rootN, normalizeForCompare(w, ctx.platform)));
+  if (roots.length > 0 || (globs.length === 0 && types.length === 0)) return [...roots, ...files];
   const positive = globs.filter((g) => !g.startsWith('!'));
   const negative = globs.filter((g) => g.startsWith('!')).map((g) => g.slice(1));
-  return files.some((file) => {
+  return files.filter((file) => {
     const fileN = normalizeForCompare(file, ctx.platform);
     const base = pm.basename(file);
     const rel = fileN.startsWith(`${rootN.replace(/\/$/, '')}/`) ? fileN.slice(rootN.replace(/\/$/, '').length + 1) : base;
@@ -402,7 +411,13 @@ function findReadRoots(seg: Segment): string[] | null {
   return roots.length > 0 ? roots : ['.'];
 }
 
-function segmentReadsProtected(seg: Segment, ctx: GuardContext): boolean {
+/** cp/mv-style commands whose last operand is the destination. */
+const COPY_WORDS = new Set(['cp', 'mv', 'copy', 'copy-item', 'cpi', 'move-item', 'xcopy', 'scp', 'rsync']);
+
+/** `'read'` = reads protected data; `'overwrite'` = only its copy destination is a protected/written file. */
+type ProtectedAccess = 'read' | 'overwrite' | false;
+
+function segmentReadsProtected(seg: Segment, ctx: GuardContext): ProtectedAccess {
   const word = seg.word ?? '';
   const winFlags = ctx.platform === 'win32' && word === 'findstr';
   let args = seg.tokens.slice(seg.index + 1);
@@ -423,13 +438,13 @@ function segmentReadsProtected(seg: Segment, ctx: GuardContext): boolean {
   const argFlags = SEARCH_ARG_FLAGS[searchWord] ?? new Set<string>();
   const ops = operandsOf(args, argFlags, winFlags);
   // `<file` input redirection reads the file whatever the command is.
-  if (ops.inputs.some((p) => pathHitsProtected(p, seg.cwd, ctx, false))) return true;
+  if (ops.inputs.some((p) => pathHitsProtected(p, seg.cwd, ctx, false))) return 'read';
 
   const findRoots = findReadRoots(seg);
-  if (findRoots) return findRoots.some((p) => pathHitsProtected(p, seg.cwd, ctx, true));
+  if (findRoots) return findRoots.some((p) => pathHitsProtected(p, seg.cwd, ctx, true)) ? 'read' : false;
 
   const inline = inlineCodeOf(seg);
-  if (inline && inlineCodeNamesProtected(inline.code, seg.cwd, ctx)) return true;
+  if (inline && inlineCodeNamesProtected(inline.code, seg.cwd, ctx)) return 'read';
 
   if (!checkAll) return false;
   let paths = ops.positional.map((p) => (/^(curl|https?)$/.test(word) ? p.replace(/^@/, '') : p));
@@ -443,10 +458,17 @@ function segmentReadsProtected(seg: Segment, ctx: GuardContext): boolean {
     if (!ops.patternViaFlag && !(word === 'rg' && args.includes('--files'))) paths = paths.slice(1);
     if (recursive && paths.length === 0) paths = ['.'];
   }
-  if (!recursive) return paths.some((p) => pathHitsProtected(p, seg.cwd, ctx, false));
+  if (!recursive) {
+    if (COPY_WORDS.has(word) && paths.length >= 2) {
+      // Sources are read; the last operand is only written to (Task 9: a distinct deny reason).
+      if (paths.slice(0, -1).some((p) => pathHitsProtected(p, seg.cwd, ctx, false))) return 'read';
+      return pathHitsProtected(paths[paths.length - 1]!, seg.cwd, ctx, false) ? 'overwrite' : false;
+    }
+    return paths.some((p) => pathHitsProtected(p, seg.cwd, ctx, false)) ? 'read' : false;
+  }
   const globs = [...(ops.flagValues.get('-g') ?? []), ...(ops.flagValues.get('--glob') ?? []), ...(ops.flagValues.get('--iglob') ?? []), ...(ops.flagValues.get('--include') ?? [])];
   const types = [...(ops.flagValues.get('-t') ?? []), ...(ops.flagValues.get('--type') ?? [])];
-  return paths.some((p) => {
+  const hit = paths.some((p) => {
     if (!pathHitsProtected(p, seg.cwd, ctx, true)) return false;
     if (hasWildcard(p)) return true;
     const resolved = resolveArgPath(p, seg.cwd, ctx);
@@ -454,6 +476,7 @@ function segmentReadsProtected(seg: Segment, ctx: GuardContext): boolean {
     if (isProtectedPath(resolved, ctx, overlapNested)) return true;
     return filtersAdmitProtected(resolved, globs, types, ctx);
   });
+  return hit ? 'read' : false;
 }
 
 // =================================================================================================
@@ -528,7 +551,13 @@ function guardBashCommand(command: string, cwd: string, ctx: GuardContext): Guar
       'this looks like it would print the environment inside `pidb secret exec`, which would leak the substituted secret — use the value only inside the invoked program, e.g. `pidb secret exec <target> "<name>" -- npm test`.',
     );
   }
-  if (segments.some((s) => segmentReadsProtected(s, ctx))) {
+  const access = segments.map((s) => segmentReadsProtected(s, ctx));
+  if (!access.includes('read') && access.includes('overwrite')) {
+    return deny(
+      'this would overwrite a pidb-written secret file (produced by `pidb secret write|env`) — regenerate it with `pidb secret write|env --out <file>` instead, or write to a different path.',
+    );
+  }
+  if (access.includes('read')) {
     return deny(
       "this command reads pidb's protected data (the plugin data dir, its config, or a file `pidb secret write|env` produced) — use the pidb CLI/MCP tools instead of reading it directly.",
     );
@@ -579,7 +608,12 @@ function guardGrepTool(toolInput: HookToolInput, cwd: string, ctx: GuardContext)
   if (!isProtectedPath(root, ctx, overlapEither)) return ALLOW;
   const globs = typeof toolInput.glob === 'string' && toolInput.glob ? toolInput.glob.split(/[\s,]+/).filter(Boolean) : [];
   const types = typeof toolInput.type === 'string' && toolInput.type ? [toolInput.type] : [];
-  return filtersAdmitProtected(root, globs, types, ctx) ? deny(PROTECTED_PATH_REASON) : ALLOW;
+  const hits = admittedProtected(root, globs, types, ctx);
+  if (hits.length === 0) return ALLOW;
+  return deny(
+    `this search would reach a file \`pidb secret write|env\` produced (${hits.slice(0, 5).join(', ')}) — ` +
+      'pass a `path` that does not contain it, or a `glob`/`type` that excludes it (e.g. `glob: "*.ts"`), and never read that file.',
+  );
 }
 
 function guardPathArgs(toolName: string, toolInput: HookToolInput, cwd: string, ctx: GuardContext): GuardDecision {

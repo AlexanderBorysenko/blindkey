@@ -6,6 +6,8 @@
 // self-executing entry blocks, the same lesson Task 5 learned the hard way for those three entries.
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { ensureDeps, pluginRootFrom } from '../deps.js';
+import { resolveDataDir } from '../datadir.js';
 import { runHook, type HookKind } from './index.js';
 
 const VALID_KINDS: readonly HookKind[] = ['guard', 'redact', 'session-start'];
@@ -46,7 +48,13 @@ export async function main(): Promise<void> {
     // an empty/unparseable payload; nothing more to do here.
   }
 
-  const result = await runHook(kindArg, stdinText, process.env);
+  const env = process.env;
+  // session-start installs the plugin's runtime deps into the data dir on first run (spec §2.1).
+  const deps =
+    kindArg === 'session-start'
+      ? { ensureDeps: () => ensureDeps({ dataDir: env.CLAUDE_PLUGIN_DATA || resolveDataDir(env), pluginRoot: pluginRootFrom(env) }) }
+      : {};
+  const result = await runHook(kindArg, stdinText, env, deps);
   if (result.stderr) console.error(result.stderr);
   exitAfterWrite(result.stdout);
 }

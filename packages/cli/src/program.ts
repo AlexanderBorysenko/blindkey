@@ -296,7 +296,7 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
     .command('connect')
     .option('--profile <name>', "profile to connect (default: the repo's bound profile, else the default profile)")
     .option('--url <url>', 'server url — required only when --profile names a profile that does not exist yet')
-    .description('Browser device-flow connect (spec §1.3): approve in the browser, nothing pasted here')
+    .description('Connect to the server: the user approves in the browser, nothing is pasted here')
     .action(async (opts: { profile?: string; url?: string }) => {
       emit(await runConnect(opts, { cwd, store, dataDir }), false);
     });
@@ -377,6 +377,7 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
 
   program
     .command('bind')
+    .description('Bind this repo (git top level) to a pidb project')
     .argument('<project>', 'project slug to bind this repo to')
     .option('--profile <name>', 'profile to bind (default: the repo\'s current binding, else the default profile)')
     .action((project: string, opts: { profile?: string }) => {
@@ -386,7 +387,7 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
         false,
       );
     });
-  program.command('unbind').action(() => {
+  program.command('unbind').description('Remove this repo\'s project binding').action(() => {
     const bindings = loadBindings(dataDir);
     const key = repoKey(cwd);
     const had = key in bindings;
@@ -397,6 +398,7 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
 
   program
     .command('status')
+    .description('Show profile, server, bound project and whether it is connected')
     .option('--json', 'raw JSON output')
     .action(async (opts: { json?: boolean }) => {
       const profiles = loadProfiles(dataDir);

@@ -121,6 +121,110 @@ open http://localhost:8080/login
 - `/settings/password` (linked from the sidebar as "Password") asks for the current password, the new one twice, and — when two-factor is on — a fresh code (TOTP or recovery). On success every OTHER browser session is signed out; the one used to change the password stays logged in. API tokens are separate credentials and are not revoked.
 - Shell recovery — if the password itself is lost — from a shell on the host: `pidb-server passwd` (Docker: `docker compose run --rm --no-deps server passwd`). Prefer the hidden prompt (it asks twice, to catch typos, when run interactively, and is never echoed); it also reads the new password from `PIDB_ADMIN_PASSWORD` if set, but that lands in shell history and the process list — the same warning as `init`'s first run — so use it only when the prompt isn't an option. Unlike the UI form it does not need the old password, so it signs out every session and clears any 2FA lockout; two-factor itself is left as is — pair it with `2fa reset` if that is also lost. `passwd` does not revoke API tokens; after a suspected compromise, review `/tokens`.
 
+## Claude Code plugin
+
+`plugin/` is a Claude Code plugin, and this repo is its local marketplace (`.claude-plugin/marketplace.json`, marketplace and plugin both named `pidb`). It gives Claude a stable working context for the project a repo belongs to:
+
+- **Session context** — each session in a bound repo starts with the project's summary, document index, secret names and field keys (sensitive ones marked `*`), plus the plugin's golden rules.
+- **MCP tools** — a local stdio bridge (`dist/mcp.mjs`) proxies the server's own tools (`list_projects`, `get_project`, `list_documents`, `read_document`, `write_document`, `search`, `list_secrets`, `update_project`, `upsert_secret_meta`, `secret_request_link`), plus the local `pidb_status`, `pidb_bind` and `pidb_profiles`. None of them returns a secret value.
+- **`pidb` on the Bash PATH** — the agent-mode CLI (`bin/pidb`, `bin/pidb.cmd` → `dist/pidb.mjs`): `connect`, `profile`, `bind`/`unbind`, `status`, `projects`, `docs`, `secrets list`, `search`, and `secret exec|write|env`. The user-only commands (`login`, `token …`, `secret get|set`) are refused.
+- **Skill and commands** — the `pidb` skill (rules, tools, examples) and `/pidb:server`, `/pidb:connect`, `/pidb:bind`, `/pidb:status`.
+
+Claude keeps the project docs current itself (`write_document`), stores non-secret facts itself (`update_project`, `upsert_secret_meta`), and uses secret values only by substitution. You approve logins in the browser and type secret values into the admin UI.
+
+### Security model and its limits
+
+The hard boundaries are enforced by the server:
+
+- An agent token is created only through the browser approval page, which you reach while logged in as the admin. It is limited to the projects you tick there. It can never carry `admin`, `secrets:reveal` or `secrets:write`, so it cannot read a secret value through the reveal endpoints, the UI or `pidb secret get`.
+- Values reach the agent's machine only through `POST …/secrets/:name/use` (scope `secrets:use`), which `pidb secret exec|write|env` call. Every call is audited as `secret.used`, with the purpose and field keys but never the values.
+- The token lives in the OS credential store (macOS Keychain or Windows Credential Manager). It is never written to a file, printed, or returned by a tool.
+
+On top of that, the plugin adds defense in depth on the agent side:
+
+- `secret exec` redacts every value, and its base64, base64url, URL-encoded and JSON-escaped forms, from the child's output.
+- A PreToolUse guard blocks:
+  - the user-only commands;
+  - commands that dump the environment inside `secret exec`;
+  - reads of the plugin data dir, `~/.config/pidb` and files written by `secret write|env`;
+  - OS credential-store reads;
+  - `curl`/`wget`/`Invoke-WebRequest` against the configured server.
+- A PostToolUse hook redacts tokens, private keys, AWS keys and `PASSWORD=`/`TOKEN=`-style lines from Bash output.
+
+These agent-side layers are heuristics, not a sandbox. Known gaps:
+
+- **Dotenv loaders.** A tool that loads a written `.env` and prints the result is not recognised as reading it. Examples: `docker compose config`, `node -r dotenv/config -e …`, and Python `dotenv_values`.
+- **Recursive archives or copies.** Archiving, syncing or copying a *directory* that contains a written file (`tar czf x.tgz .`, `cp -r . /tmp/x`, `zip -r`) is not blocked. Only commands naming the file itself, or recursive searches over it, are blocked.
+- **Deep nesting.** Pathologically nested shell constructs are allowed rather than parsed.
+- **Other encodings and channels.** A child process can still send a value somewhere, or print it in an encoding the redactor doesn't know (hex, reversed, split).
+- **A deliberately malicious agent is out of scope.** The token's project scope, `secrets:use`-only access, the audit log and revocation are the real limits. Give the agent only the projects it needs, and review `/audit`.
+
+### Install (macOS)
+
+Requires Node.js ≥ 20 and npm on `PATH`, plus a checkout of this repo. The committed `plugin/dist` bundles mean no build step is needed.
+
+```bash
+git clone <this repo> ~/src/projects-info-db
+claude plugin marketplace add ~/src/projects-info-db
+claude plugin install pidb@pidb --scope user      # every project on this machine
+# or, from inside one project: claude plugin install pidb@pidb --scope project
+```
+
+Inside Claude Code, the same is `/plugin marketplace add ~/src/projects-info-db`, then `/plugin install pidb@pidb`. Choose the scope as follows:
+
+- `user` makes pidb available everywhere.
+- `project` records the plugin in that repo's `.claude/settings.json`, so it is shared with everyone who opens the repo.
+- `local` applies to this checkout only.
+
+Repo bindings are always local (plugin data dir) and never committed.
+
+### Install (Windows)
+
+The steps are the same, in PowerShell:
+
+```powershell
+git clone <this repo> $HOME\src\projects-info-db
+claude plugin marketplace add $HOME\src\projects-info-db
+claude plugin install pidb@pidb --scope user
+```
+
+`node` and `npm` must be on `PATH`. In Git Bash, Claude runs the `bin/pidb` sh shim; in PowerShell or cmd, it runs `bin/pidb.cmd`.
+
+### First session and dependencies
+
+The native keychain module `@napi-rs/keyring` is not bundled. On the first session start, the SessionStart hook copies `plugin/package.json` into the plugin data dir (`~/.claude/plugins/data/pidb-pidb`, or `%USERPROFILE%\.claude\plugins\data\pidb-pidb` on Windows) and runs `npm install --omit=dev` there in the background. The session context says "installing plugin dependencies…". Once npm finishes, usually within a minute, `pidb connect` and the token work; at the latest, it works from the next session.
+
+If the install fails, the output is in `deps-install.log` in that directory. It retries on a later session start after 10 minutes, or you can run `npm install --omit=dev` in the directory yourself.
+
+### Update
+
+```bash
+cd ~/src/projects-info-db && git pull
+npm install && npm run build:plugin     # only if you changed packages/cli/src/agent/** yourself
+claude plugin marketplace update pidb
+claude plugin update pidb@pidb           # then restart Claude Code
+```
+
+Claude Code caches an installed plugin by its `version` (`plugin/.claude-plugin/plugin.json`). When you change the plugin, bump that version; otherwise `claude plugin uninstall pidb@pidb` and install it again. CI fails if `plugin/dist` is stale: `packages/cli/test/plugin.bundle.test.ts` rebuilds the bundles and compares them, so run `npm run build:plugin` and commit `plugin/dist` along with any change to the agent sources.
+
+### First use
+
+1. **Server profile.** `/pidb:server prod https://pidb.example.com` runs `pidb profile add`. Use `/pidb:server use <name>` to switch the default; bound repos keep their own profile.
+2. **Connect.** `/pidb:connect` makes Claude run `pidb connect`, which prints a URL and a code and tries to open your browser.
+   - Log in to the admin UI if asked, check that the code matches, tick the projects (and scopes) this agent may reach, set the expiry, and approve.
+   - The CLI receives the token and stores it in the OS keychain. Claude never sees it.
+   - Connecting again later widens the token's projects or renews it. It replaces the previous agent token with the same name.
+3. **Bind.** `/pidb:bind acme` binds this repo (its git top level) to project `acme`. The next session starts with acme's context.
+4. **Missing secrets.** When Claude needs a secret that doesn't exist, it gives you a prefilled link to the admin UI's secret form (`secret_request_link`). You type the values there, and Claude confirms with `list_secrets` and uses the secret via `pidb secret exec`.
+
+`/pidb:status` shows the profile, server, bound project and token state at any time.
+
+### Admin side
+
+- **Approval page.** `/connect?code=…` is reached from the link `pidb connect` prints, and requires the admin session. It lists the requesting name, IP and user agent. Only agent scopes are offered: `projects:read`, `projects:write`, `docs:read`, `docs:write`, `secrets:meta`, `secrets:meta-write`, `secrets:use`. Global docs and secrets are visible to any project-scoped token. Deny refuses the request.
+- **Tokens.** `/tokens` lists agent tokens with an `agent` pill, next to user tokens. Revoke one there to cut the agent off immediately; its next call gets 401, and Claude will ask for `/pidb:connect`.
+- **Audit.** `/audit` records `connect.started`, `connect.approved`, `connect.denied`, `connect.token_issued` and every `secret.used` (purpose, field keys, whether an agent made the call).
+
 ## Deployment (Docker)
 
 The stack is three services: `server` (this image), `caddy` (automatic TLS, reverse proxy) and `backup` (the same image running a 24-hour backup loop). Everything lives in `docker/`.
@@ -402,7 +506,7 @@ Migrations run on startup, so no separate step is needed.
 
 ## Scripts
 
-`npm test` · `npm run typecheck` · `npm run build`
+`npm test` · `npm run typecheck` · `npm run build` · `npm run build:plugin` (regenerates the committed `plugin/dist` bundles)
 
 `pidb-server` ops CLI (see [Admin UI](#admin-ui) and [Deployment](#deployment-docker) for the recovery flows): `init` · `start` · `passwd` · `2fa reset` · `rotate-key` · `key-versions` · `backup`
 

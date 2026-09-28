@@ -6,6 +6,7 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "build": "npm run build -w @pidb/shared && npm run build -w @pidb/server && npm run build -w @pidb/cli",
+    "build:plugin": "node scripts/build-plugin.mjs",
     "typecheck": "npm run build -w @pidb/shared && tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

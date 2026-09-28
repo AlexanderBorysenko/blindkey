@@ -17,11 +17,11 @@ export interface SessionStartDeps {
   /**
    * Task 9's hook point: ensure the plugin's runtime deps (e.g. `@napi-rs/keyring`) are installed
    * into the data dir before building context (spec §2.1/§3.3 "Ensures deps"). Not implemented here
-   * — Task 8's brief scopes the actual `npm install` to Task 9 — but wired in so that task only has
-   * to supply the function, not touch this file. Errors are swallowed: a failed dep-install must
-   * never block session context from being injected.
+   * — the implementation is `agent/deps.ts` (`ensureDeps`), supplied by `main.ts`. A returned string
+   * is a one-line status ("installing plugin dependencies…") shown first in the context. Errors are
+   * swallowed: a failed dep-install must never block session context from being injected.
    */
-  ensureDeps?: () => void | Promise<void>;
+  ensureDeps?: () => void | string | undefined | Promise<void | string | undefined>;
 }
 
 const MAX_CONTEXT_CHARS = 4096;
@@ -205,18 +205,20 @@ export async function sessionContext(deps: SessionStartDeps): Promise<string> {
   // Fix round 2 N5: restore the hard ≤4s cap — a caller-supplied `timeoutMs` can shrink the budget
   // but never grow it past the spec's own ceiling.
   const deadline = Date.now() + Math.min(deps.timeoutMs ?? 4000, 4000);
+  const notes: string[] = [];
   if (deps.ensureDeps) {
     try {
-      await withDeadline(Promise.resolve(deps.ensureDeps()), deadline);
+      const note = await withDeadline(Promise.resolve(deps.ensureDeps()), deadline);
+      if (typeof note === 'string' && note) notes.push(note);
     } catch {
-      // Task 9's concern (npm install into the data dir) — never let it block session context, and
+      // npm install into the data dir (agent/deps.ts) — never let it block session context, and
       // never let it eat into the budget the rest of this function still needs.
     }
   }
   try {
-    return finalize(await buildBody(deps, deadline));
+    return finalize([...notes, ...(await buildBody(deps, deadline))]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return fallbackContext(message);
+    return finalize([...notes, `pidb: session context unavailable (${message}).`]);
   }
 }

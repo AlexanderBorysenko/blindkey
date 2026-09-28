@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { guardDecision, type GuardContext, type HookInput } from '../src/agent/hooks/guard.js';
+import { globToRegExp } from '../src/agent/hooks/paths.js';
 
 const posixCtx: GuardContext = {
   dataDir: '/home/alex/.claude/plugins/data/pidb-pidb',
@@ -564,5 +565,47 @@ describe('guardDecision — rule 5: direct HTTP against a configured pidb server
     it('allows a different port on the same host', () => {
       expectAllow(bash('curl http://127.0.0.1:9999/api/v1/projects', ctx), ctx);
     });
+  });
+});
+
+describe('Task 9 carried minors', () => {
+  const ctx: GuardContext = { ...posixCtx, written: ['/repo/.env'] };
+
+  it('globToRegExp collapses runs of `*` and repeated `**/` (no catastrophic backtracking)', () => {
+    const star = globToRegExp(`/repo/${'*'.repeat(40)}x`, 'linux');
+    const t0 = Date.now();
+    expect(star.test(`/repo/${'a'.repeat(40)}`)).toBe(false);
+    expect(star.test('/repo/ax')).toBe(true);
+    const globstar = globToRegExp(`/${'**/'.repeat(30)}y`, 'linux');
+    expect(globstar.test(`/${'a/'.repeat(30)}z`)).toBe(false);
+    expect(globstar.test('/a/b/y')).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(500);
+    // A long `*` run from a guarded Bash command stays fast too.
+    const t1 = Date.now();
+    expectAllow(bash(`ls ${'*'.repeat(60)}.md`, ctx, '/elsewhere'), ctx);
+    expect(Date.now() - t1).toBeLessThan(500);
+  });
+
+  it('Grep over a directory holding a written file names that file and the way out', () => {
+    const d = guardDecision(tool('Grep', { pattern: 'X', path: '/repo' }, ctx), ctx);
+    expect(d.deny).toBe(true);
+    if (d.deny) {
+      expect(d.reason).toContain('/repo/.env');
+      expect(d.reason).toMatch(/`path`/);
+      expect(d.reason).toMatch(/`glob`/);
+      expect(d.reason).toMatch(/`type`/);
+    }
+    // With a glob excluding it, the same search is allowed.
+    expectAllow(tool('Grep', { pattern: 'X', path: '/repo', glob: '*.ts' }, ctx), ctx);
+  });
+
+  it('cp onto a written file is denied as an overwrite, not a read', () => {
+    const d = guardDecision(bash('cp .env.example .env', ctx, '/repo'), ctx);
+    expect(d.deny).toBe(true);
+    if (d.deny) expect(d.reason).toMatch(/would overwrite a pidb-written secret file/);
+    // Copying the written file away is still a read.
+    const r = guardDecision(bash('cp .env /tmp/leak', ctx, '/repo'), ctx);
+    expect(r.deny).toBe(true);
+    if (r.deny) expect(r.reason).not.toMatch(/overwrite/);
   });
 });
