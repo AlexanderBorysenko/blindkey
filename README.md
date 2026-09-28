@@ -166,7 +166,7 @@ These agent-side layers are heuristics, not a sandbox. Known gaps:
 Requires Node.js ≥ 20 and npm on `PATH`, plus a checkout of this repo. The committed `plugin/dist` bundles mean no build step is needed.
 
 ```bash
-git clone <this repo> ~/src/projects-info-db
+git clone https://github.com/AlexanderBorysenko/projects-info-db.git ~/src/projects-info-db
 claude plugin marketplace add ~/src/projects-info-db
 claude plugin install pidb@pidb --scope user      # every project on this machine
 # or, from inside one project: claude plugin install pidb@pidb --scope project
@@ -185,12 +185,24 @@ Repo bindings are always local (plugin data dir) and never committed.
 The steps are the same, in PowerShell:
 
 ```powershell
-git clone <this repo> $HOME\src\projects-info-db
+git clone https://github.com/AlexanderBorysenko/projects-info-db.git $HOME\src\projects-info-db
 claude plugin marketplace add $HOME\src\projects-info-db
 claude plugin install pidb@pidb --scope user
 ```
 
 `node` and `npm` must be on `PATH`. In Git Bash, Claude runs the `bin/pidb` sh shim; in PowerShell or cmd, it runs `bin/pidb.cmd`.
+
+### Syncing between machines
+
+The repo (private, `github.com/AlexanderBorysenko/projects-info-db`) is the plugin source. Each machine keeps a clone registered as the local marketplace, so edits stay easy and every machine pulls the same version:
+
+```bash
+cd ~/src/projects-info-db && git pull          # get changes made on another machine
+claude plugin marketplace update pidb           # re-read the marketplace
+claude plugin update pidb@pidb                  # takes effect for new sessions
+```
+
+After changing plugin code: `npm run build && npm run build:plugin`, bump `version` in `plugin/.claude-plugin/plugin.json`, commit (including `plugin/dist`) and `git push`. Profiles, repo bindings and tokens are per machine (plugin data dir and OS credential store) — run `/pidb:server` and `/pidb:connect` once on each new machine.
 
 ### First session and dependencies
 
