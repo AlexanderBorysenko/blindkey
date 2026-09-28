@@ -58,6 +58,16 @@ describe('redactOutput', () => {
     expect(redactOutput('DB_SECRET=')).toBe('DB_SECRET=');
   });
 
+  it('leaves a spaced-around-= assignment untouched, even with a sensitive-looking key (Fix round 1 Minor #7)', () => {
+    expect(redactOutput('MAX_TOKENS = 4096')).toBe('MAX_TOKENS = 4096');
+    expect(redactOutput('API_KEY = "xyz"')).toBe('API_KEY = "xyz"');
+  });
+
+  it('leaves a lowercase-key assignment untouched, even with a sensitive-looking name', () => {
+    expect(redactOutput('api_key = os.environ["STRIPE_KEY"]')).toBe('api_key = os.environ["STRIPE_KEY"]');
+    expect(redactOutput('password=hunter2')).toBe('password=hunter2');
+  });
+
   it('redacts a sensitive KEY=value line among several unrelated lines, multi-line safe', () => {
     const text = ['NODE_ENV=production', 'DB_HOST=localhost', 'DB_PASSWORD=hunter2', 'PORT=5432'].join('\n');
     expect(redactOutput(text)).toBe(['NODE_ENV=production', 'DB_HOST=localhost', `DB_PASSWORD=${REDACTED}`, 'PORT=5432'].join('\n'));

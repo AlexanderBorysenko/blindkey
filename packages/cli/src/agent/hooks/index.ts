@@ -68,14 +68,32 @@ function collectServerUrls(dataDir: string): string[] {
   }
 }
 
+/**
+ * `written.json` being corrupt must degrade *only* that one signal, not fail the whole guard open
+ * (Fix round 1 Minor #9) — a naive `loadWritten(dataDir).paths` call left uncaught here would bubble
+ * all the way out to `runHook`'s outer catch, which for `kind: 'guard'` means "allow", silently
+ * dropping rules 1/2/4/5 too. Treats a load failure as an empty written-paths list plus a stderr note.
+ */
+function loadWrittenPathsSafe(dataDir: string): { paths: string[]; note?: string } {
+  try {
+    return { paths: loadWritten(dataDir).paths };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { paths: [], note: `pidb hook (guard): written.json unreadable (${message}) — treating as empty` };
+  }
+}
+
 function guardOutput(reason: string): string {
   return JSON.stringify({
     hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
   });
 }
 
-function redactHookOutput(updatedOutput: unknown): string {
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedOutput } });
+// `updatedToolOutput`, not `updatedOutput` (Fix round 1 Critical #1) — the field Claude Code 2.1.281
+// actually recognizes for a PostToolUse hookSpecificOutput; `updatedOutput` doesn't exist in the
+// binary and is silently ignored. See spec §3.2.
+function redactHookOutput(updatedToolOutput: unknown): string {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput } });
 }
 
 function sessionStartOutput(additionalContext: string): string {
@@ -111,15 +129,20 @@ async function dispatch(kind: HookKind, stdinText: string, env: NodeJS.ProcessEn
   const input = parseHookInput(stdinText);
 
   if (kind === 'guard') {
+    const written = loadWrittenPathsSafe(dataDir);
     const ctx: GuardContext = {
       dataDir,
-      written: loadWritten(dataDir).paths,
+      written: written.paths,
       serverUrls: collectServerUrls(dataDir),
       home: env.HOME ?? homedir(),
       platform: deps.platform ?? process.platform,
+      // Fix round 1 Minor #8: production reads the real `%APPDATA%` from the environment rather than
+      // always falling back to the `<home>\AppData\Roaming` convention `guard.ts` uses when unset.
+      appData: env.APPDATA,
     };
     const decision = guardDecision(input, ctx);
-    return decision.deny ? { stdout: guardOutput(decision.reason), exitCode: 0 } : { stdout: '', exitCode: 0 };
+    const stdout = decision.deny ? guardOutput(decision.reason) : '';
+    return { stdout, exitCode: 0, stderr: written.note };
   }
 
   // redact
@@ -131,7 +154,7 @@ async function dispatch(kind: HookKind, stdinText: string, env: NodeJS.ProcessEn
  * Runs one hook invocation end to end: parses `stdinText` as the documented hook JSON, decides, and
  * returns the exact stdout the hook must print (empty string ⇒ print nothing) — always with
  * `exitCode: 0`. Never throws: any internal error is caught here and turned into the safest possible
- * fallback for `kind` (guard → allow, redact → no `updatedOutput`, session-start → a one-line status
+ * fallback for `kind` (guard → allow, redact → no `updatedToolOutput`, session-start → a one-line status
  * built the same way `sessionContext` builds its own failure status), with a diagnostic on `stderr`
  * for guard/redact (session-start's fallback already explains itself in the injected context, so no
  * separate stderr note is needed there).

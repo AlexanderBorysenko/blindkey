@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runHook } from '../src/agent/hooks/index.js';
@@ -65,6 +65,35 @@ describe('runHook — guard', () => {
     expect(result.stderr).toMatch(/pidb hook \(guard\)/);
   });
 
+  it('a corrupt written.json degrades to an empty written-paths list — it does NOT fail the whole guard open', async () => {
+    writeFileSync(join(dataDir, 'written.json'), '{not valid json', 'utf8');
+    // profiles.json is fine, so the curl-target rule (unrelated to written.json) must still fire —
+    // this is what proves the corruption didn't bubble out and silently allow *everything*.
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } });
+    const result = await runHook(
+      'guard',
+      hookJson({ tool_name: 'Bash', tool_input: { command: 'curl https://pidb.example.com/api/v1/projects' } }),
+      { CLAUDE_PLUGIN_DATA: dataDir },
+    );
+    const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { permissionDecision: string } };
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(result.stderr).toMatch(/written\.json unreadable/);
+  });
+
+  it('passes env.APPDATA through to the guard context for the %APPDATA%\\pidb rule', async () => {
+    // A literal Windows-style path — deliberately not derived from the real (POSIX) tmp dir, so the
+    // win32 path module resolves it exactly the way it would on a real Windows session.
+    const appData = 'C:\\Users\\alex\\Custom\\AppData';
+    const result = await runHook(
+      'guard',
+      hookJson({ tool_name: 'Bash', tool_input: { command: 'type %APPDATA%\\pidb\\config.json' } }),
+      { CLAUDE_PLUGIN_DATA: dataDir, APPDATA: appData },
+      { platform: 'win32' },
+    );
+    const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { permissionDecision: string } };
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
+  });
+
   it('never throws on empty stdin — allows and notes it on stderr', async () => {
     const result = await runHook('guard', '', { CLAUDE_PLUGIN_DATA: dataDir });
     expect(result.exitCode).toBe(0);
@@ -83,17 +112,17 @@ describe('runHook — redact', () => {
     expect(result).toEqual({ stdout: '', exitCode: 0 });
   });
 
-  it('prints the documented PostToolUse updatedOutput JSON when something was redacted', async () => {
+  it('prints the documented PostToolUse updatedToolOutput JSON when something was redacted', async () => {
     const token = `pidb_${'a'.repeat(24)}`;
     const result = await runHook(
       'redact',
       JSON.stringify({ hook_event_name: 'PostToolUse', cwd: '/repo', tool_name: 'Bash', tool_response: { stdout: `token: ${token}`, stderr: '' } }),
       { CLAUDE_PLUGIN_DATA: dataDir },
     );
-    const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { hookEventName: string; updatedOutput: { stdout: string; stderr: string } } };
+    const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { hookEventName: string; updatedToolOutput: { stdout: string; stderr: string } } };
     expect(parsed.hookSpecificOutput.hookEventName).toBe('PostToolUse');
-    expect(parsed.hookSpecificOutput.updatedOutput.stdout).toContain('[pidb:redacted]');
-    expect(parsed.hookSpecificOutput.updatedOutput.stdout).not.toContain(token);
+    expect(parsed.hookSpecificOutput.updatedToolOutput.stdout).toContain('[pidb:redacted]');
+    expect(parsed.hookSpecificOutput.updatedToolOutput.stdout).not.toContain(token);
   });
 
   it('handles a plain-string tool_response', async () => {
@@ -101,8 +130,8 @@ describe('runHook — redact', () => {
     const result = await runHook('redact', JSON.stringify({ hook_event_name: 'PostToolUse', cwd: '/repo', tool_response: `x=${token}` }), {
       CLAUDE_PLUGIN_DATA: dataDir,
     });
-    const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { updatedOutput: string } };
-    expect(parsed.hookSpecificOutput.updatedOutput).toBe('x=[pidb:redacted]');
+    const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { updatedToolOutput: string } };
+    expect(parsed.hookSpecificOutput.updatedToolOutput).toBe('x=[pidb:redacted]');
   });
 
   it('never throws on malformed stdin — no redaction and a stderr note', async () => {

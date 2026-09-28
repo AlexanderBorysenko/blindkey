@@ -69,7 +69,7 @@
 
 ### Task 8: Hooks — guard, redact, session-start (spec §3.1–§3.3)
 **Files:** new `packages/cli/src/agent/hooks/{guard,redact,session-start,index}.ts` (pure decision functions + stdin/stdout JSON dispatcher), tests `packages/cli/test/agent.hooks.*.test.ts`.
-- Interfaces: `guardDecision(input: HookInput, ctx: {dataDir, written: string[], serverUrls: string[], home, platform}) → {deny: false} | {deny: true, reason: string}`; `redactOutput(text) → string`; `sessionContext(ctx) → string`. Dispatcher reads hook JSON from stdin, writes the documented JSON (`hookSpecificOutput` with `permissionDecision`/`updatedOutput`/`additionalContext`), never throws (errors → allow + stderr note).
+- Interfaces: `guardDecision(input: HookInput, ctx: {dataDir, written: string[], serverUrls: string[], home, platform}) → {deny: false} | {deny: true, reason: string}`; `redactOutput(text) → string`; `sessionContext(ctx) → string`. Dispatcher reads hook JSON from stdin, writes the documented JSON (`hookSpecificOutput` with `permissionDecision`/`updatedToolOutput`/`additionalContext`), never throws (errors → allow + stderr note).
 - [ ] Table tests covering every rule in §3.1 for bash/zsh, PowerShell and cmd syntaxes (Review Focus 5), plus allowed look-alikes (`pidb secret exec acme DB -- npm test`, `cat README.md`, `echo hello`); redact patterns; session context for connected/unbound/not-connected/server-down (≤4 KB).
 - [ ] Implement, build, suite, typecheck, commit `feat(cli): plugin hooks — command guard, output redaction, session context`.
 

@@ -66,19 +66,26 @@ function bulletedList(items: string[], max: number): string[] {
 }
 
 /** `null` = the project doesn't exist (404); `'down'` = couldn't reach/parse the server in time. */
-async function fetchProjectDetail(url: string, token: string, project: string, deps: SessionStartDeps): Promise<RemoteProjectDetail | null | 'down'> {
+async function fetchProjectDetail(
+  url: string,
+  token: string,
+  project: string,
+  deps: SessionStartDeps,
+  deadline: number,
+): Promise<RemoteProjectDetail | null | 'down'> {
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const timeoutMs = Math.min(deps.timeoutMs ?? 4000, 4000);
   try {
     const client = new PidbClient({ url, token }, fetchImpl);
-    return await withTimeout(client.json<RemoteProjectDetail>('GET', `/api/v1/projects/${encodeURIComponent(project)}`), timeoutMs);
+    return await withDeadline(client.json<RemoteProjectDetail>('GET', `/api/v1/projects/${encodeURIComponent(project)}`), deadline);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
     return 'down';
   }
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+/** Rejects once `deadline` (an absolute `Date.now()`-scale timestamp) passes, whatever's left of it. */
+function withDeadline<T>(p: Promise<T>, deadline: number): Promise<T> {
+  const ms = Math.max(deadline - Date.now(), 0);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
     p.then(
@@ -94,7 +101,13 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-async function buildBody(deps: SessionStartDeps): Promise<string[]> {
+/**
+ * `deadline` is a single shared budget (Fix round 1 Minor #10): `ensureDeps`, `store.get`, and the
+ * project-detail fetch all draw down the *same* remaining time rather than each getting their own
+ * fresh `timeoutMs` — a slow/hanging keychain (`store.get`) or a slow dep-install must not let the
+ * total time this hook can block Claude Code exceed the documented "≤ 4s" budget.
+ */
+async function buildBody(deps: SessionStartDeps, deadline: number): Promise<string[]> {
   const profiles = loadProfiles(deps.dataDir);
   const bindings = loadBindings(deps.dataDir);
   const binding = bindings[repoKey(deps.cwd)];
@@ -110,7 +123,7 @@ async function buildBody(deps: SessionStartDeps): Promise<string[]> {
 
   const lines = [`pidb: profile "${profileName}" — ${profile.url}`];
 
-  const token = await deps.store.get(profileName);
+  const token = await withDeadline(Promise.resolve(deps.store.get(profileName)), deadline);
   if (!token) {
     lines.push('Not connected — run `pidb connect` (browser approval), or ask the user to run `/pidb:connect`.');
     return lines;
@@ -123,7 +136,7 @@ async function buildBody(deps: SessionStartDeps): Promise<string[]> {
   }
   lines.push(`Bound project: ${binding.project}`);
 
-  const detail = await fetchProjectDetail(profile.url, token, binding.project, deps);
+  const detail = await fetchProjectDetail(profile.url, token, binding.project, deps, deadline);
   if (detail === 'down') {
     lines.push(`pidb server (${profile.url}) is unreachable right now — project details unavailable this session.`);
     return lines;
@@ -189,15 +202,17 @@ export function fallbackContext(message: string): string {
  * saves the day, this is redundant with it — belt and braces for a hook that must never crash).
  */
 export async function sessionContext(deps: SessionStartDeps): Promise<string> {
+  const deadline = Date.now() + (deps.timeoutMs ?? 4000);
   if (deps.ensureDeps) {
     try {
-      await deps.ensureDeps();
+      await withDeadline(Promise.resolve(deps.ensureDeps()), deadline);
     } catch {
-      // Task 9's concern (npm install into the data dir) — never let it block session context.
+      // Task 9's concern (npm install into the data dir) — never let it block session context, and
+      // never let it eat into the budget the rest of this function still needs.
     }
   }
   try {
-    return finalize(await buildBody(deps));
+    return finalize(await buildBody(deps, deadline));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return fallbackContext(message);

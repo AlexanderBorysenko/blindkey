@@ -149,6 +149,40 @@ describe('sessionContext — server down / unreachable', () => {
     expect(context).toContain('is unreachable right now');
     expectGoldenRules(context);
   });
+
+  it('a slow store.get eats into the same shared budget the fetch would otherwise get (Fix round 1 Minor #10)', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+    saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });
+    const slowStore: TokenStore = {
+      get: () => new Promise((resolve) => setTimeout(() => resolve('a-token'), 40)),
+      set: async () => {},
+      delete: async () => {},
+    };
+    const hangingFetch: typeof fetch = () => new Promise(() => {}); // never resolves
+    const start = Date.now();
+    const context = await sessionContext({ cwd, dataDir, store: slowStore, fetchImpl: hangingFetch, timeoutMs: 60 });
+    const elapsed = Date.now() - start;
+    // The whole call (store.get's 40ms + whatever's left of the 60ms budget for the hanging fetch)
+    // must stay close to the 60ms total budget, not 40ms + a fresh 60ms fetch timeout on top of it.
+    expect(elapsed).toBeLessThan(500);
+    expect(context).toContain('is unreachable right now');
+    expectGoldenRules(context);
+  });
+
+  it('a slow/hanging ensureDeps also draws down the same shared budget', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+    const start = Date.now();
+    const context = await sessionContext({
+      cwd,
+      dataDir,
+      store,
+      timeoutMs: 60,
+      ensureDeps: () => new Promise(() => {}), // never resolves
+    });
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(500);
+    expectGoldenRules(context);
+  });
 });
 
 describe('sessionContext — never throws', () => {

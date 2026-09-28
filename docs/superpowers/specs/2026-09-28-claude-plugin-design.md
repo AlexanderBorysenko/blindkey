@@ -124,7 +124,7 @@ Deny (with a reason telling Claude the safe alternative) when:
 The guard is heuristic defense-in-depth; the skill states the rules plainly.
 
 ### 3.2 PostToolUse redaction (`hook.mjs redact`, Bash)
-Replace in tool output (via `updatedOutput`): pidb tokens (`pidb_[A-Za-z0-9_-]{20,}`), PEM private key blocks, `AKIA[0-9A-Z]{16}`, and `KEY=value` lines whose key matches `/(PASS(WORD)?|SECRET|TOKEN|API_?KEY|PRIVATE)/i` (value → `[pidb:redacted]`). Does not fetch secret values.
+Replace in tool output (via `updatedToolOutput`): pidb tokens (`pidb_[A-Za-z0-9_-]{20,}`), PEM private key blocks, `AKIA[0-9A-Z]{16}`, and `KEY=value` lines whose key matches `/(PASS(WORD)?|SECRET|TOKEN|API_?KEY|PRIVATE)/i` (value → `[pidb:redacted]`). Does not fetch secret values.
 
 ### 3.3 SessionStart (`hook.mjs session-start`)
 - Ensures deps (2.1). Resolves binding for cwd. Injects `additionalContext` (≤ ~4 KB): profile + url, connection status, bound project summary, document index (slugs + titles), secret names with field keys (sensitive marked `*`), and the 6 golden rules (below). Unbound repo: short note + "call pidb_bind or ask the user which project". Not connected: "run `pidb connect`". Never throws; on any failure injects a one-line status.
