@@ -122,6 +122,22 @@ describe('agent mode: profile', () => {
     const err = await expectCliError(program().parseAsync(['node', 'pidb', 'profile', 'set-url', 'nope', 'https://x.example.com']));
     expect(err.exitCode).toBe(4);
   });
+
+  it('set-url deletes the token before saving the new url (crash-safety: never a new url with a stale token)', async () => {
+    await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
+    await store.set('work', 'pidb_old_token');
+    let urlOnDiskWhenTokenWasDeleted: string | undefined;
+    const spyingStore: TokenStore = {
+      get: (p) => store.get(p),
+      set: (p, t) => store.set(p, t),
+      delete: async (p) => {
+        urlOnDiskWhenTokenWasDeleted = loadProfiles(dataDir).profiles[p]?.url;
+        await store.delete(p);
+      },
+    };
+    await run(program({ store: spyingStore }), ['profile', 'set-url', 'work', 'https://work2.example.com']);
+    expect(urlOnDiskWhenTokenWasDeleted).toBe('https://work.example.com');
+  });
 });
 
 describe('agent mode: bind / unbind / status', () => {
@@ -222,6 +238,12 @@ describe('agent mode: disabled commands', () => {
 
   it('token create with no options at all still exits 2 with the agent message, not a missing-option error', async () => {
     const err = await expectCliError(program().parseAsync(['node', 'pidb', 'token', 'create']));
+    expect(err.exitCode).toBe(2);
+    expect(err.message).toBe('not available to the Claude agent — ask the user');
+  });
+
+  it('bare `token` (no subcommand) refuses instead of showing the group\'s help', async () => {
+    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'token']));
     expect(err.exitCode).toBe(2);
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });

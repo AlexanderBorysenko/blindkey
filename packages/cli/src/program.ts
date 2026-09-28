@@ -264,6 +264,16 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   token.hook('preSubcommand', () => {
     refuseInAgentMode();
   });
+  // Bare `pidb token` (no subcommand) doesn't dispatch into a child, so the preSubcommand hook above
+  // never fires for it — without an action of its own, commander's default for a childless invocation
+  // of a command that has subcommands is to display that group's help and exit, which would leak
+  // token subcommand names/options into agent-mode output instead of refusing. Only register this in
+  // agent mode: in normal mode `token`'s bare-invocation behavior (show help) is unchanged.
+  if (agent) {
+    token.action(() => {
+      refuseInAgentMode();
+    });
+  }
 
   if (agent) buildAgentOnlyCommands(program, { cwd, store, dataDir });
 
@@ -318,9 +328,12 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
       const profiles = loadProfiles(dataDir);
       if (!profiles.profiles[name]) throw new CliError(`unknown profile "${name}"`, EXIT_NOT_FOUND);
       const normalized = normalizeUrl(url);
+      // Clear the token for the *old* url before saving the new one: if this is interrupted midway,
+      // the profile is left pointing at its old (now-tokenless) url rather than at a new url that's
+      // still holding a token issued for the old server.
+      await store.delete(name);
       profiles.profiles[name] = { url: normalized };
       saveProfiles(dataDir, profiles);
-      await store.delete(name);
       emit(
         {
           json: { name, url: normalized, tokenCleared: true },

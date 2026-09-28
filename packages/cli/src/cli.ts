@@ -5,6 +5,7 @@
 // copy of the normal program against `import.meta.url`, since both files would share one bundle.
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { CommanderError } from 'commander';
 import { buildProgram, exitCodeOf } from './program.js';
 
 export * from './program.js';
@@ -15,7 +16,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     // running the dedicated agent entry (agent/cli.ts), which always passes `{ agent: true }`.
     await buildProgram({ agent: process.env.PIDB_AGENT === '1' }).parseAsync(argv);
   } catch (err) {
-    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    // Commander (via .exitOverride()) already wrote its own message/usage/help — for --help, a
+    // missing argument, an unknown command, etc. — so printing another "error: ..." line here would
+    // duplicate or garble it (e.g. "error: error: missing required argument 'url'", or a spurious
+    // "error: (outputHelp)" for a successful --help). Only our own thrown errors need this line.
+    if (!(err instanceof CommanderError)) {
+      console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    }
     // process.exit() can truncate a long console.error write when stderr is a pipe (exactly how
     // the e2e tests invoke the CLI); setting exitCode and returning lets Node flush before exiting.
     process.exitCode = exitCodeOf(err);

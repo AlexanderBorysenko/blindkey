@@ -8,13 +8,18 @@
 // second time — reading `PIDB_URL`/`PIDB_TOKEN`/`~/.config/pidb` and running every command twice.
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { CommanderError } from 'commander';
 import { buildProgram, exitCodeOf } from '../program.js';
 
 export async function main(argv: string[] = process.argv): Promise<void> {
   try {
     await buildProgram({ agent: true }).parseAsync(argv);
   } catch (err) {
-    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    // See cli.ts's main() for why a CommanderError (--help, missing argument, ...) doesn't get an
+    // extra "error: ..." line here — commander already printed its own message.
+    if (!(err instanceof CommanderError)) {
+      console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    }
     // See cli.ts's main() for why this sets exitCode + returns rather than calling process.exit().
     process.exitCode = exitCodeOf(err);
     return;
