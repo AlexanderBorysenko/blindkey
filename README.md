@@ -474,6 +474,27 @@ A backup taken before a rotation is wrapped with the old key version, so after r
 4. Run `docker compose run --rm --no-deps server rotate-key` and read its output exactly as above: expect `rewrapped <count> secrets to key version <current>`; on an error nothing changed — handle it as described in the error bullet above and try again. Then run `docker compose run --rm --no-deps server key-versions` — it should now show only the current version, ok.
 5. `docker compose up -d`, reveal one secret field, then remove the `PREVIOUS` line as above.
 
+### Behind an existing reverse proxy (nginx / CloudPanel)
+
+If the host already serves 80/443 (CloudPanel, Plesk, a plain nginx), skip Caddy and let that proxy terminate TLS. Add to `docker/.env`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+PIDB_HOST_PORT=8090
+```
+
+`docker-compose.proxy.yml` moves Caddy into an unused profile and publishes the server on `127.0.0.1:8090` only. Keep it on the loopback address: Docker-published ports bypass ufw, so `0.0.0.0` would expose the server (and its trusted `X-Forwarded-*` handling) to the internet.
+
+Point the proxy at `http://127.0.0.1:8090` and make it send `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`. On CloudPanel that is one command (as root), followed by the certificate:
+
+```bash
+clpctl site:add:reverse-proxy --domainName=pidb.example.com --reverseProxyUrl='http://127.0.0.1:8090' \
+  --siteUser='example-pidb' --siteUserPassword='<random>'
+clpctl lets-encrypt:install:certificate --domainName=pidb.example.com
+```
+
+Add `add_header Strict-Transport-Security "max-age=31536000" always;` to the site's vhost (CloudPanel: Vhost editor) — Caddy did that for you in the default setup. Everything else in this section (first run, backups, rotation, upgrades) is unchanged; the commands pick up `COMPOSE_FILE` from `docker/.env`.
+
 ### Upgrading
 
 Take a backup first:

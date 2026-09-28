@@ -1,0 +1,15 @@
+# Overlay for hosts that already run a reverse proxy on 80/443 (nginx, CloudPanel, Plesk, ...).
+# Use it by adding to docker/.env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+#   PIDB_HOST_PORT=8090
+# Caddy is moved into an opt-in profile (never started), and the server is published on the
+# loopback interface only, so the host's proxy is the sole way in — the condition under which
+# PIDB_TRUST_PROXY=true is safe. Never change the bind address to 0.0.0.0: Docker-published
+# ports bypass ufw/iptables INPUT rules.
+services:
+  server:
+    ports:
+      - "127.0.0.1:${PIDB_HOST_PORT:-8090}:8080"
+
+  caddy:
+    profiles: ["caddy"]
