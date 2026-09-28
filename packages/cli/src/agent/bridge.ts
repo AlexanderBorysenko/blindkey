@@ -7,7 +7,7 @@
 // from the OS credential store, and adds three local tools (`pidb_status`, `pidb_bind`,
 // `pidb_profiles`) that never leave this process. Profile/token are resolved fresh on every call
 // (spec: "profile or binding may change mid-session") — only the upstream MCP `Client` (keyed by
-// `url`+`token`) is cached, and dropped on an authentication/authorization failure so the next call
+// `url`+`token`) is cached, and dropped on an authentication/authorization failure so a retry
 // reconnects rather than reusing a session tied to a token that's since been rotated or widened.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -30,6 +30,7 @@ export interface BridgeDeps {
 
 const CONNECT_HINT = 'not connected — run `pidb connect`';
 const WIDEN_HINT = 'the token lacks access — run `pidb connect` to widen';
+const NOT_ALLOWED = 'tool not allowed by the pidb plugin';
 
 const LOCAL_TOOLS: Tool[] = [
   {
@@ -61,11 +62,29 @@ const LOCAL_TOOLS: Tool[] = [
 ];
 const LOCAL_TOOL_NAMES = new Set(LOCAL_TOOLS.map((t) => t.name));
 
+/**
+ * The exact tools the pidb server's own `/mcp` exposes (spec §1.5) — anything else the upstream
+ * server happens to list (a future tool this bridge hasn't been reviewed against, a misbehaving or
+ * malicious server) is dropped from `tools/list` and refused for `tools/call`, never forwarded.
+ */
+const ALLOWED_UPSTREAM_TOOLS = new Set([
+  'list_projects',
+  'get_project',
+  'list_documents',
+  'read_document',
+  'write_document',
+  'search',
+  'list_secrets',
+  'update_project',
+  'upsert_secret_meta',
+  'secret_request_link',
+]);
+
 function textResult(text: string, isError = false): CallToolResult {
   return { content: [{ type: 'text', text }], isError };
 }
 
-/** Strips the current token value out of anything the bridge is about to emit (belt-and-braces — the
+/** Strips a known token value out of anything the bridge is about to emit (belt-and-braces — the
  * upstream server never echoes a token back, but a transport-level error can embed arbitrary response
  * text and must never be trusted to be token-free). */
 function sanitize(token: string, text: string): string {
@@ -99,39 +118,51 @@ export function createBridge(deps: BridgeDeps): Server {
   const dataDir = deps.dataDir ?? resolveDataDir(env);
 
   const upstream = new Map<string, Client>();
+  // Tracks the most recent token cached for each url, so that resolving a *different* token for a
+  // url we've already cached a client for (a rotation — `pidb connect` issuing a fresh token for the
+  // same profile) can close the now-unreachable superseded client instead of leaking it forever.
+  const lastTokenForUrl = new Map<string, string>();
   const clientKey = (url: string, token: string): string => `${url}\u0000${token}`;
+
+  /** Drops a cached client so a retry reconnects from scratch — used after an auth failure (the
+   * cached client's session is tied to a token that just proved invalid/insufficient) and whenever a
+   * url's token changes (the old client will never be reused again). */
+  function dropUpstreamClient(url: string, token: string): void {
+    const key = clientKey(url, token);
+    const client = upstream.get(key);
+    if (!client) return;
+    upstream.delete(key);
+    if (lastTokenForUrl.get(url) === token) lastTokenForUrl.delete(url);
+    void client.close().catch(() => {});
+  }
 
   async function getUpstreamClient(url: string, token: string): Promise<Client> {
     const key = clientKey(url, token);
     const existing = upstream.get(key);
     if (existing) return existing;
+    const superseded = lastTokenForUrl.get(url);
+    if (superseded !== undefined && superseded !== token) dropUpstreamClient(url, superseded);
     const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
       requestInit: { headers: { authorization: `Bearer ${token}` } },
     });
     const client = new Client({ name: 'pidb-bridge', version: '0.1.0' });
     await client.connect(transport);
     upstream.set(key, client);
+    lastTokenForUrl.set(url, token);
     return client;
   }
 
-  /** Drops a cached client so the next call reconnects from scratch — used after an auth failure,
-   * since the cached client's session is tied to a token that just proved invalid/insufficient. */
-  function dropUpstreamClient(url: string, token: string): void {
-    const key = clientKey(url, token);
-    const client = upstream.get(key);
-    if (!client) return;
-    upstream.delete(key);
-    void client.close().catch(() => {});
-  }
-
   /** Resolves the effective profile/token for the *current* call — never cached across calls, since
-   * the bound profile or its token can change mid-session (spec §2.4). Returns null for "not
-   * connected"/"no server configured" instead of throwing, so callers can degrade gracefully. */
+   * the bound profile or its token can change mid-session (spec §2.4). Returns null for the expected
+   * "not connected"/"no server configured" states (both `CliError`s from `resolveAgentConfig`); any
+   * other error (a broken keychain, a corrupt state file racing a concurrent write, ...) is rethrown
+   * so it's reported with its own real message rather than silently read as "not connected". */
   async function resolveConfig(): Promise<AgentConfig | null> {
     try {
       return await resolveAgentConfig({ cwd, env, store, dataDir });
-    } catch {
-      return null;
+    } catch (err) {
+      if (err instanceof CliError) return null;
+      throw err;
     }
   }
 
@@ -139,17 +170,40 @@ export function createBridge(deps: BridgeDeps): Server {
     return err instanceof StreamableHTTPError ? err.code : undefined;
   }
 
+  function authErrorResult(token: string, err: unknown, status: number | undefined): CallToolResult {
+    const hint = status === 401 ? CONNECT_HINT : status === 403 ? WIDEN_HINT : undefined;
+    const message = sanitize(token, err instanceof Error ? err.message : String(err));
+    return textResult(hint ? `${message} — ${hint}` : message, true);
+  }
+
+  async function attemptUpstreamCall(cfg: AgentConfig, name: string, args: Record<string, unknown> | undefined): Promise<CallToolResult> {
+    const client = await getUpstreamClient(cfg.url, cfg.token);
+    const result = (await client.callTool({ name, arguments: args })) as CallToolResult;
+    return isScopeError(result) ? withWidenHint(result) : result;
+  }
+
+  /**
+   * On a 401/403, drops the stale client and retries exactly once against a freshly resolved config
+   * (spec §2.4 error mapping) — this is what makes a token rotated by a concurrent `pidb connect`
+   * work on the very first tool call after it, instead of requiring the caller to retry. Only if the
+   * retry *also* fails (or there's nothing left to reconnect to) is the hinted error returned.
+   */
   async function callUpstreamTool(cfg: AgentConfig, name: string, args: Record<string, unknown> | undefined): Promise<CallToolResult> {
     try {
-      const client = await getUpstreamClient(cfg.url, cfg.token);
-      const result = (await client.callTool({ name, arguments: args })) as CallToolResult;
-      return isScopeError(result) ? withWidenHint(result) : result;
-    } catch (err) {
-      const status = statusCodeOf(err);
-      if (status === 401 || status === 403) dropUpstreamClient(cfg.url, cfg.token);
-      const hint = status === 401 ? CONNECT_HINT : status === 403 ? WIDEN_HINT : undefined;
-      const message = sanitize(cfg.token, err instanceof Error ? err.message : String(err));
-      return textResult(hint ? `${message} — ${hint}` : message, true);
+      return await attemptUpstreamCall(cfg, name, args);
+    } catch (firstErr) {
+      const firstStatus = statusCodeOf(firstErr);
+      if (firstStatus !== 401 && firstStatus !== 403) return authErrorResult(cfg.token, firstErr, undefined);
+      dropUpstreamClient(cfg.url, cfg.token);
+      const refreshed = await resolveConfig();
+      if (!refreshed) return textResult(CONNECT_HINT, true);
+      try {
+        return await attemptUpstreamCall(refreshed, name, args);
+      } catch (secondErr) {
+        const secondStatus = statusCodeOf(secondErr);
+        if (secondStatus === 401 || secondStatus === 403) dropUpstreamClient(refreshed.url, refreshed.token);
+        return authErrorResult(refreshed.token, secondErr, secondStatus);
+      }
     }
   }
 
@@ -184,7 +238,11 @@ export function createBridge(deps: BridgeDeps): Server {
       const result = performBind(dataDir, cwd, project, profile);
       return textResult(JSON.stringify(result));
     } catch (err) {
-      return textResult(err instanceof CliError ? err.message : 'bind failed', true);
+      // Only our own "no server configured" refusal is an expected, reportable-as-is outcome;
+      // anything else (e.g. an unexpected filesystem error) is rethrown with its real message rather
+      // than papered over — it never involves a token, so there's nothing to sanitize here.
+      if (err instanceof CliError) return textResult(err.message, true);
+      throw err;
     }
   }
 
@@ -197,7 +255,14 @@ export function createBridge(deps: BridgeDeps): Server {
   const server = new Server({ name: 'pidb-bridge', version: '0.1.0' }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const cfg = await resolveConfig();
+    let cfg: AgentConfig | null = null;
+    try {
+      cfg = await resolveConfig();
+    } catch (err) {
+      // tools/list has no per-item error channel (unlike tools/call) — degrade to local tools only,
+      // but still report the unexpected failure on stderr rather than silently swallowing it.
+      console.error(`pidb bridge: tools/list could not resolve the agent config (${err instanceof Error ? err.message : String(err)})`);
+    }
     let upstreamTools: Tool[] = [];
     if (cfg) {
       try {
@@ -209,7 +274,10 @@ export function createBridge(deps: BridgeDeps): Server {
         // Degrade to local tools only — tools/list has no per-call error channel.
       }
     }
-    return { tools: [...upstreamTools, ...LOCAL_TOOLS] };
+    // Allowlisted upstream tools only (never something the upstream server merely happens to list),
+    // and local tool names always win over any same-named upstream tool.
+    const allowedUpstream = upstreamTools.filter((t) => ALLOWED_UPSTREAM_TOOLS.has(t.name) && !LOCAL_TOOL_NAMES.has(t.name));
+    return { tools: [...allowedUpstream, ...LOCAL_TOOLS] };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -219,6 +287,7 @@ export function createBridge(deps: BridgeDeps): Server {
       if (name === 'pidb_bind') return handleBind(args);
       return handleProfiles();
     }
+    if (!ALLOWED_UPSTREAM_TOOLS.has(name)) return textResult(NOT_ALLOWED, true);
     const cfg = await resolveConfig();
     if (!cfg) return textResult(CONNECT_HINT, true);
     return callUpstreamTool(cfg, name, args);
