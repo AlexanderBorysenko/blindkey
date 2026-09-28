@@ -23,6 +23,21 @@
 </div>
 <% } %>
 
+<% if (it.listError) { %><div class="panel"><p role="alert" class="alert"><%= it.listError %></p></div><% } %>
+
+<% if (it.pending.length > 0) { %>
+<div class="panel"<%~ it.created || it.listError ? '' : ' data-auto-refresh="3"' %>>
+  <h3>Approved — waiting for the agent</h3>
+  <p class="note">The token is minted when the agent next polls (within a few seconds of approval). <% if (it.created || it.listError) { %>Reload the page to check.<% } else { %>This page refreshes until it appears below.<% } %></p>
+  <ul>
+    <% it.pending.forEach(function (p) { %>
+    <li><strong><%= p.name %></strong> — <% p.scopes.forEach(function (s) { %><span class="chip"><%= s %></span> <% }) %>
+      <% if (p.projects.length === 0) { %><span class="muted">no projects yet</span><% } else { %><% p.projects.forEach(function (slug) { %><span class="tag"><%= slug %></span> <% }) %><% } %></li>
+    <% }) %>
+  </ul>
+</div>
+<% } %>
+
 <div class="table-wrap">
   <table>
     <thead><tr><th>ID</th><th>Name</th><th>Prefix</th><th>Scopes</th><th>Projects</th><th>Expires</th><th>Last used</th><th>State</th><th></th></tr></thead>
@@ -43,12 +58,30 @@
         <td><%= t.name %><% if (t.kind === 'agent') { %> <span class="pill kind-agent">agent</span><% } %></td>
         <td class="mono"><%= t.prefix %></td>
         <td><% t.scopes.forEach(function (s) { %><span class="chip"><%= s %></span> <% }) %></td>
-        <td><% if (t.projects === null) { %><span class="muted">all</span><% } else { %><% t.projects.forEach(function (p) { %><span class="tag"><%= p %></span> <% }) %><% } %></td>
+        <td><% if (t.projects === null) { %><span class="muted">all</span><% } else if (t.projects.length === 0) { %><span class="muted">none</span><% } else { %><% t.projects.forEach(function (p) { %><span class="tag"><%= p %></span> <% }) %><% } %></td>
         <td><% if (t.expires_at === null && t.revoked_at === null) { %><span class="pill status-paused">never expires</span><% } else if (t.expires_at === null) { %>never<% } else { %><time datetime="<%= it.fmt.iso(t.expires_at) %>" title="<%= it.fmt.iso(t.expires_at) %>"><%= it.fmt.ago(t.expires_at) %></time><% } %></td>
         <td><% if (t.last_used_at === null) { %>—<% } else { %><time datetime="<%= it.fmt.iso(t.last_used_at) %>" title="<%= it.fmt.iso(t.last_used_at) %>"><%= it.fmt.ago(t.last_used_at) %></time><% } %></td>
         <td><% if (t.revoked_at === null) { %><span class="pill status-active">active</span><% } else { %><span class="pill status-archived">revoked</span><% } %></td>
         <td>
           <% if (t.revoked_at === null) { %>
+          <button class="btn sm ghost" type="button" data-open-dialog="projects-<%= t.id %>">Projects</button>
+          <dialog class="confirm" id="projects-<%= t.id %>">
+            <h2>Projects for <%= t.name %></h2>
+            <form method="post" action="/tokens/<%= t.id %>/projects" class="form-grid">
+              <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+              <label class="check"><input type="checkbox" name="all"<%~ t.projects === null ? ' checked' : '' %> /> All projects (including future ones)</label>
+              <fieldset class="chip-grid">
+                <legend>Or only these</legend>
+                <% it.projects.forEach(function (p) { %>
+                <label class="chip"><input type="checkbox" name="projects" value="<%= p.slug %>"<%~ t.projects !== null && t.projects.includes(p.slug) ? ' checked' : '' %> /> <%= p.slug %></label>
+                <% }) %>
+              </fieldset>
+              <div class="actions">
+                <button class="btn" type="button" data-close-dialog>Cancel</button>
+                <button class="btn primary" type="submit">Save</button>
+              </div>
+            </form>
+          </dialog>
           <button class="btn sm danger" type="button" data-open-dialog="revoke-<%= t.id %>">Revoke</button>
           <dialog class="confirm" id="revoke-<%= t.id %>">
             <h2>Revoke token</h2>

@@ -57,6 +57,7 @@ describe('mcp', () => {
     const client = await connect(t.token(['admin']));
     const names = (await client.listTools()).tools.map((x) => x.name).sort();
     expect(names).toEqual([
+      'create_project',
       'get_project',
       'list_documents',
       'list_projects',
@@ -312,5 +313,41 @@ describe('mcp', () => {
     const r = await t.app.inject({ method: 'POST', url: '/mcp', payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
     expect(r.statusCode).toBe(401);
     expect((await t.app.inject({ method: 'GET', url: '/mcp', headers: { authorization: `Bearer ${t.token(['admin'])}` } })).statusCode).toBe(405);
+  });
+});
+
+describe('mcp: agent autonomy tools', () => {
+  it('create_project: the new project is usable by the same client right away (next tool calls)', async () => {
+    t = await makeTestApp();
+    t.project('alpha');
+    const client = await connect(t.token(['projects:read', 'projects:create', 'secrets:meta', 'secrets:meta-write'], ['alpha'], 'agent'));
+    const created = await client.callTool({ name: 'create_project', arguments: { slug: 'fresh', name: 'Fresh', summary: 's' } });
+    expect(created.isError).toBeFalsy();
+    expect(JSON.parse(textOf(created))).toMatchObject({ slug: 'fresh', name: 'Fresh', summary: 's', status: 'active' });
+    const got = await client.callTool({ name: 'get_project', arguments: { slug: 'fresh' } });
+    expect(got.isError).toBeFalsy();
+    const meta = await client.callTool({
+      name: 'upsert_secret_meta',
+      arguments: { project: 'fresh', name: 'Site', fields: [{ key: 'web_root', value: '/srv/x', sensitive: false }, { key: 'url', value: 'https://x' }] },
+    });
+    expect(meta.isError).toBeFalsy();
+    expect(JSON.parse(textOf(meta)).fields).toEqual([
+      { key: 'web_root', sensitive: false, value: '/srv/x' },
+      { key: 'url', sensitive: false, value: 'https://x' },
+    ]);
+    const refused = await client.callTool({
+      name: 'upsert_secret_meta',
+      arguments: { project: 'fresh', name: 'Site', fields: [{ key: 'db_password', value: 'x', sensitive: false }] },
+    });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toMatch(/looks like a credential/);
+  });
+
+  it('create_project needs projects:create', async () => {
+    t = await makeTestApp();
+    const client = await connect(t.token(['projects:read', 'projects:write'], [], 'agent'));
+    const denied = await client.callTool({ name: 'create_project', arguments: { slug: 'x', name: 'X' } });
+    expect(denied.isError).toBe(true);
+    expect(textOf(denied)).toMatch(/projects:create/);
   });
 });

@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { SCOPES, tokenInputSchema } from '@pidb/shared';
 import type { AppContext } from '../../http/context.js';
-import { createTokenFor, listAuditFor, listTokensFor, revokeTokenFor } from '../../services/admin.js';
+import { createTokenFor, listAuditFor, listPendingAgentTokensFor, listTokensFor, revokeTokenFor, updateTokenProjectsFor } from '../../services/admin.js';
+import { AppError } from '../../errors.js';
 import { listProjectsFor } from '../../services/projects.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
-import { body, bool, list, pageContext, parseTags, str } from '../forms.js';
+import { body, bool, errorText, list, pageContext, parseTags, str } from '../forms.js';
 import { renderPage } from '../render.js';
 import { DAY_MS } from '../../repos/tokens.js';
 
@@ -15,10 +16,12 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     return renderPage('tokens', {
       ...pageContext(ctx, req, 'Tokens'),
       tokens: listTokensFor(ctx, principal),
+      pending: listPendingAgentTokensFor(ctx, principal),
       scopes: SCOPES,
       projects: listProjectsFor(ctx, principal),
       created: null,
       error: null,
+      listError: null,
       ...extra,
     });
   };
@@ -74,6 +77,22 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     requireAdmin(req);
     revokeTokenFor(ctx, adminActor(req), Number.parseInt(req.params.id, 10));
     return reply.redirect('/tokens?done=revoked', 302);
+  });
+
+  app.post<{ Params: { id: string } }>('/tokens/:id/projects', async (req, reply) => {
+    assertCsrf(ctx, req);
+    requireAdmin(req);
+    const b = body(req);
+    const projects = bool(b, 'all') ? null : list(b, 'projects');
+    try {
+      updateTokenProjectsFor(ctx, adminActor(req), Number.parseInt(req.params.id, 10), projects);
+    } catch (err) {
+      if (err instanceof AppError && err.status < 500) {
+        return reply.status(err.status).type('text/html').send(tokensPage(req, { listError: errorText(err) }));
+      }
+      throw err;
+    }
+    return reply.redirect('/tokens?done=saved', 302);
   });
 
   type AuditQs = { Querystring: { limit?: string; before?: string; action?: string; actor?: string } };

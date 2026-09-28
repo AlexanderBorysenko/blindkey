@@ -17,6 +17,7 @@ import { createToken } from '../../server/src/repos/tokens.js';
 import { makeServer, type ServerFixture } from './helpers.js';
 
 const UPSTREAM_TOOL_NAMES = [
+  'create_project',
   'get_project',
   'list_documents',
   'list_projects',
@@ -105,7 +106,7 @@ describe('MCP bridge (spec §2.4)', () => {
     expect(names).toEqual([...UPSTREAM_TOOL_NAMES, ...LOCAL_TOOL_NAMES].sort());
   });
 
-  it('not connected: tools/list still lists all 10 allowlisted upstream tools, from the static descriptors (F2)', async () => {
+  it('not connected: tools/list still lists all 11 allowlisted upstream tools, from the static descriptors (F2)', async () => {
     // No profile configured at all.
     const client = await connectBridge();
     const tools = (await client.listTools()).tools;

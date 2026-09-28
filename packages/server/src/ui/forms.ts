@@ -1,3 +1,4 @@
+import type { AppError } from '../errors.js';
 import type { FastifyRequest } from 'fastify';
 import type { AppContext } from '../http/context.js';
 import { loadNav, type NavData } from '../repos/nav.js';
@@ -71,4 +72,18 @@ export function pageContext(ctx: AppContext, req: FastifyRequest, title: string)
     flash: flashFor(query.done),
     totpEnabled: req.principal?.kind === 'admin' ? isTotpEnabled(ctx, req.principal.id) : true,
   };
+}
+
+/** A user-facing message for a 4xx AppError: a ValidationError's issue texts instead of its generic "validation failed". */
+export function errorText(err: AppError): string {
+  const issues = err.details.issues;
+  if (err.code === 'validation' && Array.isArray(issues) && issues.length > 0) {
+    return issues
+      .map((i: { path?: unknown[]; message?: unknown }) => {
+        const path = Array.isArray(i.path) && i.path.length ? `${i.path.join('.')}: ` : '';
+        return `${path}${String(i.message ?? 'invalid')}`;
+      })
+      .join('; ');
+  }
+  return err.message;
 }

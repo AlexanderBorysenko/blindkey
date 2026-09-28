@@ -2,7 +2,8 @@ import type { AuthTokenRequest, TokenInput } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, type Actor, type Principal } from '../auth/principal.js';
 import { NotFoundError, ValidationError } from '../errors.js';
-import { createToken, listTokens, revokeToken, DAY_MS, type TokenKind, type TokenRow } from '../repos/tokens.js';
+import { createToken, listTokens, revokeToken, setTokenProjects, DAY_MS, type TokenKind, type TokenRow } from '../repos/tokens.js';
+import { listApprovedConnectRequests } from '../repos/connect.js';
 import { getProjectBySlug, listProjects } from '../repos/projects.js';
 import { listAudit, writeAudit, type AuditQuery, type AuditRow } from '../repos/audit.js';
 import { getAdminByUsername } from '../repos/admin.js';
@@ -54,6 +55,40 @@ export function createTokenFor(ctx: AppContext, actor: Actor, input: TokenInput)
   const { token, row } = createToken(ctx.db, { name: input.name, scopes: input.scopes, projectIds, expiresAt });
   auditAs(ctx, actor, { action: 'token.create', target_type: 'token', target_id: row.id, meta: { name: row.name, scopes: row.scopes } });
   return { ...publicToken(ctx, row), token };
+}
+
+/** An approved device-flow request whose token the agent has not picked up yet (it is minted on the agent's next poll). */
+export interface PendingAgentToken {
+  name: string;
+  scopes: string[];
+  projects: string[];
+  expires_at: number;
+}
+
+export function listPendingAgentTokensFor(ctx: AppContext, principal: Principal): PendingAgentToken[] {
+  assertScope(principal, 'admin');
+  return listApprovedConnectRequests(ctx.db).map((r) => ({
+    name: r.name,
+    scopes: r.approved_scopes ?? [],
+    projects: listProjects(ctx.db, r.approved_project_ids ?? []).map((p) => p.slug),
+    expires_at: r.expires_at,
+  }));
+}
+
+/** Replaces which projects an active token can reach; `null` = all projects. */
+export function updateTokenProjectsFor(ctx: AppContext, actor: Actor, id: number, projects: string[] | null): void {
+  assertScope(actor.principal, 'admin');
+  let projectIds: number[] | null = null;
+  if (projects !== null) {
+    projectIds = [];
+    for (const slug of new Set(projects)) {
+      const p = getProjectBySlug(ctx.db, slug);
+      if (!p) throw new ValidationError([{ path: ['projects'], message: `unknown project "${slug}"` }]);
+      projectIds.push(p.id);
+    }
+  }
+  if (!setTokenProjects(ctx.db, id, projectIds)) throw new NotFoundError('token not found or revoked');
+  auditAs(ctx, actor, { action: 'token.update_projects', target_type: 'token', target_id: id, meta: { projects } });
 }
 
 export function revokeTokenFor(ctx: AppContext, actor: Actor, id: number): void {

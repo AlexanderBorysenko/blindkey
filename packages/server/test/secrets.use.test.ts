@@ -21,7 +21,7 @@ describe('secret use endpoint (spec §1.2)', () => {
     const useToken = auth(t.token(['secrets:use'], ['alpha']));
     const r = await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets/Staging%20server/use', headers: useToken, payload: { purpose: 'exec' } });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ name: 'Staging server', fields: { host: '10.0.0.1', password: 'pw-1', private_key: 'KEYDATA' } });
+    expect(r.json()).toEqual({ name: 'Staging server', fields: { host: '10.0.0.1', password: 'pw-1', private_key: 'KEYDATA' }, sensitive: ['password', 'private_key'] });
 
     const used = listAudit(t.db, { action: 'secret.used' });
     expect(used).toHaveLength(1);
@@ -53,7 +53,7 @@ describe('secret use endpoint (spec §1.2)', () => {
       payload: { purpose: 'write', fields: ['host', 'password'] },
     });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ name: 'Staging server', fields: { host: '10.0.0.1', password: 'pw-1' } });
+    expect(r.json()).toEqual({ name: 'Staging server', fields: { host: '10.0.0.1', password: 'pw-1' }, sensitive: ['password'] });
     const used = listAudit(t.db, { action: 'secret.used' });
     expect(used[0]?.meta).toEqual({ purpose: 'write', fields: ['host', 'password'], agent: false });
   });
@@ -110,7 +110,7 @@ describe('secret use endpoint (spec §1.2)', () => {
     const useToken = auth(t.token(['secrets:use']));
     const r = await t.app.inject({ method: 'POST', url: '/api/v1/secrets/GitHub%20PAT/use', headers: useToken, payload: { purpose: 'env' } });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ name: 'GitHub PAT', fields: { token: 't1' } });
+    expect(r.json()).toEqual({ name: 'GitHub PAT', fields: { token: 't1' }, sensitive: ['token'] });
   });
 
   it('rejects an invalid purpose with 400', async () => {

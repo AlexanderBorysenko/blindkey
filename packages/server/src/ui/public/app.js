@@ -231,6 +231,16 @@
       if (!d.open) d.showModal();
     });
     startTimers(document);
+    // A page waiting on something outside the browser (an agent picking up its approved token)
+    // reloads itself until that shows up; an open dialog pauses it so a form is never lost.
+    var auto = document.querySelector('[data-auto-refresh]');
+    if (auto) {
+      var secs = Number(auto.getAttribute('data-auto-refresh')) || 3;
+      setTimeout(function tick() {
+        if (document.querySelector('dialog[open]')) { setTimeout(tick, secs * 1000); return; }
+        window.location.replace(window.location.pathname);
+      }, secs * 1000);
+    }
   });
 
   document.addEventListener('htmx:afterSwap', function () { startTimers(document); });

@@ -15,6 +15,7 @@ import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from './command
 import { runSecretGet, runSecretSet, runSecretsList } from './commands/secrets.js';
 import { runSecretExec } from './commands/exec.js';
 import { runSecretEnv, runSecretWrite } from './commands/files.js';
+import { runDocsDelete, runProjectsCreate, runSecretsMeta, runSecretsRequest } from './commands/write.js';
 import { runTokenCreate, runTokenList, runTokenRevoke } from './commands/tokens.js';
 import { resolveDataDir } from './agent/datadir.js';
 import { resolveAgentConfig } from './agent/context.js';
@@ -100,6 +101,18 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
       emit(await runProjectsGet(await client(), slug), opts.json === true);
     });
 
+  projects
+    .command('create')
+    .argument('<slug>')
+    .requiredOption('--name <name>', 'display name')
+    .option('--summary <text>', 'one-paragraph summary')
+    .option('--tags <tags>', 'comma-separated tags')
+    .option('--json', 'raw JSON output')
+    .description('Create a project (admin or projects:create; an agent token gets it added to its projects)')
+    .action(async (slug: string, opts: { name: string; summary?: string; tags?: string; json?: boolean }) => {
+      emit(await runProjectsCreate(await client(), slug, opts), opts.json === true);
+    });
+
   // Read-only and useful for the agent (spec §2.3 ruling), so available in both modes.
   program
     .command('search')
@@ -148,6 +161,16 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
       },
     );
 
+  docs
+    .command('delete')
+    .argument('<target>', 'project slug, or the document slug for a global document')
+    .argument('[doc]', 'document slug')
+    .option('--json', 'raw JSON output')
+    .action(async (a: string, b: string | undefined, opts: { json?: boolean }) => {
+      const { target, doc } = resolveDocTarget(a, b);
+      emit(await runDocsDelete(await client(), target, doc), opts.json === true);
+    });
+
   const secrets = program.command('secrets').description('Secret metadata (never values)');
   secrets
     .command('list', { isDefault: true })
@@ -155,6 +178,32 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     .option('--json', 'raw JSON output')
     .action(async (target: string, opts: { json?: boolean }) => {
       emit(await runSecretsList(await client(), target), opts.json === true);
+    });
+  const collect = (v: string, prev: string[] = []) => [...prev, v];
+  secrets
+    .command('meta')
+    .argument('<target>', 'project slug or "global"')
+    .argument('<name>', 'secret name')
+    .option('--field <key=value>', 'non-sensitive field (repeatable); credential-looking keys are refused', collect)
+    .option('--description <text>')
+    .option('--tags <tags>', 'comma-separated tags')
+    .option('--json', 'raw JSON output')
+    .description('Create a secret or patch its description/tags/non-sensitive fields (never sensitive values)')
+    .action(async (target: string, name: string, opts: { field?: string[]; description?: string; tags?: string; json?: boolean }) => {
+      emit(await runSecretsMeta(await client(), target, name, opts), opts.json === true);
+    });
+  secrets
+    .command('request')
+    .argument('<target>', 'project slug or "global"')
+    .argument('<name>', 'secret name')
+    .option('--key <key>', 'sensitive key the user fills in (repeatable)', collect)
+    .option('--plain-key <key>', 'non-sensitive key the user fills in (repeatable)', collect)
+    .option('--description <text>')
+    .option('--tags <tags>', 'comma-separated tags')
+    .option('--json', 'raw JSON output')
+    .description('Print a prefilled admin-UI link where the user types the values in')
+    .action(async (target: string, name: string, opts: { key?: string[]; plainKey?: string[]; description?: string; tags?: string; json?: boolean }) => {
+      emit(await runSecretsRequest(await client(), target, name, opts), opts.json === true);
     });
 
   const secret = program.command('secret').description('Consume a single secret');

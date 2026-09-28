@@ -34,6 +34,19 @@ describe('envKeyFor', () => {
   });
 });
 
+describe('buildEnv reserved variables by mode', () => {
+  it('agent mode allows url/token fields (agent mode ignores PIDB_URL/PIDB_TOKEN)', () => {
+    expect(buildEnv({ url: 'https://site', token: 't' }, {}, true)).toEqual({ PIDB_URL: 'https://site', PIDB_TOKEN: 't' });
+  });
+  it('user mode still refuses url/token fields', () => {
+    expect(() => buildEnv({ url: 'https://site' }, {})).toThrow(/reserved variable PIDB_URL/);
+  });
+  it.each(['plugin_data', 'agent', 'allow_user_mode', 'config_home'])('refuses %s in both modes', (key) => {
+    expect(() => buildEnv({ [key]: 'x' }, {}, true)).toThrow(CliError);
+    expect(() => buildEnv({ [key]: 'x' }, {})).toThrow(CliError);
+  });
+});
+
 describe('buildEnv', () => {
   it('rejects two fields that map to the same env var', () => {
     expect(() => buildEnv({ 'a.b': '1', 'a-b': '2' }, {})).toThrow(CliError);

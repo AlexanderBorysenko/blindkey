@@ -1,4 +1,4 @@
-import { defaultSensitive, type SecretInput, type SecretPatch } from '@pidb/shared';
+import { defaultSensitive, secretLookingKey, urlWithPassword, type SecretInput, type SecretPatch } from '@pidb/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { AppError, ForbiddenError, NotFoundError } from '../errors.js';
@@ -91,7 +91,7 @@ export function useSecretFor(
   name: string,
   purpose: 'exec' | 'write' | 'env',
   fields?: string[],
-): { name: string; fields: Record<string, string> } {
+): { name: string; fields: Record<string, string>; sensitive: string[] } {
   if (!hasScope(actor.principal, 'secrets:use') && !hasScope(actor.principal, 'secrets:reveal')) {
     throw new ForbiddenError('secrets:use');
   }
@@ -106,11 +106,32 @@ export function useSecretFor(
   const result: Record<string, string> = {};
   for (const key of wanted) result[key] = values.get(key)!;
   auditAs(ctx, actor, { action: 'secret.used', target_type: 'secret', target_id: secret.id, meta: { purpose, fields: wanted, agent: actor.principal.agent } });
-  return { name: secret.name, fields: result };
+  // Which of the returned keys are sensitive, so a client redacts only those from command output.
+  const sensitive = secret.fields.filter((f) => f.sensitive && wanted.includes(f.key)).map((f) => f.key);
+  return { name: secret.name, fields: result, sensitive };
 }
 
 /** 403 `forbidden` raised where `secrets:meta-write` is not enough — a sensitive field would be created, touched or removed (spec §1.1). */
 const SENSITIVE_FORBIDDEN = () => new AppError(403, 'forbidden', 'sensitive fields need secrets:write');
+
+/**
+ * Without `secrets:write`, `sensitive: false` is honoured only for keys that do not look like a
+ * credential (`secretLookingKey`): otherwise meta-write could create a visible `password` field,
+ * ask the user to fill it in, and read the value back through list_secrets.
+ */
+function assertNoVisibleSecretLookingKey(fields: { key: string; value?: string; sensitive?: boolean }[]): void {
+  for (const f of fields) {
+    if (f.sensitive === false && secretLookingKey(f.key)) {
+      throw new AppError(403, 'forbidden', `field "${f.key}" looks like a credential and must stay sensitive`);
+    }
+    // A non-sensitive value is readable through list_secrets and unmasked in exec output, so a URL
+    // with an embedded password (`postgres://u:PASS@h`) must go through a sensitive field instead.
+    const visible = f.sensitive === false || (f.sensitive === undefined && !defaultSensitive(f.key));
+    if (visible && f.value !== undefined && urlWithPassword(f.value)) {
+      throw new AppError(403, 'forbidden', `field "${f.key}" contains a URL with a password; store it as a sensitive field`);
+    }
+  }
+}
 
 /**
  * `secrets:meta-write` (spec §1.1) may create a secret only when every field resolves to
@@ -118,6 +139,7 @@ const SENSITIVE_FORBIDDEN = () => new AppError(403, 'forbidden', 'sensitive fiel
  * to sensitive would fail this).
  */
 function assertMetaWriteCreateAllowed(input: SecretInput): void {
+  assertNoVisibleSecretLookingKey(input.fields);
   const hasSensitive = input.fields.some((f) => f.sensitive ?? defaultSensitive(f.key));
   if (hasSensitive) throw SENSITIVE_FORBIDDEN();
 }
@@ -137,6 +159,7 @@ function assertMetaWriteCreateAllowed(input: SecretInput): void {
  * a re-added key's `willBeSensitive` never falls back to its pre-patch sensitivity.
  */
 function assertMetaWritePatchAllowed(existing: SecretMeta, patch: SecretPatch): void {
+  assertNoVisibleSecretLookingKey(patch.fields ?? []);
   const priorSensitive = new Map(existing.fields.map((f) => [f.key, f.sensitive]));
   const removed = new Set(patch.removeFields ?? []);
   for (const f of patch.fields ?? []) {

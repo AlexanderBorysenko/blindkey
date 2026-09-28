@@ -1455,7 +1455,7 @@ var GOLDEN_RULES = [
   "Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.",
   'Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env PIDB_<KEY>), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.',
   "Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.",
-  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret connection facts (host, port, url, username, database, public_key) go into non-sensitive fields via `upsert_secret_meta`; any other key → `secret_request_link`.',
+  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret facts go into non-sensitive fields via `upsert_secret_meta` (host, port, url, username, database, public_key, or any non-credential key with `sensitive: false`); credentials → `secret_request_link`; a new project → `create_project`.',
   "401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.",
   "Never use curl against the pidb server; use MCP tools / the CLI."
 ];

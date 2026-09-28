@@ -116,9 +116,40 @@ describe('pidb secret exec (agent mode, via buildProgram) redacts child output',
     expect(stdout).not.toContain('hunter2hunter2');
   });
 
+  it('leaves non-sensitive values (host) readable — only sensitive ones are masked', async () => {
+    const { stdout } = await runAgentExec('console.log(process.env.PIDB_HOST, process.env.PIDB_PASSWORD)');
+    expect(stdout).toContain('db.internal');
+    expect(stdout).toContain('[pidb:redacted]');
+    expect(stdout).not.toContain('hunter2hunter2');
+  });
+
   it('does not touch unrelated output', async () => {
     const { stdout } = await runAgentExec('console.log("hello world, nothing secret here")');
     expect(stdout).toContain('hello world, nothing secret here');
     expect(stdout).not.toContain('[pidb:redacted]');
+  });
+});
+
+describe('runSecretExec against a server that does not say which fields are sensitive', () => {
+  it('masks every value, as before', async () => {
+    const fakeFetch = (async () =>
+      new Response(JSON.stringify({ name: 'Old', fields: { host: 'old-host.example', password: 'old-password-1' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+    const old = new PidbClient({ url: 'http://old.invalid', token: 't' }, fakeFetch);
+    const originalOut = process.stdout.write.bind(process.stdout);
+    let stdout = '';
+    process.stdout.write = ((chunk: unknown) => {
+      stdout += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await runSecretExec(old, 'acme', 'Old', [process.execPath, '-e', 'console.log(process.env.PIDB_HOST, process.env.PIDB_PASSWORD)'], { agent: true });
+    } finally {
+      process.stdout.write = originalOut;
+    }
+    expect(stdout).not.toContain('old-host.example');
+    expect(stdout).not.toContain('old-password-1');
   });
 });

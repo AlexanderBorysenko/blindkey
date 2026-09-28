@@ -201,7 +201,8 @@ export function viewConnectRequest(ctx: AppContext, code: string): ConnectView {
 }
 
 /**
- * `POST /connect/approve`: requires >=1 valid scope and >=1 known project, and a 1-365 day expiry
+ * `POST /connect/approve`: requires >=1 valid scope, >=1 known project (unless `projects:create` is
+ * granted — the agent's own new projects are added to its token), and a 1-365 day expiry
  * (editable by the approver — prefilled with the request's own `expires_days`, but the approver
  * may shorten or lengthen it before granting). Scopes are validated against `AGENT_SCOPES` here
  * regardless of what was originally requested (Review: a tampered form cannot add
@@ -232,7 +233,10 @@ export function approveConnect(
       matchedSlugs.push(slug);
     }
   }
-  if (projectIds.length === 0) throw new ValidationError([{ path: ['projects'], message: 'at least one project is required' }]);
+  // A token that may create projects can start with none: whatever it creates is added to it.
+  if (projectIds.length === 0 && !scopes.includes('projects:create')) {
+    throw new ValidationError([{ path: ['projects'], message: 'pick at least one project, or grant projects:create' }]);
+  }
   const parsedExpiresDays = expiresDaysSchema.safeParse(expiresDaysInput);
   if (!parsedExpiresDays.success) throw new ValidationError(parsedExpiresDays.error.issues);
   const ok = approveConnectRequest(ctx.db, row.id, { scopes, projectIds, expiresDays: parsedExpiresDays.data });

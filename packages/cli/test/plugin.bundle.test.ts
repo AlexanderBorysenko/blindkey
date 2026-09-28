@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { NON_SENSITIVE_KEYS } from '@pidb/shared';
+import { NON_SENSITIVE_KEYS, secretLookingKey } from '@pidb/shared';
 import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -244,12 +244,16 @@ describe('plugin manifests', () => {
     expect(Object.keys(p.dependencies)).toEqual(['@napi-rs/keyring']);
   });
 
-  it('SKILL.md upsert_secret_meta examples only write keys the server treats as non-sensitive (F3)', () => {
+  it('SKILL.md upsert_secret_meta examples only write fields the server accepts from meta-write (F3)', () => {
     const skill = readFileSync(join(pluginDir, 'skills', 'pidb', 'SKILL.md'), 'utf8');
     const calls = [...skill.matchAll(/upsert_secret_meta\((.*?)\)`/g)].map((m) => m[1] ?? '');
-    const keys = calls.flatMap((c) => [...c.matchAll(/key: "([^"]+)"/g)].map((m) => m[1]));
-    expect(keys.length).toBeGreaterThan(0);
-    for (const k of keys) expect(NON_SENSITIVE_KEYS as readonly string[]).toContain(k);
+    const fields = calls.flatMap((c) => [...c.matchAll(/\{key: "([^"]+)"[^}]*?(sensitive: false)?\}/g)].map((m) => ({ key: m[1]!, plain: Boolean(m[2]) })));
+    expect(fields.length).toBeGreaterThan(0);
+    for (const f of fields) {
+      // Default-non-sensitive keys may omit the flag; any other key must say sensitive:false and not look like a credential.
+      if (f.plain) expect(secretLookingKey(f.key)).toBe(false);
+      else expect(NON_SENSITIVE_KEYS as readonly string[]).toContain(f.key);
+    }
     expect(skill).not.toMatch(/key: "account_id", sensitive: false/);
   });
 

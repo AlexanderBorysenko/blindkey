@@ -53,6 +53,8 @@ export interface ProjectDetail extends PublicProject {
 export interface RevealedFields {
   name: string;
   fields: Record<string, string>;
+  /** Keys of `fields` that are sensitive (agent `/use` responses; absent from older servers and from `/fields`). */
+  sensitive?: string[];
 }
 
 export interface PublicToken {

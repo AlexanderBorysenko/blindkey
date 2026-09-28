@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../http/context.js';
 import { AppError } from '../../errors.js';
+import { errorText } from '../forms.js';
 import { approveConnect, denyConnect, viewConnectRequest } from '../../services/connect.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
@@ -47,7 +48,7 @@ export function registerConnectRoutes(app: FastifyInstance, ctx: AppContext): vo
       approveConnect(ctx, actor, code, scopes, projects, expiresDays);
     } catch (err) {
       if (err instanceof AppError && err.status < 500) {
-        const { status, html } = page(req, code, err.message, err.status, { scopes, projects, expiresDays });
+        const { status, html } = page(req, code, errorText(err), err.status, { scopes, projects, expiresDays });
         return reply.status(status).type('text/html').send(html);
       }
       throw err;

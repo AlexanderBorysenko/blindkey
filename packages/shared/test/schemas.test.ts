@@ -8,6 +8,8 @@ import {
   tokenInputSchema,
   SCOPES,
   AGENT_SCOPES,
+  secretLookingKey,
+  urlWithPassword,
 } from '../src/index.js';
 
 describe('slugSchema', () => {
@@ -81,7 +83,7 @@ describe('SCOPES / AGENT_SCOPES', () => {
     for (const s of ['admin', 'secrets:reveal', 'secrets:write']) {
       expect(AGENT_SCOPES).not.toContain(s);
     }
-    expect(AGENT_SCOPES).toEqual(['projects:read', 'projects:write', 'docs:read', 'docs:write', 'secrets:meta', 'secrets:meta-write', 'secrets:use']);
+    expect(AGENT_SCOPES).toEqual(['projects:read', 'projects:write', 'projects:create', 'docs:read', 'docs:write', 'secrets:meta', 'secrets:meta-write', 'secrets:use']);
     for (const s of AGENT_SCOPES) expect(SCOPES).toContain(s);
   });
 });
@@ -97,5 +99,22 @@ describe('tokenInputSchema', () => {
   it('an explicit null expires_at parses to null (never expires)', () => {
     const r = tokenInputSchema.parse({ name: 'cc', scopes: ['docs:read'], expires_at: null });
     expect(r.expires_at).toBeNull();
+  });
+});
+
+describe('secretLookingKey / urlWithPassword', () => {
+  it.each(['password', 'db_password', 'PASS', 'pw', 'pwd', 'jwt', 'bearer', 'dsn', 'conn_str', 'apiToken', 'SSH-Key', 'private_key', 'passphrase', 'wp_salt', 'hmac', 'cvv', 'totp'])(
+    '%s looks like a credential',
+    (k) => expect(secretLookingKey(k)).toBe(true),
+  );
+  it.each(['host', 'url', 'public_key', 'web_root', 'php_version', 'wp_admin_user', 'site_url', 'author', 'monkey', 'mapping', 'ping', 'database_url'])(
+    '%s does not',
+    (k) => expect(secretLookingKey(k)).toBe(false),
+  );
+  it('detects a password in URL userinfo only', () => {
+    expect(urlWithPassword('postgres://app:hunter2@db:5432/x')).toBe(true);
+    expect(urlWithPassword('https://user@host/path')).toBe(false);
+    expect(urlWithPassword('https://host/a:b@c')).toBe(false);
+    expect(urlWithPassword('https://easy-renovation.hacon.com.ua')).toBe(false);
   });
 });

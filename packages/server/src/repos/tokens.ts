@@ -104,3 +104,21 @@ export function revokeAgentTokensByName(db: Db, name: string, ts: number = now()
     .prepare(`UPDATE api_tokens SET revoked_at = ? WHERE name = ? AND kind = 'agent' AND revoked_at IS NULL`)
     .run(ts, name).changes;
 }
+
+/** Adds one project to a project-scoped token (no-op for an all-projects token or one that already has it). */
+export function addProjectToToken(db: Db, id: number, projectId: number): void {
+  const r = db.prepare(`SELECT project_ids FROM api_tokens WHERE id = ?`).get(id) as { project_ids: string | null } | undefined;
+  if (!r || r.project_ids === null) return;
+  const ids = parseJsonArray<number>(r.project_ids);
+  if (ids.includes(projectId)) return;
+  db.prepare(`UPDATE api_tokens SET project_ids = ? WHERE id = ?`).run(JSON.stringify([...ids, projectId]), id);
+}
+
+/** Replaces a token's project list; `null` = all projects. Returns false when the token does not exist or is revoked. */
+export function setTokenProjects(db: Db, id: number, projectIds: number[] | null): boolean {
+  return (
+    db
+      .prepare(`UPDATE api_tokens SET project_ids = ? WHERE id = ? AND revoked_at IS NULL`)
+      .run(projectIds === null ? null : JSON.stringify(projectIds), id).changes > 0
+  );
+}

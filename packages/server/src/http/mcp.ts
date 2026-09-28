@@ -2,12 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { DOC_CATEGORIES, PROJECT_STATUSES, defaultSensitive, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@pidb/shared';
+import { DOC_CATEGORIES, PROJECT_STATUSES, projectInputSchema, secretRequestPath, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@pidb/shared';
 import type { AppContext } from './context.js';
 import { actorOf, originOf, parseBody } from './helpers.js';
 import { hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { AppError } from '../errors.js';
-import { getProjectDetailFor, listProjectsFor, updateProjectFor } from '../services/projects.js';
+import { createProjectFor, getProjectDetailFor, listProjectsFor, updateProjectFor } from '../services/projects.js';
 import { listDocumentsFor, readDocumentFor, writeDocumentFor } from '../services/documents.js';
 import { createSecretFor, listSecretsFor, updateSecretFor } from '../services/secrets.js';
 import { loadProjectFor } from '../services/common.js';
@@ -21,8 +21,10 @@ Values are consumed ONLY via the pidb CLI — never any other way:
   pidb secret write <project|global> "<name>" <field> --out <path> --mode 600
   pidb secret env <project|global> "<name>" --out .env
 Documents reference secrets with {{secret:Name}}, {{secret:global/Name}} or {{secret:<project-slug>/Name}}. Never paste secret values into documents.
+create_project creates a project (needs projects:create); it is added to your own token's projects at once.
 update_project changes name/status/tags/summary (needs projects:write). upsert_secret_meta creates or patches a
-secret's non-sensitive fields (needs secrets:meta-write) — anything sensitive is refused. To get a sensitive value
+secret's non-sensitive fields (needs secrets:meta-write); a field may be declared sensitive:false unless its key
+looks like a credential — anything sensitive is refused. To get a sensitive value
 in front of the user, call secret_request_link for a prefilled admin-UI link (it points at the new-secret form for a
 name that doesn't exist yet, or the existing secret's edit page otherwise), hand it to them, then call list_secrets
 to confirm once they've submitted it.`;
@@ -134,26 +136,48 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
   );
 
   server.registerTool(
+    'create_project',
+    {
+      description:
+        'Create a project. Requires projects:create. The new project is added to this token\'s projects immediately, ' +
+        'so you can write its documents and secrets straight away.',
+      inputSchema: {
+        slug: slugSchema,
+        name: z.string().min(1).max(200),
+        status: z.enum(PROJECT_STATUSES).optional(),
+        tags: tagsSchema.optional(),
+        summary: z.string().max(5000).optional(),
+      },
+    },
+    async ({ slug, name, status, tags, summary }) =>
+      run(() => createProjectFor(ctx, actor, parseBody(projectInputSchema, { slug, name, status, tags, summary }))),
+  );
+
+  server.registerTool(
     'upsert_secret_meta',
     {
       description:
         'Create a secret (project omitted for global) or patch an existing one\'s description/tags/fields, by name. ' +
-        'Requires secrets:meta-write. Fields may only be keys that are non-sensitive both before and after (e.g. host, ' +
-        'port, url, username, database, public_key) — creating or touching a sensitive field is refused with a 403; use ' +
-        'secret_request_link instead so the user types the value in.',
+        'Requires secrets:meta-write. Fields may only be non-sensitive both before and after: keys that are non-sensitive ' +
+        'by default (host, port, url, username, database, public_key), or any other key passed with sensitive:false ' +
+        'unless it looks like a credential (pass, secret, token, key, salt, auth, private, ...). Creating or touching a ' +
+        'sensitive field is refused with a 403; use secret_request_link instead so the user types the value in.',
       inputSchema: {
         project: slugSchema.optional(),
         name: secretNameSchema,
         description: z.string().max(5000).optional(),
         tags: tagsSchema.optional(),
-        fields: z.array(z.object({ key: secretKeySchema, value: z.string().max(1_000_000) })).max(200).optional(),
+        fields: z
+          .array(z.object({ key: secretKeySchema, value: z.string().max(1_000_000), sensitive: z.literal(false).optional() }))
+          .max(200)
+          .optional(),
       },
     },
     async ({ project, name, description, tags, fields }) =>
       run(() => {
         const projectRow = project ? loadProjectFor(ctx, p, project) : null;
         const existing = getSecretMeta(ctx.db, ctx.ring, projectRow?.id ?? null, name);
-        const fieldInputs = (fields ?? []).map((f) => ({ key: f.key, value: f.value }));
+        const fieldInputs = (fields ?? []).map((f) => ({ key: f.key, value: f.value, ...(f.sensitive === false ? { sensitive: false } : {}) }));
         if (!existing) {
           // Validated the same way the UI's create form is (min 1 field, unique keys, size caps):
           // a duplicate key or an empty field list comes back as a validation error, not "internal error".
@@ -195,17 +219,7 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
         assertAnySecretsScope(p);
         const projectRow = project ? loadProjectFor(ctx, p, project) : null;
         const existing = getSecretMeta(ctx.db, ctx.ring, projectRow?.id ?? null, name);
-        const prefix = project ? `/p/${encodeURIComponent(project)}` : '/global';
-        const qs = new URLSearchParams();
-        qs.set('name', name);
-        if (description) qs.set('description', description);
-        if (tags && tags.length > 0) qs.set('tags', tags.join(','));
-        // `sensitive: false` is honoured only for keys that are non-sensitive by default (spec §1.5):
-        // an agent must not be able to make e.g. `password` a visible field, whose value list_secrets
-        // would then return to it. The user can still untick the row in the form themselves.
-        qs.set('keys', keys.map((k) => (k.sensitive || defaultSensitive(k.key) ? k.key : `${k.key}!`)).join(','));
-        const path = existing ? `${prefix}/secrets/${encodeURIComponent(name)}/edit` : `${prefix}/secrets/new`;
-        return { url: `${origin}${path}?${qs.toString()}` };
+        return { url: `${origin}${secretRequestPath({ project: project ?? null, name, exists: Boolean(existing), description, tags, keys })}` };
       }),
   );
 

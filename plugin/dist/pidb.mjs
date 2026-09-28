@@ -23453,6 +23453,7 @@ function date4(params) {
 var SCOPES = [
   "projects:read",
   "projects:write",
+  "projects:create",
   "docs:read",
   "docs:write",
   "secrets:meta",
@@ -23465,6 +23466,7 @@ var SCOPES = [
 var AGENT_SCOPES = [
   "projects:read",
   "projects:write",
+  "projects:create",
   "docs:read",
   "docs:write",
   "secrets:meta",
@@ -23481,6 +23483,10 @@ var DOC_CATEGORIES = [
   "notes",
   "guidelines"
 ];
+var NON_SENSITIVE_KEYS = ["host", "port", "url", "username", "database", "public_key"];
+function defaultSensitive(key) {
+  return !NON_SENSITIVE_KEYS.includes(key);
+}
 var scopeSchema = external_exports.enum(SCOPES);
 var agentScopeSchema = external_exports.enum(AGENT_SCOPES);
 var agentScopesSchema = external_exports.array(agentScopeSchema).min(1);
@@ -23556,6 +23562,18 @@ var connectStartSchema = external_exports.strictObject({
 var connectPollSchema = external_exports.strictObject({
   device_code: external_exports.string().min(1).max(500)
 });
+
+// packages/shared/src/links.ts
+function secretRequestPath(input2) {
+  const prefix = input2.project ? `/p/${encodeURIComponent(input2.project)}` : "/global";
+  const qs = new URLSearchParams();
+  qs.set("name", input2.name);
+  if (input2.description) qs.set("description", input2.description);
+  if (input2.tags && input2.tags.length > 0) qs.set("tags", input2.tags.join(","));
+  qs.set("keys", input2.keys.map((k) => k.sensitive || defaultSensitive(k.key) ? k.key : `${k.key}!`).join(","));
+  const path2 = input2.exists ? `${prefix}/secrets/${encodeURIComponent(input2.name)}/edit` : `${prefix}/secrets/new`;
+  return `${path2}?${qs.toString()}`;
+}
 
 // packages/cli/src/commands/docs.ts
 function resolveDocTarget(a, b) {
@@ -23762,8 +23780,10 @@ function createRedactor(values) {
 function envKeyFor(key) {
   return `PIDB_${key.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`;
 }
-var RESERVED_ENV_VARS = ["PIDB_TOKEN", "PIDB_URL", "PIDB_CONFIG_HOME"];
-function buildEnv(fields, base) {
+var ALWAYS_RESERVED_ENV_VARS = ["PIDB_CONFIG_HOME", "PIDB_AGENT", "PIDB_PLUGIN_DATA", "PIDB_ALLOW_USER_MODE"];
+var USER_MODE_RESERVED_ENV_VARS = ["PIDB_TOKEN", "PIDB_URL"];
+function buildEnv(fields, base, agent = false) {
+  const reserved = agent ? ALWAYS_RESERVED_ENV_VARS : [...ALWAYS_RESERVED_ENV_VARS, ...USER_MODE_RESERVED_ENV_VARS];
   const env = { ...base };
   delete env.PIDB_TOKEN;
   const seen = /* @__PURE__ */ new Map();
@@ -23773,7 +23793,7 @@ function buildEnv(fields, base) {
     if (previous !== void 0) {
       throw new CliError(`fields "${previous}" and "${key}" both map to ${name} — rename one of them`);
     }
-    if (RESERVED_ENV_VARS.includes(name)) {
+    if (reserved.includes(name)) {
       throw new CliError(`field "${key}" maps to the reserved variable ${name} — rename the field`);
     }
     seen.set(name, key);
@@ -23802,11 +23822,11 @@ async function runSecretExec(client, target, name, command, opts = {}) {
   const revealed = opts.agent ? await client.json("POST", scopedPath(target, "secrets", `/${seg(name)}/use`), {
     body: { purpose: "exec" }
   }) : await client.json("GET", scopedPath(target, "secrets", `/${seg(name)}/fields`));
-  const env = buildEnv(revealed.fields, process.env);
+  const env = buildEnv(revealed.fields, process.env, opts.agent === true);
   if (!opts.agent) {
     return await spawnAndAwaitExit(bin, args, { stdio: "inherit", env });
   }
-  const values = Object.values(revealed.fields);
+  const values = revealed.sensitive ? revealed.sensitive.map((k) => revealed.fields[k]).filter((v) => v !== void 0) : Object.values(revealed.fields);
   const stdoutRedactor = createRedactor(values);
   const stderrRedactor = createRedactor(values);
   return await spawnAndAwaitExit(
@@ -24025,6 +24045,75 @@ async function runSecretEnv(client, target, name, opts) {
     json: { path: opts.out, mode: mode.toString(8).padStart(4, "0"), secret: name, keys: Object.keys(revealed.fields) },
     text: `wrote ${lines.length} field(s) of ${name} to ${opts.out} (mode ${mode.toString(8).padStart(4, "0")})`
   };
+}
+
+// packages/cli/src/commands/write.ts
+function splitList(raw) {
+  return (raw ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+async function runProjectsCreate(client, slug, opts) {
+  const project = await client.json("POST", "/api/v1/projects", {
+    body: { slug, name: opts.name, summary: opts.summary ?? "", tags: splitList(opts.tags) }
+  });
+  return { json: project, text: `created project ${project.slug} (${project.name})` };
+}
+async function runDocsDelete(client, target, doc) {
+  await client.empty("DELETE", scopedPath(target, "docs", `/${seg(doc)}`));
+  return { json: { deleted: doc, target }, text: `deleted ${target === "global" ? "" : `${target}/`}${doc}` };
+}
+function parseFieldArg(raw) {
+  const i = raw.indexOf("=");
+  if (i <= 0) throw new CliError(`--field expects key=value, got "${raw}"`);
+  return { key: raw.slice(0, i), value: raw.slice(i + 1), sensitive: false };
+}
+async function secretExists(client, target, name) {
+  try {
+    await client.json("GET", scopedPath(target, "secrets", `/${seg(name)}`));
+    return true;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return false;
+    throw err;
+  }
+}
+async function runSecretsMeta(client, target, name, opts) {
+  const fields = (opts.field ?? []).map(parseFieldArg);
+  const tags = opts.tags === void 0 ? void 0 : splitList(opts.tags);
+  if (fields.length > 0) {
+    try {
+      await client.json("POST", scopedPath(target, "secrets"), {
+        body: { name, description: opts.description ?? "", tags: tags ?? [], fields }
+      });
+      return { json: { created: name }, text: `created secret "${name}" (${fields.length} non-sensitive field(s))` };
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 409)) throw err;
+    }
+  }
+  await client.json("PATCH", scopedPath(target, "secrets", `/${seg(name)}`), {
+    body: {
+      ...opts.description !== void 0 ? { description: opts.description } : {},
+      ...tags !== void 0 ? { tags } : {},
+      ...fields.length ? { fields } : {}
+    }
+  });
+  return { json: { updated: name }, text: `updated secret "${name}" (${fields.length} non-sensitive field(s))` };
+}
+async function runSecretsRequest(client, target, name, opts) {
+  const keys = [
+    ...(opts.key ?? []).map((key) => ({ key, sensitive: true })),
+    ...(opts.plainKey ?? []).map((key) => ({ key, sensitive: false }))
+  ];
+  if (keys.length === 0) throw new CliError("give at least one --key (sensitive) or --plain-key");
+  const exists = await secretExists(client, target, name);
+  const url2 = `${client.url}${secretRequestPath({
+    project: target === "global" ? null : target,
+    name,
+    exists,
+    description: opts.description,
+    tags: opts.tags === void 0 ? void 0 : splitList(opts.tags),
+    keys
+  })}`;
+  return { json: { url: url2 }, text: `Ask the user to open this link and enter the values:
+${url2}` };
 }
 
 // packages/cli/src/commands/tokens.ts
@@ -24387,6 +24476,9 @@ function buildProgram(opts = {}) {
   projects.command("get").argument("<slug>").option("--json", "raw JSON output").action(async (slug, opts2) => {
     emit(await runProjectsGet(await client(), slug), opts2.json === true);
   });
+  projects.command("create").argument("<slug>").requiredOption("--name <name>", "display name").option("--summary <text>", "one-paragraph summary").option("--tags <tags>", "comma-separated tags").option("--json", "raw JSON output").description("Create a project (admin or projects:create; an agent token gets it added to its projects)").action(async (slug, opts2) => {
+    emit(await runProjectsCreate(await client(), slug, opts2), opts2.json === true);
+  });
   program2.command("search").argument("<query>").option("--json", "raw JSON output").description("Search projects, documents and secret names (never values)").action(async (query, opts2) => {
     emit(await runSearch(await client(), query), opts2.json === true);
   });
@@ -24404,9 +24496,20 @@ function buildProgram(opts = {}) {
       emit(await runDocsPut(await client(), target, doc, opts2), opts2.json === true);
     }
   );
+  docs.command("delete").argument("<target>", "project slug, or the document slug for a global document").argument("[doc]", "document slug").option("--json", "raw JSON output").action(async (a, b, opts2) => {
+    const { target, doc } = resolveDocTarget(a, b);
+    emit(await runDocsDelete(await client(), target, doc), opts2.json === true);
+  });
   const secrets = program2.command("secrets").description("Secret metadata (never values)");
   secrets.command("list", { isDefault: true }).argument("[target]", 'project slug or "global"', "global").option("--json", "raw JSON output").action(async (target, opts2) => {
     emit(await runSecretsList(await client(), target), opts2.json === true);
+  });
+  const collect = (v, prev = []) => [...prev, v];
+  secrets.command("meta").argument("<target>", 'project slug or "global"').argument("<name>", "secret name").option("--field <key=value>", "non-sensitive field (repeatable); credential-looking keys are refused", collect).option("--description <text>").option("--tags <tags>", "comma-separated tags").option("--json", "raw JSON output").description("Create a secret or patch its description/tags/non-sensitive fields (never sensitive values)").action(async (target, name, opts2) => {
+    emit(await runSecretsMeta(await client(), target, name, opts2), opts2.json === true);
+  });
+  secrets.command("request").argument("<target>", 'project slug or "global"').argument("<name>", "secret name").option("--key <key>", "sensitive key the user fills in (repeatable)", collect).option("--plain-key <key>", "non-sensitive key the user fills in (repeatable)", collect).option("--description <text>").option("--tags <tags>", "comma-separated tags").option("--json", "raw JSON output").description("Print a prefilled admin-UI link where the user types the values in").action(async (target, name, opts2) => {
+    emit(await runSecretsRequest(await client(), target, name, opts2), opts2.json === true);
   });
   const secret = program2.command("secret").description("Consume a single secret");
   secret.command("get", { hidden: agent }).argument("<target>", 'project slug or "global"').argument("<name>", "secret name").argument("<field>", "field key").option("--print", "print the value to stdout (refused without this flag)").option("--json", "raw JSON output").action(async (target, name, field, opts2) => {

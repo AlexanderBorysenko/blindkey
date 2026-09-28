@@ -81,6 +81,25 @@ export function updateProject(db: Db, id: number, patch: ProjectPatch): ProjectR
   return getProjectById(db, id)!;
 }
 
+/**
+ * Deletes a project and scrubs its id from every token and pending connect approval. Project ids
+ * are rowids that SQLite may hand out again, so a stale id left in `project_ids` would silently
+ * grant an old token access to whichever project is created next with the same id.
+ */
 export function deleteProject(db: Db, id: number): boolean {
-  return db.prepare(`DELETE FROM projects WHERE id = ?`).run(id).changes > 0;
+  return db.transaction(() => {
+    const deleted = db.prepare(`DELETE FROM projects WHERE id = ?`).run(id).changes > 0;
+    if (!deleted) return false;
+    const scrub = (table: string, column: string) => {
+      const rows = db.prepare(`SELECT id, ${column} AS ids FROM ${table} WHERE ${column} IS NOT NULL`).all() as { id: number; ids: string }[];
+      const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
+      for (const r of rows) {
+        const ids = parseJsonArray<number>(r.ids);
+        if (ids.includes(id)) update.run(JSON.stringify(ids.filter((x) => x !== id)), r.id);
+      }
+    };
+    scrub('api_tokens', 'project_ids');
+    scrub('connect_requests', 'approved_project_ids');
+    return true;
+  })();
 }

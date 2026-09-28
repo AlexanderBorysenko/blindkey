@@ -191,8 +191,52 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
     }
   },
   {
+    "name": "create_project",
+    "description": "Create a project. Requires projects:create. The new project is added to this token's projects immediately, so you can write its documents and secrets straight away.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "paused",
+            "archived"
+          ]
+        },
+        "tags": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 5000
+        }
+      },
+      "required": [
+        "slug",
+        "name"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
     "name": "upsert_secret_meta",
-    "description": "Create a secret (project omitted for global) or patch an existing one's description/tags/fields, by name. Requires secrets:meta-write. Fields may only be keys that are non-sensitive both before and after (e.g. host, port, url, username, database, public_key) — creating or touching a sensitive field is refused with a 403; use secret_request_link instead so the user types the value in.",
+    "description": "Create a secret (project omitted for global) or patch an existing one's description/tags/fields, by name. Requires secrets:meta-write. Fields may only be non-sensitive both before and after: keys that are non-sensitive by default (host, port, url, username, database, public_key), or any other key passed with sensitive:false unless it looks like a credential (pass, secret, token, key, salt, auth, private, ...). Creating or touching a sensitive field is refused with a 403; use secret_request_link instead so the user types the value in.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -231,6 +275,10 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
               "value": {
                 "type": "string",
                 "maxLength": 1000000
+              },
+              "sensitive": {
+                "type": "boolean",
+                "const": false
               }
             },
             "required": [

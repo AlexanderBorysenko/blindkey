@@ -25,7 +25,7 @@ pidb is a self-hosted server that holds, per project, **documents** (Markdown: a
 1. Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.
 2. Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env `PIDB_<KEY>`), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.
 3. Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.
-4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret connection facts go into non-sensitive fields via `upsert_secret_meta` (keys `host`, `port`, `url`, `username`, `database`, `public_key` only).
+4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret connection facts go into non-sensitive fields via `upsert_secret_meta` (`host`, `port`, `url`, `username`, `database`, `public_key` by default; any other non-credential key with `sensitive: false`). A new project you need → `create_project` (needs `projects:create`); it joins your token immediately.
 5. 401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.
 6. Never use curl against the pidb server; use MCP tools / the CLI.
 
@@ -40,8 +40,9 @@ Server (proxied with the agent token; project defaults to global when omitted):
 - `list_projects`, `get_project(slug)`, `search(query)` — never searches secret values.
 - `list_documents(project?)`, `read_document(project?, slug)`, `write_document(project?, slug, title, category, body_md, force?)`.
 - `list_secrets(project?)` — names, field keys, sensitivity; never values.
+- `create_project(slug, name, status?, tags?, summary?)` — needs `projects:create`; the project is added to this token's projects at once (same session).
 - `update_project(slug, name?, status?, tags?, summary?)`.
-- `upsert_secret_meta(project?, name, description?, tags?, fields?: [{key, value}])` — only the non-sensitive keys `host`, `port`, `url`, `username`, `database`, `public_key`; any other key is refused ("sensitive fields need secrets:write") — use `secret_request_link` for it.
+- `upsert_secret_meta(project?, name, description?, tags?, fields?: [{key, value, sensitive?: false}])` — non-sensitive fields only: `host`, `port`, `url`, `username`, `database`, `public_key` by default, or any key passed with `sensitive: false` unless it looks like a credential (`pass`, `secret`, `token`, `key`, `salt`, `auth`, `private`, …) — that, and every sensitive field, is refused; use `secret_request_link` for it.
 - `secret_request_link(project?, name, description?, tags?, keys: [{key, sensitive}])` — a prefilled admin-UI link for the user. `sensitive: false` only takes effect for the non-sensitive keys above; any other key stays sensitive.
 
 There is deliberately no tool that returns a secret value.
@@ -83,7 +84,7 @@ Never: `echo`/`printf`/`Write-Output` a `PIDB_*` variable, run `env`/`printenv`/
 ## Secret-request flow (a value you need doesn't exist yet)
 
 1. `list_secrets(project)` — confirm it's really missing (check global too).
-2. Store what isn't secret yourself — only the non-sensitive keys (`host`, `port`, `url`, `username`, `database`, `public_key`): `upsert_secret_meta(project, "Postgres", description, fields: [{key: "host", value: "db.internal"}, {key: "port", value: "5432"}, {key: "username", value: "app"}])`. Any other key (e.g. `password`, `account_id`) is refused with "sensitive fields need secrets:write" — that is expected, not a scope problem; don't `pidb connect` to widen, request it instead (step 3).
+2. Store what isn't secret yourself: `upsert_secret_meta(project, "Postgres", description, fields: [{key: "host", value: "db.internal"}, {key: "port", value: "5432"}, {key: "username", value: "app"}, {key: "schema", value: "public", sensitive: false}])`. A credential-looking key (e.g. `password`, `api_token`) or a sensitive one is refused with "sensitive fields need secrets:write" — that is expected, not a scope problem; don't `pidb connect` to widen, request it instead (step 3).
 3. `secret_request_link(project, "Postgres", description, keys: [{key: "password", sensitive: true}])` → give the user the link and say what to type there. Don't ask for the value in chat. (Keys other than the non-sensitive ones always come out sensitive; the user can untick one in the form if it isn't secret.)
 4. Wait for the user to say it's done, then `list_secrets(project)` to verify the field exists, then use it with `pidb secret exec`.
 
@@ -92,7 +93,7 @@ Never: `echo`/`printf`/`Write-Output` a `PIDB_*` variable, run `env`/`printenv`/
 After meaningful work — a new service, a changed deploy procedure, a decision with a reason, a gotcha that cost time — update the docs before finishing:
 - `read_document` first, then `write_document` with the full updated body (it replaces the doc). Use `architecture` for structure and data flow, `deploy` for runbooks (commands, hosts, `{{secret:Name}}` references — never values), `notes`/`conventions` for decisions and rules.
 - Keep `update_project` summary/tags accurate when the project's shape changes.
-- Record non-secret connection facts (`host`, `port`, `url`, `username`, `database`, `public_key`) as non-sensitive fields via `upsert_secret_meta` rather than in prose.
+- Record non-secret connection facts (`host`, `port`, `url`, `username`, `database`, `public_key`, or other keys with `sensitive: false`) as non-sensitive fields via `upsert_secret_meta` rather than in prose.
 
 ## Shared infrastructure memory (global docs)
 
@@ -111,3 +112,11 @@ Servers, domains and cross-project conventions are **global** documents (listed 
 - **"no OS credential store available" / "installing plugin dependencies"** → first session after install: npm is installing `@napi-rs/keyring` into the plugin data dir in the background. Wait a minute or start a new session. If it keeps failing, the user can run `npm install --omit=dev` in `~/.claude/plugins/data/pidb-pidb` (Windows: `%USERPROFILE%\.claude\plugins\data\pidb-pidb`).
 - **A command was denied by the pidb guard** → read the reason; it names the allowed alternative (e.g. pass a Grep `path`/`glob` that excludes a secret file).
 - **Windows** → in Git Bash, `pidb` runs the sh shim; in PowerShell/cmd, `pidb.cmd`. Both need `node` on PATH.
+
+## CLI equivalents (when the MCP tools are not loaded)
+
+- `pidb projects create <slug> --name "<Name>" [--summary …] [--tags a,b]`
+- `pidb docs delete <project|global-doc-slug> [doc]`
+- `pidb secrets meta <project|global> "<Name>" --field key=value [--field …] [--description …] [--tags …]` (fields are sent as non-sensitive)
+- `pidb secrets request <project|global> "<Name>" --key password [--plain-key host]` → prints the link for the user
+- `pidb secret exec` masks only the secret's sensitive values in command output; non-sensitive ones (host, username) stay readable.

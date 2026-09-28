@@ -9,10 +9,16 @@ export function envKeyFor(key: string): string {
   return `PIDB_${key.toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`;
 }
 
-/** Variables the CLI itself reads for its own configuration — never let a secret field overwrite one of these. */
-const RESERVED_ENV_VARS = ['PIDB_TOKEN', 'PIDB_URL', 'PIDB_CONFIG_HOME'];
+/**
+ * Variables the CLI itself reads for its own configuration — never let a secret field overwrite one
+ * of these. Mode and data-dir switches are reserved everywhere; `PIDB_URL`/`PIDB_TOKEN` only in user
+ * mode, since agent mode ignores them (so a secret's `url`/`token` field still works for the agent).
+ */
+const ALWAYS_RESERVED_ENV_VARS = ['PIDB_CONFIG_HOME', 'PIDB_AGENT', 'PIDB_PLUGIN_DATA', 'PIDB_ALLOW_USER_MODE'];
+const USER_MODE_RESERVED_ENV_VARS = ['PIDB_TOKEN', 'PIDB_URL'];
 
-export function buildEnv(fields: Record<string, string>, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function buildEnv(fields: Record<string, string>, base: NodeJS.ProcessEnv, agent = false): NodeJS.ProcessEnv {
+  const reserved = agent ? ALWAYS_RESERVED_ENV_VARS : [...ALWAYS_RESERVED_ENV_VARS, ...USER_MODE_RESERVED_ENV_VARS];
   const env: NodeJS.ProcessEnv = { ...base };
   // The child gets only the one secret it opted into, never the caller's own API token.
   delete env.PIDB_TOKEN;
@@ -23,7 +29,7 @@ export function buildEnv(fields: Record<string, string>, base: NodeJS.ProcessEnv
     if (previous !== undefined) {
       throw new CliError(`fields "${previous}" and "${key}" both map to ${name} — rename one of them`);
     }
-    if (RESERVED_ENV_VARS.includes(name)) {
+    if (reserved.includes(name)) {
       throw new CliError(`field "${key}" maps to the reserved variable ${name} — rename the field`);
     }
     seen.set(name, key);
@@ -83,7 +89,7 @@ export async function runSecretExec(
         body: { purpose: 'exec' },
       })
     : await client.json<RevealedFields>('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields`));
-  const env = buildEnv(revealed.fields, process.env);
+  const env = buildEnv(revealed.fields, process.env, opts.agent === true);
 
   if (!opts.agent) {
     return await spawnAndAwaitExit(bin, args, { stdio: 'inherit', env });
@@ -92,7 +98,11 @@ export async function runSecretExec(
   // Agent mode: stdin is still inherited, but stdout/stderr are piped through a redactor (each stream
   // gets its own instance — they must not share held-back state) before being relayed to our own
   // stdout/stderr, so a value the child prints verbatim or in an encoded form never reaches the agent.
-  const values = Object.values(revealed.fields);
+  // Only sensitive values are masked (the server says which); a server that predates that list gets
+  // every value masked, as before. Masking host/username too only garbled ordinary words in output.
+  const values = revealed.sensitive
+    ? revealed.sensitive.map((k) => revealed.fields[k]).filter((v): v is string => v !== undefined)
+    : Object.values(revealed.fields);
   const stdoutRedactor = createRedactor(values);
   const stderrRedactor = createRedactor(values);
   return await spawnAndAwaitExit(

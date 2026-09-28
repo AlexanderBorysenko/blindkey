@@ -92,6 +92,7 @@ describe('MCP bridge executable entry (packages/cli/src/agent/bridge-main.ts), r
       [
         'get_project',
         'list_documents',
+        'create_project',
         'list_projects',
         'list_secrets',
         'pidb_bind',

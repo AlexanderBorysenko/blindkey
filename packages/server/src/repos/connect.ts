@@ -144,3 +144,10 @@ export function claimApprovedConnectRequest(db: Db, id: number): ConnectRequestR
 export function purgeExpiredConnectRequests(db: Db, nowTs: number = now()): number {
   return db.prepare(`DELETE FROM connect_requests WHERE expires_at <= ?`).run(nowTs).changes;
 }
+
+/** Approved device-flow requests the agent has not claimed yet (still within their TTL), oldest first. */
+export function listApprovedConnectRequests(db: Db, nowTs: number = now()): ConnectRequestRow[] {
+  return (
+    db.prepare(`SELECT ${COLS} FROM connect_requests WHERE status = 'approved' AND expires_at > ? ORDER BY id`).all(nowTs) as RawRow[]
+  ).map(toRow);
+}

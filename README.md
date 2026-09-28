@@ -126,13 +126,13 @@ open http://localhost:8080/login
 `plugin/` is a Claude Code plugin, and this repo is its local marketplace (`.claude-plugin/marketplace.json`, marketplace and plugin both named `pidb`). It gives Claude a stable working context for the project a repo belongs to:
 
 - **Session context** — each session in a bound repo starts with the project's summary, document index, secret names and field keys (sensitive ones marked `*`), plus the plugin's golden rules.
-- **MCP tools** — a local stdio bridge (`dist/mcp.mjs`) proxies the server's own tools (`list_projects`, `get_project`, `list_documents`, `read_document`, `write_document`, `search`, `list_secrets`, `update_project`, `upsert_secret_meta`, `secret_request_link`), plus the local `pidb_status`, `pidb_bind` and `pidb_profiles`. None of them returns a secret value.
+- **MCP tools** — a local stdio bridge (`dist/mcp.mjs`) proxies the server's own tools (`list_projects`, `get_project`, `create_project`, `list_documents`, `read_document`, `write_document`, `search`, `list_secrets`, `update_project`, `upsert_secret_meta`, `secret_request_link`), plus the local `pidb_status`, `pidb_bind` and `pidb_profiles`. None of them returns a secret value.
 - **`pidb` on the Bash PATH** — the agent-mode CLI (`bin/pidb`, `bin/pidb.cmd` → `dist/pidb.mjs`): `connect`, `profile`, `bind`/`unbind`, `status`, `projects`, `docs`, `secrets list`, `search`, and `secret exec|write|env`. The user-only commands (`login`, `token …`, `secret get|set`) are refused.
 - **Skill and commands** — the `pidb` skill (rules, tools, examples) and `/pidb:server`, `/pidb:connect`, `/pidb:bind`, `/pidb:status`.
 
 **Your own `pidb` inside Claude Code.** Claude Code appends the plugin's `bin/` to the *end* of PATH, so if you also installed `pidb` yourself (`npm link`, a global install), Claude's Bash commands would run *your* copy — ungated and unredacted. To prevent that, any `pidb` started with `CLAUDECODE=1` in its environment (Claude Code sets it for every Bash tool command) runs in agent mode: the same refusals, redaction and plugin state (`$CLAUDE_CONFIG_DIR` or `~/.claude`, `plugins/data/pidb-pidb`) as the plugin's shim. That includes commands you run yourself with `!pidb …` in a Claude Code session; for those, opt out explicitly with `!PIDB_ALLOW_USER_MODE=1 pidb …` (PowerShell: `$env:PIDB_ALLOW_USER_MODE='1'; pidb …`). Outside Claude Code nothing changes.
 
-Claude keeps the project docs current itself (`write_document`), stores non-secret facts itself (`update_project`, `upsert_secret_meta`), and uses secret values only by substitution. You approve logins in the browser and type secret values into the admin UI.
+Claude keeps the project docs current itself (`write_document`), stores non-secret facts itself (`create_project`, `update_project`, `upsert_secret_meta`), and uses secret values only by substitution. You approve logins in the browser and type secret values into the admin UI.
 
 ### Security model and its limits
 
@@ -235,7 +235,8 @@ Claude Code caches an installed plugin by its `version` (`plugin/.claude-plugin/
 
 ### Admin side
 
-- **Approval page.** `/connect?code=…` is reached from the link `pidb connect` prints, and requires the admin session. It lists the requesting name, IP and user agent. Only agent scopes are offered: `projects:read`, `projects:write`, `docs:read`, `docs:write`, `secrets:meta`, `secrets:meta-write`, `secrets:use`. Global docs and secrets are visible to any project-scoped token. Deny refuses the request.
+- **Approval page.** `/connect?code=…` is reached from the link `pidb connect` prints, and requires the admin session. It lists the requesting name, IP and user agent. Only agent scopes are offered: `projects:read`, `projects:write`, `projects:create`, `docs:read`, `docs:write`, `secrets:meta`, `secrets:meta-write`, `secrets:use`. Global docs and secrets are visible to any project-scoped token. With `projects:create` the approval may pick no project at all: projects the agent creates are added to its token. Deny refuses the request.
+- **Tokens page.** An approved request shows under "Approved — waiting for the agent" until the agent's next poll mints the token (the page refreshes itself). **Projects** on a token row changes which projects it can reach, including "all projects".
 - **Tokens.** `/tokens` lists agent tokens with an `agent` pill, next to user tokens. Revoke one there to cut the agent off immediately; its next call gets 401, and Claude will ask for `/pidb:connect`.
 - **Audit.** `/audit` records `connect.started`, `connect.approved`, `connect.denied`, `connect.token_issued` and every `secret.used` (purpose, field keys, whether an agent made the call).
 

@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const SCOPES = [
   'projects:read',
   'projects:write',
+  'projects:create',
   'docs:read',
   'docs:write',
   'secrets:meta',
@@ -22,6 +23,7 @@ export type Scope = (typeof SCOPES)[number];
 export const AGENT_SCOPES = [
   'projects:read',
   'projects:write',
+  'projects:create',
   'docs:read',
   'docs:write',
   'secrets:meta',
@@ -47,6 +49,39 @@ export const NON_SENSITIVE_KEYS = ['host', 'port', 'url', 'username', 'database'
 
 export function defaultSensitive(key: string): boolean {
   return !(NON_SENSITIVE_KEYS as readonly string[]).includes(key);
+}
+
+/**
+ * Whether a field key looks like it holds a credential. An agent (meta-write) may declare a field
+ * non-sensitive only when this is false — otherwise it could create a visible `password` field and
+ * have the user type a real password into it. The key is split into words (`db_password`,
+ * `apiToken`, `SSH-Key` → db/password, api/token, ssh/key); a word matches exactly (`auth` but not
+ * `author`, `pin` but not `ping`), and a few stems match anywhere (`passphrase`, `apitoken`).
+ * This is a guard against the obvious, not a proof: the admin UI shows every field's sensitivity.
+ */
+const CREDENTIAL_WORDS = new Set([
+  'pass', 'passwd', 'password', 'passphrase', 'pw', 'pwd', 'pin', 'otp', 'totp', 'mfa', '2fa',
+  'secret', 'token', 'jwt', 'bearer', 'auth', 'authorization', 'credential', 'credentials', 'cred', 'creds',
+  'key', 'apikey', 'privkey', 'private', 'priv', 'salt', 'nonce', 'hmac', 'signature', 'sig', 'cert', 'pem', 'pfx', 'p12',
+  'cookie', 'session', 'sid', 'dsn', 'conn', 'connection', 'connstr', 'seed', 'mnemonic', 'recovery', 'backup_codes',
+  'cvv', 'cvc', 'iban', 'card', 'ssn', 'license', 'licence',
+]);
+const CREDENTIAL_STEMS = /pass(?:word|wd|phrase)|secret|token|credential|private|apikey|mnemonic/i;
+
+export function secretLookingKey(key: string): boolean {
+  if ((NON_SENSITIVE_KEYS as readonly string[]).includes(key)) return false;
+  if (CREDENTIAL_STEMS.test(key)) return true;
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return words.some((w) => CREDENTIAL_WORDS.has(w));
+}
+
+/** A URL carrying a password in its userinfo (`scheme://user:pass@host`) — never a non-sensitive value. */
+export function urlWithPassword(value: string): boolean {
+  return /[a-z][a-z0-9+.-]*:\/\/[^\s/@:]*:[^\s/@]+@/i.test(value);
 }
 
 export const scopeSchema = z.enum(SCOPES);
