@@ -201,3 +201,26 @@ describe('runHook — CLAUDE_PLUGIN_DATA vs resolveDataDir precedence', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toContain('profile "work"');
   });
 });
+
+describe('exportDataDir — CLAUDE_ENV_FILE', () => {
+  it('exports PIDB_PLUGIN_DATA, shell-quoted, so the bin shim uses the hooks’ data dir', async () => {
+    const { exportDataDir } = await import('../src/agent/hooks/index.js');
+    const { readFileSync } = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const envFile = join(dataDir, 'env.sh');
+    writeFileSync(envFile, '');
+    const tricky = join(dataDir, "it's a dir");
+    exportDataDir({ CLAUDE_ENV_FILE: envFile }, tricky);
+    expect(readFileSync(envFile, 'utf8')).toContain('export PIDB_PLUGIN_DATA=');
+    if (process.platform !== 'win32') {
+      const out = execFileSync('sh', ['-c', `. "${envFile}"; printf %s "$PIDB_PLUGIN_DATA"`], { encoding: 'utf8' });
+      expect(out).toBe(tricky);
+    }
+  });
+
+  it('is a no-op without CLAUDE_ENV_FILE and never throws on an unwritable file', async () => {
+    const { exportDataDir } = await import('../src/agent/hooks/index.js');
+    expect(() => exportDataDir({}, dataDir)).not.toThrow();
+    expect(() => exportDataDir({ CLAUDE_ENV_FILE: join(dataDir, 'missing-dir', 'env.sh') }, dataDir)).not.toThrow();
+  });
+});

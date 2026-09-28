@@ -5,6 +5,7 @@
 // bug here should degrade to "allow"/"no redaction"/"a one-line status", not break Claude Code's tool
 // loop. `runHook` is side-effect-free enough to unit-test directly (no real stdin/stdout/process.exit);
 // `main.ts` is the actual executable entry that Task 9 bundles into `dist/hook.mjs`.
+import { appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolveDataDir } from '../datadir.js';
 import { loadProfiles, loadWritten } from '../state.js';
@@ -100,6 +101,23 @@ function sessionStartOutput(additionalContext: string): string {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } });
 }
 
+/**
+ * The plugin's bin/ shim runs inside Claude's Bash tool, which never receives CLAUDE_PLUGIN_DATA.
+ * Claude Code sources CLAUDE_ENV_FILE (handed to SessionStart hooks) before every later Bash command,
+ * so exporting PIDB_PLUGIN_DATA there keeps the CLI on the same data dir as the hooks and the MCP
+ * bridge — this matters for `--plugin-dir` loads, whose data dir differs from the one the shim derives.
+ */
+export function exportDataDir(env: NodeJS.ProcessEnv, dataDir: string): void {
+  const file = env.CLAUDE_ENV_FILE;
+  if (!file) return;
+  const quoted = `'${dataDir.replace(/'/g, `'\\''`)}'`;
+  try {
+    appendFileSync(file, `export PIDB_PLUGIN_DATA=${quoted}\n`);
+  } catch {
+    // Best effort: without it the CLI still derives the data dir from its own install path.
+  }
+}
+
 async function dispatch(kind: HookKind, stdinText: string, env: NodeJS.ProcessEnv, deps: RunHookDeps): Promise<RunHookResult> {
   const dataDir = env.CLAUDE_PLUGIN_DATA || resolveDataDir(env);
 
@@ -114,6 +132,7 @@ async function dispatch(kind: HookKind, stdinText: string, env: NodeJS.ProcessEn
     } catch {
       // fall through with process.cwd()
     }
+    exportDataDir(env, dataDir);
     const store = deps.store ?? keyringStore(dataDir);
     const context = await sessionContext({
       cwd,

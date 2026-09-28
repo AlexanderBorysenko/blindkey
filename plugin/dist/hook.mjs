@@ -158,6 +158,7 @@ function resolveDataDir(env = process.env, selfPath = process.argv[1] ?? "") {
 }
 
 // packages/cli/src/agent/hooks/index.ts
+import { appendFileSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 
 // packages/cli/src/agent/state.ts
@@ -1628,6 +1629,16 @@ function redactHookOutput(updatedToolOutput) {
 function sessionStartOutput(additionalContext) {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } });
 }
+function exportDataDir(env, dataDir) {
+  const file = env.CLAUDE_ENV_FILE;
+  if (!file) return;
+  const quoted = `'${dataDir.replace(/'/g, `'\\''`)}'`;
+  try {
+    appendFileSync(file, `export PIDB_PLUGIN_DATA=${quoted}
+`);
+  } catch {
+  }
+}
 async function dispatch(kind, stdinText, env, deps) {
   const dataDir = env.CLAUDE_PLUGIN_DATA || resolveDataDir(env);
   if (kind === "session-start") {
@@ -1636,6 +1647,7 @@ async function dispatch(kind, stdinText, env, deps) {
       cwd = parseHookInput(stdinText).cwd;
     } catch {
     }
+    exportDataDir(env, dataDir);
     const store = deps.store ?? keyringStore(dataDir);
     const context = await sessionContext({
       cwd,
