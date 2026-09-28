@@ -2,23 +2,21 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * Recognizes a path inside a Claude Code plugin marketplace cache:
- * `.../plugins/cache/<marketplace>/<plugin>/<version>/dist/<file>` (spec §2.1).
- * Segments are split on both `/` and `\` so a path built with either
- * separator style parses the same regardless of the host platform — the
- * caller may be inspecting its own `argv[1]` on Windows while this code runs
- * on a POSIX CI box, or vice versa.
+ * Matches a file inside a Claude Code plugin marketplace cache:
+ * `<prefix>/plugins/cache/<marketplace>/<plugin>/<version>/dist/<file>` (spec §2.1), on either
+ * separator style — the caller may be inspecting its own `argv[1]` on Windows while this code runs
+ * on a POSIX CI box, or vice versa. Captures `<prefix>/plugins` and the separator used right after
+ * it, so the derived data dir can be built from the *actual* installed location (which may not be
+ * under `$HOME` at all, e.g. a custom Claude config dir) rather than reconstructed from `$HOME`.
  */
-function pluginCacheSuffix(selfPath: string): string | null {
-  const segments = selfPath.split(/[\\/]+/).filter(Boolean);
-  const idx = segments.findIndex((s, i) => s === 'plugins' && segments[i + 1] === 'cache');
-  if (idx === -1) return null;
-  const marketplace = segments[idx + 2];
-  const plugin = segments[idx + 3];
-  const version = segments[idx + 4];
-  const dist = segments[idx + 5];
-  if (!marketplace || !plugin || !version || dist !== 'dist') return null;
-  return `${plugin}-${marketplace}`;
+const PLUGIN_CACHE_PATH = /^(.*[\\/]plugins)([\\/])cache[\\/]([^\\/]+)[\\/]([^\\/]+)[\\/]([^\\/]+)[\\/]dist[\\/][^\\/]+$/;
+
+function derivedDataDir(selfPath: string): string | null {
+  const m = PLUGIN_CACHE_PATH.exec(selfPath);
+  if (!m) return null;
+  const [, pluginsDir, sep, marketplace, plugin, version] = m;
+  if (!pluginsDir || !sep || !marketplace || !plugin || !version) return null;
+  return `${pluginsDir}${sep}data${sep}${plugin}-${marketplace}`;
 }
 
 /**
@@ -27,12 +25,12 @@ function pluginCacheSuffix(selfPath: string): string | null {
  * `CLAUDE_PLUGIN_DATA` (only hooks and the MCP bridge do, straight from the
  * environment), so the CLI instead:
  *   1. uses `PIDB_PLUGIN_DATA` if set,
- *   2. else derives `<plugin>-<marketplace>` from its own installed path
- *      under a plugin marketplace cache,
- *   3. else falls back to `pidb-pidb` (e.g. running from source in dev).
+ *   2. else derives `<the plugin cache's own "plugins" dir>/data/<plugin>-<marketplace>` from its
+ *      own installed path,
+ *   3. else (selfPath isn't inside a plugin cache — dev/tsx, or a truncated path) falls back to
+ *      `$HOME/.claude/plugins/data/pidb-pidb`.
  */
 export function resolveDataDir(env: NodeJS.ProcessEnv = process.env, selfPath: string = process.argv[1] ?? ''): string {
   if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
-  const suffix = pluginCacheSuffix(selfPath) ?? 'pidb-pidb';
-  return join(env.HOME ?? homedir(), '.claude', 'plugins', 'data', suffix);
+  return derivedDataDir(selfPath) ?? join(env.HOME ?? homedir(), '.claude', 'plugins', 'data', 'pidb-pidb');
 }

@@ -98,7 +98,7 @@ plugin/
 - All JSON writes are atomic (temp + rename).
 
 ### 2.3 Agent-mode CLI (`PIDB_AGENT=1`)
-- Commands: `connect [--profile] [--url]`, `profile list|add <name> <url>|use <name>|remove <name>`, `bind <project>` / `unbind`, `status`, `projects list|get`, `docs list|get|put`, `secrets list`, `secret exec|write|env`.
+- Commands: `connect [--profile] [--url]`, `profile list|add <name> <url>|set-url <name> <url>|use <name>|remove <name>`, `bind <project>` / `unbind`, `status`, `projects list|get`, `search`, `docs list|get|put`, `secrets list`, `secret exec|write|env`. `search` is read-only and included for the agent's own use. `profile add` on an existing name refuses (exit 2, "profile `<name>` exists — use `pidb profile set-url <name> <url>`"); `profile set-url` changes the profile's url and clears its stored token (prints "token cleared — run `pidb connect --profile <name>`").
 - Not available (exit 2 with "not available to the Claude agent — ask the user"): `login`, `secret get`, `secret set`, `token *`.
 - Config: url from the profile (bound profile for the cwd repo, else default), token from keyring. `PIDB_URL`/`PIDB_TOKEN` env ignored in agent mode.
 - `connect`: start → print `Open <verification_url> and approve code <user_code>` → try to open the browser (`open` on macOS, `cmd /c start "" <url>` on Windows, `xdg-open` otherwise; failure is fine) → poll every `interval` s until success/deny/expiry (max 10 min) → store token in keyring → print name, projects, scopes, expiry (never the token). Requested scopes = all AGENT_SCOPES; requested projects = the bound project (if any) plus projects of the existing token.

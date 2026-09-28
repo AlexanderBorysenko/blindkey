@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { buildProgram } from '../src/cli.js';
+import { buildProgram } from '../src/program.js';
 import { loadBindings, loadProfiles } from '../src/agent/state.js';
 import { memoryStore, type TokenStore } from '../src/agent/tokenstore.js';
 import { CliError } from '../src/errors.js';
@@ -99,6 +99,29 @@ describe('agent mode: profile', () => {
     expect(captured).toContain('work.example.com');
     expect(captured).not.toContain('pidb_super_secret_token');
   });
+
+  it('add refuses an existing profile name rather than silently overwriting its url', async () => {
+    await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
+    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'profile', 'add', 'work', 'https://other.example.com']));
+    expect(err.exitCode).toBe(2);
+    expect(err.message).toBe('profile work exists — use `pidb profile set-url work <url>`');
+    // Untouched: the refused add did not change the stored url.
+    expect(loadProfiles(dataDir).profiles.work).toEqual({ url: 'https://work.example.com' });
+  });
+
+  it('set-url changes the url and clears the stored token', async () => {
+    await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
+    await store.set('work', 'pidb_old_token');
+    const captured = await run(program(), ['profile', 'set-url', 'work', 'https://work2.example.com/']);
+    expect(loadProfiles(dataDir).profiles.work).toEqual({ url: 'https://work2.example.com' });
+    expect(await store.get('work')).toBeNull();
+    expect(captured).toContain('token cleared — run `pidb connect --profile work`');
+  });
+
+  it('set-url rejects an unknown profile', async () => {
+    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'profile', 'set-url', 'nope', 'https://x.example.com']));
+    expect(err.exitCode).toBe(4);
+  });
 });
 
 describe('agent mode: bind / unbind / status', () => {
@@ -162,8 +185,20 @@ describe('agent mode: disabled commands', () => {
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });
 
+  it('login with no <url> still exits 2 with the agent message, not commander\'s "missing required argument"', async () => {
+    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'login']));
+    expect(err.exitCode).toBe(2);
+    expect(err.message).toBe('not available to the Claude agent — ask the user');
+  });
+
   it('secret get exits 2 with the spec message', async () => {
     const err = await expectCliError(program().parseAsync(['node', 'pidb', 'secret', 'get', 'global', 'X', 'k']));
+    expect(err.exitCode).toBe(2);
+    expect(err.message).toBe('not available to the Claude agent — ask the user');
+  });
+
+  it('secret get with no arguments at all still exits 2 with the agent message', async () => {
+    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'secret', 'get']));
     expect(err.exitCode).toBe(2);
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });
@@ -185,8 +220,32 @@ describe('agent mode: disabled commands', () => {
     }
   });
 
-  it('search is not registered at all in agent mode', async () => {
-    await expect(program().parseAsync(['node', 'pidb', 'search', 'anything'])).rejects.toThrow();
+  it('token create with no options at all still exits 2 with the agent message, not a missing-option error', async () => {
+    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'token', 'create']));
+    expect(err.exitCode).toBe(2);
+    expect(err.message).toBe('not available to the Claude agent — ask the user');
+  });
+
+  it('login, secret get, secret set and the whole token group are hidden from agent-mode help', () => {
+    const help = program().helpInformation();
+    expect(help).not.toMatch(/\blogin\b/);
+    expect(help).not.toMatch(/\btoken\b/);
+    const secretHelp = program().commands.find((c) => c.name() === 'secret')!.helpInformation();
+    expect(secretHelp).not.toMatch(/\bget\b/);
+    expect(secretHelp).not.toMatch(/\bset\b/);
+    expect(secretHelp).toMatch(/\bwrite\b/); // still visible: not disabled
+  });
+
+  it('search remains visible in agent-mode help (spec ruling: available, read-only)', () => {
+    expect(program().helpInformation()).toMatch(/\bsearch\b/);
+  });
+});
+
+describe('agent mode: search is available (spec ruling)', () => {
+  it('is registered — fails on config resolution (no profile configured), not on an unknown command', async () => {
+    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'search', 'anything']));
+    expect(err.exitCode).toBe(3);
+    expect(err.message).toMatch(/no server configured/);
   });
 });
 

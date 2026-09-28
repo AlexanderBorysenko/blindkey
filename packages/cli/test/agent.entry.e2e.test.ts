@@ -57,6 +57,7 @@ describe('normal entry (packages/cli/src/cli.ts) with PIDB_AGENT=1', () => {
       ['login', 'http://127.0.0.1:1'],
       { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_CONFIG_HOME: configHome },
     );
+    expect(r.status).not.toBe(0);
     expect(r.stderr).not.toContain('not available to the Claude agent');
   });
 });

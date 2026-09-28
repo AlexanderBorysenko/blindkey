@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import path from 'node:path';
@@ -50,12 +50,18 @@ describe('bindings.json', () => {
 });
 
 describe('writeJsonAtomic', () => {
-  it('writes via a temp file + rename, leaving no temp file behind and 0600 perms', () => {
+  it('writes via a temp file + rename, leaving no temp file behind', () => {
     const target = join(dataDir, 'sub', 'thing.json');
     writeJsonAtomic(target, { a: 1 });
     expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({ a: 1 });
     const leftovers = readdirSync(join(dataDir, 'sub')).filter((f) => f.includes('.tmp'));
     expect(leftovers).toEqual([]);
+  });
+
+  it.skipIf(process.platform === 'win32')('writes the file 0600 (POSIX file-mode bits are not meaningful on Windows)', () => {
+    const target = join(dataDir, 'perms.json');
+    writeJsonAtomic(target, { a: 1 });
+    expect(statSync(target).mode & 0o777).toBe(0o600);
   });
 
   it('creates parent directories as needed and overwrites an existing file', () => {
