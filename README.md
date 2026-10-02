@@ -1,47 +1,150 @@
-# blindkey — Blindkey
+<p align="center">
+  <img src="assets/logo-wordmark.svg" alt="Blindkey" height="56">
+</p>
 
-Self-hosted store for project documentation and encrypted secrets, with a scoped REST API and an MCP endpoint for AI agents. Secret values never enter an agent's context: agents read metadata and documents, and consume values through the `blindkey` CLI (`exec` / `write` / `env`).
+<p align="center"><strong>Secrets your AI agents can use but never see.</strong></p>
 
-Spec: `docs/superpowers/specs/2026-09-12-projects-info-db-design.md`.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-4f46e5"></a>
+  <img alt="Node 22" src="https://img.shields.io/badge/node-%E2%89%A522-4f46e5">
+  <img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-yes-4f46e5">
+</p>
+
+Blindkey is a self-hosted secret manager and project-memory store built for AI coding agents such as Claude Code. Your agent can deploy, migrate a database or SSH into a box with real credentials, and the credential values never enter its context window, its transcript or its logs.
+
+## Why
+
+Coding agents need credentials to do useful work. The usual ways of giving them one all leak it:
+
+- **Pasting it into chat** puts the value in the model's context, in the conversation transcript, and in whatever the provider keeps.
+- **A `.env` file in the repo** is one `cat` away. The agent will read it the first time it debugs a connection error.
+- **An environment variable in your shell** gets printed by `env`, `printenv`, stack traces and debug logs, and from there it lands in the transcript too.
+
+Blindkey separates *using* a secret from *seeing* it. The agent knows a secret exists, which fields it has, and which project docs explain how to use it. When it needs the value, it runs a command through Blindkey, which injects the value into that one child process and redacts it from the output. The agent never holds the value itself.
+
+Blindkey also stores each project's documentation (architecture notes, runbooks, deploy steps), so every new agent session starts with the project's context instead of rediscovering it.
+
+## How it works
+
+```
+  Claude Code ──MCP──▶ Blindkey server         docs, secret names and field keys (never values)
+       │
+       │ Bash: blindkey secret exec acme "Prod DB" -- psql
+       ▼
+  blindkey CLI ──POST /secrets/:name/use──▶ server   scope secrets:use, audited as secret.used
+       │                                    (value decrypted server-side, sent to the CLI only)
+       ▼
+  psql  ◀── env BLINDKEY_HOST, BLINDKEY_PASSWORD, …
+       │
+       ▼
+  stdout/stderr ──▶ redactor ──▶ agent      the value and its encodings are masked
+```
+
+1. **Context.** At session start the Claude Code plugin loads the bound project's summary, document index and secret names into the session. Over MCP the agent can read and write docs and secret *metadata*.
+2. **Use by substitution.** `blindkey secret exec <project> "<name>" -- <cmd>` exposes each field as `BLINDKEY_<KEY>` to the child process only. `secret write` and `secret env` write a file (an SSH key, a `.env`) that the agent is then blocked from reading.
+3. **Missing secrets.** When the agent needs a secret that doesn't exist, it sends you a prefilled link to the admin UI. You type the value there, never in chat.
+4. **Login.** An agent gets a token only after you approve it in the browser, and only for the projects you tick.
+
+## Features
+
+- **Project docs and memory:** Markdown documents per project plus global ones, full-text search, and `{{secret:Name}}` references that are linted so values never land in a doc.
+- **Encrypted secrets:** flat key/value secrets with per-field sensitivity, envelope-encrypted at rest.
+- **Scoped tokens:** per-project, per-scope API tokens with expiry. Agent tokens are approved in the browser through a device-code flow.
+- **MCP endpoint and REST API:** a server-side MCP server plus a local stdio bridge for Claude Code.
+- **Claude Code plugin:** session context, guard and redaction hooks, slash commands, and a skill that teaches the rules.
+- **Admin web UI:** browse and edit everything, audited one-field reveal, token management, an audit log, and TOTP two-factor with recovery codes. It runs under a strict CSP with no CDN.
+- **Operations:** a Docker image, Caddy or bring-your-own reverse proxy, scheduled integrity-checked backups, and master-key rotation.
+
+## Security model
+
+Blindkey's job is to keep secrets out of places they shouldn't be. Here is what it does, and where it stops.
+
+### Encryption at rest
+
+- Each secret has its own random 256-bit data key (DEK). Field values are encrypted with **AES-256-GCM** under that DEK, and the DEK itself is wrapped with the **master key** (envelope encryption).
+- The master key comes from a file (a Docker secret at `/run/secrets/master_key`) or an environment variable. It is never stored in the database, never baked into the image, and never included in a backup.
+- Key rotation (`blindkey-server rotate-key`) rewraps every DEK and every 2FA secret in one transaction. Old key versions stay readable until you retire them.
+- TOTP secrets for two-factor login are encrypted the same way.
+
+### Boundaries the server enforces
+
+These don't depend on the agent behaving:
+
+- **Agent tokens can't read values.** A token created through the browser approval page can never carry `admin`, `secrets:reveal` or `secrets:write`. The reveal endpoints, the UI and `secret get` are closed to it.
+- **One audited path to values.** Values reach an agent's machine only through `POST …/secrets/:name/use` (scope `secrets:use`), which `blindkey secret exec|write|env` call. Every call writes a `secret.used` audit row with the purpose and field keys, never the values.
+- **Project scope.** A token reaches only the projects you approved. Revoking it in the UI cuts the agent off on its next call.
+- **Tokens are stored hashed** (SHA-256). The plaintext is shown once at creation.
+
+### Credentials and login
+
+- The admin password is hashed with **argon2id** (64 MiB, t=3).
+- Optional **TOTP two-factor** with one-time recovery codes. Ten wrong codes lock code entry for 15 minutes.
+- On the agent's machine the token lives in the **OS credential store** (macOS Keychain, Windows Credential Manager). It is never written to a file, printed, or returned by a tool.
+
+### Web hardening
+
+- Session cookies are `HttpOnly`, `SameSite=Lax`, and `Secure` behind HTTPS. CSRF tokens are HMACs of the session id.
+- **Strict CSP:** `script-src 'self'; style-src 'self'`, with no inline scripts, handlers or styles anywhere in the UI. All assets are served locally.
+- HSTS on HTTPS responses, and rate limits on login, token and device-code endpoints.
+- Logs are JSON, with credentials and secret-bearing request bodies redacted.
+
+### Defence in depth on the agent side
+
+The Claude Code plugin adds layers that make accidental leaks unlikely:
+
+- `secret exec` redacts every value from the child's output, along with its base64, base64url, URL-encoded and JSON-escaped forms.
+- A PreToolUse guard blocks:
+  - the user-only commands;
+  - environment dumps inside `secret exec`;
+  - reads of the plugin data dir, `~/.config/blindkey` and files written by `secret write|env`;
+  - OS credential-store reads;
+  - `curl`/`wget`/`Invoke-WebRequest` against the Blindkey server.
+- A PostToolUse hook redacts tokens, private keys, AWS keys and `PASSWORD=`/`TOKEN=`-style lines from Bash output.
+
+### Known limits
+
+The agent-side layers are heuristics, not a sandbox:
+
+- **Dotenv loaders.** A tool that loads a written `.env` and prints the result is not recognised as reading it. Examples: `docker compose config`, `node -r dotenv/config -e …`, and Python `dotenv_values`.
+- **Recursive archives or copies.** Archiving, syncing or copying a *directory* that contains a written file (`tar czf x.tgz .`, `cp -r . /tmp/x`, `zip -r`) is not blocked. Only commands naming the file itself, or recursive searches over it, are blocked.
+- **Deep nesting.** Pathologically nested shell constructs are allowed rather than parsed.
+- **Other encodings and channels.** A child process can still send a value somewhere, or print it in an encoding the redactor doesn't know (hex, reversed, split).
+- **A deliberately malicious agent is out of scope.** The token's project scope, `secrets:use`-only access, the audit log and revocation are the real limits. Give the agent only the projects it needs, and review `/audit`.
+
+### Threat model at a glance
+
+| Threat | Covered? |
+|---|---|
+| Secret value ends up in the model's context or transcript during normal work | **Yes.** Substitution, redaction and guard hooks. |
+| Agent token stolen from the agent's machine | **Limited.** The attacker gets use of the approved projects' secrets, audited and revocable, but no admin, reveal or write access. |
+| Database file or backup stolen without the master key | **Yes.** Values are AES-256-GCM encrypted. |
+| Server host compromised (root, with the master key) | **No.** Whoever controls the server controls the secrets. |
+| An agent deliberately trying to exfiltrate a value it is allowed to use | **No.** Mitigated only by scope, audit and revocation. |
+| Admin UI attacks (XSS, CSRF, brute force) | **Yes.** Strict CSP, CSRF tokens, rate limits, argon2id, optional 2FA. |
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md).
 
 ## Packages
 
-- `packages/shared` — zod schemas, secret-reference parser (`{{secret:Name}}`), secret-value lint
-- `packages/server` — Fastify server: REST (`/api/v1`), MCP (`/mcp`), `blindkey-server` ops CLI
-- `packages/cli` — `blindkey` client CLI: docs, secret metadata, and value injection (`exec` / `write` / `env`)
+- `packages/shared`: zod schemas, the secret-reference parser (`{{secret:Name}}`), and the secret-value lint.
+- `packages/server`: Fastify server with REST (`/api/v1`), MCP (`/mcp`), the admin UI, and the `blindkey-server` ops CLI.
+- `packages/cli`: the `blindkey` client CLI for docs, secret metadata and value injection (`exec` / `write` / `env`). It is also bundled into the Claude Code plugin.
+- `plugin/`: the Claude Code plugin. This repo is its marketplace.
 
-## Quick start (development)
+## Quick start
 
-```bash
-npm install
-export BLINDKEY_MASTER_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
-export BLINDKEY_DATA_DIR=./data
-npm run build
-BLINDKEY_ADMIN_USERNAME=alex BLINDKEY_ADMIN_PASSWORD=change-me-please node packages/server/dist/cli.js init
-node packages/server/dist/cli.js start
-```
-
-Get an admin token:
+Run the server with Docker (full guide: [Deployment](#deployment-docker)):
 
 ```bash
-curl -s -XPOST localhost:8080/api/v1/auth/token -H 'content-type: application/json' \
-  -d '{"username":"alex","password":"change-me-please","name":"cli"}'
+git clone https://github.com/AlexanderBorysenko/blindkey.git && cd blindkey/docker
+cp .env.example .env                       # set BLINDKEY_DOMAIN and BLINDKEY_ACME_EMAIL
+mkdir -p secrets && (umask 077; openssl rand -base64 32 > secrets/master_key)
+sudo chown 1000:1000 secrets/master_key
+docker compose run --rm -e BLINDKEY_ADMIN_USERNAME=admin server init   # prompts for the password
+docker compose up -d
 ```
 
-`GET /api/v1/audit` accepts `before=<audit row id>` as an exclusive cursor (not a timestamp).
-
-Create a scoped token for an agent (scopes: `projects:read docs:read docs:write secrets:meta secrets:reveal secrets:write admin`):
-
-```bash
-curl -s -XPOST localhost:8080/api/v1/tokens -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
-  -d '{"name":"claude-code","scopes":["projects:read","docs:read","docs:write","secrets:meta"],"projects":["my-project"]}'
-```
-
-Register the MCP server in Claude Code:
-
-```bash
-claude mcp add --transport http blindkey http://localhost:8080/mcp --header "Authorization: Bearer $AGENT_TOKEN"
-```
+Then install the Claude Code plugin on your machine ([Claude Code plugin](#claude-code-plugin)) and run `/blindkey:server`, `/blindkey:connect` and `/blindkey:bind`.
 
 ## CLI (`blindkey`)
 
@@ -130,51 +233,26 @@ open http://localhost:8080/login
 - **`blindkey` on the Bash PATH** — the agent-mode CLI (`bin/blindkey`, `bin/blindkey.cmd` → `dist/blindkey.mjs`): `connect`, `profile`, `bind`/`unbind`, `status`, `projects`, `docs`, `secrets list`, `search`, and `secret exec|write|env`. The user-only commands (`login`, `token …`, `secret get|set`) are refused.
 - **Skill and commands** — the `blindkey` skill (rules, tools, examples) and `/blindkey:server`, `/blindkey:connect`, `/blindkey:bind`, `/blindkey:status`.
 
-**Your own `blindkey` inside Claude Code.** Claude Code appends the plugin's `bin/` to the *end* of PATH, so if you also installed `blindkey` yourself (`npm link`, a global install), Claude's Bash commands would run *your* copy — ungated and unredacted. To prevent that, any `blindkey` started with `CLAUDECODE=1` in its environment (Claude Code sets it for every Bash tool command) runs in agent mode: the same refusals, redaction and plugin state (`$CLAUDE_CONFIG_DIR` or `~/.claude`, `plugins/data/blindkey-blindkey`) as the plugin's shim. That includes commands you run yourself with `!blindkey …` in a Claude Code session; for those, opt out explicitly with `!BLINDKEY_ALLOW_USER_MODE=1 blindkey …` (PowerShell: `$env:blindkey_ALLOW_USER_MODE='1'; blindkey …`). Outside Claude Code nothing changes.
+**Your own `blindkey` inside Claude Code.** Claude Code appends the plugin's `bin/` to the *end* of PATH, so if you also installed `blindkey` yourself (`npm link`, a global install), Claude's Bash commands would run *your* copy — ungated and unredacted. To prevent that, any `blindkey` started with `CLAUDECODE=1` in its environment (Claude Code sets it for every Bash tool command) runs in agent mode: the same refusals, redaction and plugin state (`$CLAUDE_CONFIG_DIR` or `~/.claude`, `plugins/data/blindkey-blindkey`) as the plugin's shim. That includes commands you run yourself with `!blindkey …` in a Claude Code session; for those, opt out explicitly with `!BLINDKEY_ALLOW_USER_MODE=1 blindkey …` (PowerShell: `$env:BLINDKEY_ALLOW_USER_MODE='1'; blindkey …`). Outside Claude Code nothing changes.
 
 Claude keeps the project docs current itself (`write_document`), stores non-secret facts itself (`create_project`, `update_project`, `upsert_secret_meta`), and uses secret values only by substitution. You approve logins in the browser and type secret values into the admin UI.
 
-### Security model and its limits
-
-The hard boundaries are enforced by the server:
-
-- An agent token is created only through the browser approval page, which you reach while logged in as the admin. It is limited to the projects you tick there. It can never carry `admin`, `secrets:reveal` or `secrets:write`, so it cannot read a secret value through the reveal endpoints, the UI or `blindkey secret get`.
-- Values reach the agent's machine only through `POST …/secrets/:name/use` (scope `secrets:use`), which `blindkey secret exec|write|env` call. Every call is audited as `secret.used`, with the purpose and field keys but never the values.
-- The token lives in the OS credential store (macOS Keychain or Windows Credential Manager). It is never written to a file, printed, or returned by a tool.
-
-On top of that, the plugin adds defense in depth on the agent side:
-
-- `secret exec` redacts every value, and its base64, base64url, URL-encoded and JSON-escaped forms, from the child's output.
-- A PreToolUse guard blocks:
-  - the user-only commands;
-  - commands that dump the environment inside `secret exec`;
-  - reads of the plugin data dir, `~/.config/blindkey` and files written by `secret write|env`;
-  - OS credential-store reads;
-  - `curl`/`wget`/`Invoke-WebRequest` against the configured server.
-- A PostToolUse hook redacts tokens, private keys, AWS keys and `PASSWORD=`/`TOKEN=`-style lines from Bash output.
-
-These agent-side layers are heuristics, not a sandbox. Known gaps:
-
-- **Dotenv loaders.** A tool that loads a written `.env` and prints the result is not recognised as reading it. Examples: `docker compose config`, `node -r dotenv/config -e …`, and Python `dotenv_values`.
-- **Recursive archives or copies.** Archiving, syncing or copying a *directory* that contains a written file (`tar czf x.tgz .`, `cp -r . /tmp/x`, `zip -r`) is not blocked. Only commands naming the file itself, or recursive searches over it, are blocked.
-- **Deep nesting.** Pathologically nested shell constructs are allowed rather than parsed.
-- **Other encodings and channels.** A child process can still send a value somewhere, or print it in an encoding the redactor doesn't know (hex, reversed, split).
-- **A deliberately malicious agent is out of scope.** The token's project scope, `secrets:use`-only access, the audit log and revocation are the real limits. Give the agent only the projects it needs, and review `/audit`.
+The security boundaries and agent-side protections are described in [Security model](#security-model).
 
 ### Install (macOS)
 
 Requires Node.js ≥ 20 and npm on `PATH`, plus a checkout of this repo. The committed `plugin/dist` bundles mean no build step is needed.
 
 ```bash
-git clone https://github.com/AlexanderBorysenko/projects-info-db.git ~/src/projects-info-db
-claude plugin marketplace add ~/src/projects-info-db
+git clone https://github.com/AlexanderBorysenko/blindkey.git ~/src/blindkey
+claude plugin marketplace add ~/src/blindkey
 claude plugin install blindkey@blindkey --scope user      # every project on this machine
 # or, from inside one project: claude plugin install blindkey@blindkey --scope project
 ```
 
-Inside Claude Code, the same is `/plugin marketplace add ~/src/projects-info-db`, then `/plugin install blindkey@blindkey`. Choose the scope as follows:
+Inside Claude Code, the same is `/plugin marketplace add ~/src/blindkey`, then `/plugin install blindkey@blindkey`. Choose the scope as follows:
 
-- `user` makes blindkey available everywhere.
+- `user` makes Blindkey available everywhere.
 - `project` records the plugin in that repo's `.claude/settings.json`, so it is shared with everyone who opens the repo.
 - `local` applies to this checkout only.
 
@@ -185,8 +263,8 @@ Repo bindings are always local (plugin data dir) and never committed.
 The steps are the same, in PowerShell:
 
 ```powershell
-git clone https://github.com/AlexanderBorysenko/projects-info-db.git $HOME\src\projects-info-db
-claude plugin marketplace add $HOME\src\projects-info-db
+git clone https://github.com/AlexanderBorysenko/blindkey.git $HOME\src\blindkey
+claude plugin marketplace add $HOME\src\blindkey
 claude plugin install blindkey@blindkey --scope user
 ```
 
@@ -194,10 +272,10 @@ claude plugin install blindkey@blindkey --scope user
 
 ### Syncing between machines
 
-The repo (private, `github.com/AlexanderBorysenko/projects-info-db`) is the plugin source. Each machine keeps a clone registered as the local marketplace, so edits stay easy and every machine pulls the same version:
+The repo is the plugin source. Each machine keeps a clone registered as the local marketplace, so local edits stay easy and every machine pulls the same version:
 
 ```bash
-cd ~/src/projects-info-db && git pull          # get changes made on another machine
+cd ~/src/blindkey && git pull          # get changes made on another machine
 claude plugin marketplace update blindkey           # re-read the marketplace
 claude plugin update blindkey@blindkey                  # takes effect for new sessions
 ```
@@ -213,7 +291,7 @@ If the install fails, the output is in `deps-install.log` in that directory. It 
 ### Update
 
 ```bash
-cd ~/src/projects-info-db && git pull
+cd ~/src/blindkey && git pull
 npm install && npm run build:plugin     # only if you changed packages/cli/src/** or packages/shared/src/** yourself
 claude plugin marketplace update blindkey
 claude plugin update blindkey@blindkey           # then restart Claude Code
@@ -549,3 +627,42 @@ Migrations run on startup, so no separate step is needed.
 ### Error codes
 
 `unauthorized` · `missing_scope` · `not_found` · `validation` · `conflict` · `lint` · `unresolved_refs` · `rate_limited` · `payload_too_large` · `unsupported_media_type` · `bad_request` · `decrypt_failed` · `internal`
+
+## Development
+
+```bash
+npm install
+export BLINDKEY_MASTER_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
+export BLINDKEY_DATA_DIR=./data
+npm run build
+BLINDKEY_ADMIN_USERNAME=alex BLINDKEY_ADMIN_PASSWORD=change-me-please node packages/server/dist/cli.js init
+node packages/server/dist/cli.js start
+```
+
+Get an admin token:
+
+```bash
+curl -s -XPOST localhost:8080/api/v1/auth/token -H 'content-type: application/json' \
+  -d '{"username":"alex","password":"change-me-please","name":"cli"}'
+```
+
+`GET /api/v1/audit` accepts `before=<audit row id>` as an exclusive cursor (not a timestamp).
+
+Create a scoped token for an agent (scopes: `projects:read docs:read docs:write secrets:meta secrets:reveal secrets:write admin`):
+
+```bash
+curl -s -XPOST localhost:8080/api/v1/tokens -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"claude-code","scopes":["projects:read","docs:read","docs:write","secrets:meta"],"projects":["my-project"]}'
+```
+
+Register the MCP server in Claude Code:
+
+```bash
+claude mcp add --transport http blindkey http://localhost:8080/mcp --header "Authorization: Bearer $AGENT_TOKEN"
+```
+
+## Status and licence
+
+Blindkey is a personal project. The author runs it in production for their own work, but there are no stability guarantees: the API, CLI and plugin may change between versions. Issues and pull requests are welcome.
+
+Released under the [MIT licence](LICENSE).

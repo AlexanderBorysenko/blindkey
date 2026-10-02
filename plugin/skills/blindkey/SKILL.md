@@ -75,7 +75,7 @@ blindkey secret env acme "DB" --out .env                                 # KEY=v
 
 ```powershell
 # Windows PowerShell
-blindkey secret exec acme "DB" -- pwsh -NoProfile -Command '$env:PGPASSWORD = $env:blindkey_PASSWORD; psql -h $env:blindkey_HOST -U $env:blindkey_USERNAME $env:blindkey_DATABASE'
+blindkey secret exec acme "DB" -- pwsh -NoProfile -Command '$env:PGPASSWORD = $env:BLINDKEY_PASSWORD; psql -h $env:BLINDKEY_HOST -U $env:BLINDKEY_USERNAME $env:BLINDKEY_DATABASE'
 blindkey secret env acme "DB" --out .env
 ```
 

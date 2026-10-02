@@ -122,16 +122,16 @@ describe('guardDecision — rule 1: blindkey + disabled subcommand', () => {
 
 describe('guardDecision — rule 2: blindkey secret exec whose child prints the environment (Fix round 1 Important #2)', () => {
   it.each([
-    // print-like verbs taking a $BLINDKEY_*/${BLINDKEY_*}/%BLINDKEY_%/$env:blindkey_* reference
+    // print-like verbs taking a $BLINDKEY_*/${BLINDKEY_*}/%BLINDKEY_%/$env:BLINDKEY_* reference
     ['blindkey secret exec acme DB -- echo $BLINDKEY_DB'],
     ['blindkey secret exec acme DB -- echo "${BLINDKEY_DB}"'],
     ['blindkey secret exec acme DB -- printf "%s" "$BLINDKEY_DB"'],
-    ['blindkey secret exec acme DB -- Write-Host $env:blindkey_DB'],
-    ['blindkey secret exec acme DB -- Write-Output $env:blindkey_DB'],
+    ['blindkey secret exec acme DB -- Write-Host $env:BLINDKEY_DB'],
+    ['blindkey secret exec acme DB -- Write-Output $env:BLINDKEY_DB'],
     ['blindkey secret exec acme DB -- cmd /c echo %BLINDKEY_DB%'],
-    // bare PowerShell $env:blindkey_X expression statement
-    ['blindkey secret exec acme DB -- powershell -c "$env:blindkey_DB"'],
-    ['blindkey secret exec acme DB -- pwsh -Command "$env:blindkey_DB"'],
+    // bare PowerShell $env:BLINDKEY_X expression statement
+    ['blindkey secret exec acme DB -- powershell -c "$env:BLINDKEY_DB"'],
+    ['blindkey secret exec acme DB -- pwsh -Command "$env:BLINDKEY_DB"'],
     // env/printenv/export -p/declare -p/typeset/compgen -v as commands
     ['blindkey secret exec acme DB -- env'],
     ['blindkey secret exec acme DB -- printenv'],
@@ -629,7 +629,7 @@ describe('guardDecision — escaping agent mode (F1: BLINDKEY_ALLOW_USER_MODE / 
     'env -u CLAUDECODE blindkey secret get acme Db',
     'env --unset=CLAUDECODE blindkey token list',
     'unset CLAUDECODE; blindkey secret get acme Db',
-    '$env:blindkey_ALLOW_USER_MODE=1; blindkey secret get acme Db',
+    '$env:BLINDKEY_ALLOW_USER_MODE=1; blindkey secret get acme Db',
     'Remove-Item env:CLAUDECODE; blindkey secret get acme Db',
     '$env:CLAUDECODE=""; blindkey token list',
   ])('denies %s', (command) => {

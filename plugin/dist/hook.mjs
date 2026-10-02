@@ -802,7 +802,7 @@ function runsDisabledBlindkeyCommand(segments) {
     return own.slice(1).some((t) => t.toLowerCase() === "get" || t === "--print");
   });
 }
-var BLINDKEY_VAR_REF = /\$\{?BLINDKEY_[A-Za-z0-9_]*\}?|%BLINDKEY_[A-Za-z0-9_]*%|\$\{?env:blindkey_[A-Za-z0-9_]*\}?/i;
+var BLINDKEY_VAR_REF = /\$\{?BLINDKEY_[A-Za-z0-9_]*\}?|%BLINDKEY_[A-Za-z0-9_]*%|\$\{?env:BLINDKEY_[A-Za-z0-9_]*\}?/i;
 var PRINT_WORDS = /* @__PURE__ */ new Set([
   "echo",
   "printf",
@@ -889,7 +889,7 @@ function inlineCodeOf(seg) {
 function segmentPrintsEnvironment(seg) {
   const word = seg.word ?? "";
   const args = seg.tokens.slice(seg.index + 1);
-  if (/^\$\{?env:blindkey_[a-z0-9_]*\}?$/i.test(word)) return true;
+  if (/^\$\{?env:BLINDKEY_[a-z0-9_]*\}?$/i.test(word)) return true;
   if (word === "env" || word === "printenv" || word === "typeset") return true;
   if (word === "export" && (args.length === 0 || args[0] === "-p")) return true;
   if (word === "declare" && args.every((a) => a.startsWith("-"))) return true;
