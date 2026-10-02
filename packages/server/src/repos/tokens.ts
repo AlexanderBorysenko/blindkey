@@ -16,7 +16,7 @@ export interface TokenRow {
   revoked_at: number | null;
   created_at: number;
   kind: TokenKind;
-  /** Admin-chosen display name (e.g. "Easy Renovation · home PC"); `name` stays the machine identity. */
+  /** Admin-chosen display name (e.g. "Acme Shop · home PC"); `name` stays the machine identity. */
   label: string | null;
 }
 

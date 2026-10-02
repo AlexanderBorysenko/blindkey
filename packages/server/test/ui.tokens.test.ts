@@ -127,11 +127,11 @@ describe('ui tokens', () => {
   it('renames a token (label), shows it instead of the name, and clears it when blank', async () => {
     await post('/tokens', { csrf, name: 'machine-name', scopes: 'docs:read' });
     const id = listTokens(t.db).find((r) => r.name === 'machine-name')!.id;
-    const r = await post(`/tokens/${id}/label`, { csrf, label: '  Easy   Renovation · home <b>PC</b> ' });
+    const r = await post(`/tokens/${id}/label`, { csrf, label: '  Acme   Shop · home <b>PC</b> ' });
     expect(r.statusCode).toBe(302);
-    expect(listTokens(t.db).find((x) => x.id === id)!.label).toBe('Easy Renovation · home <b>PC</b>');
+    expect(listTokens(t.db).find((x) => x.id === id)!.label).toBe('Acme Shop · home <b>PC</b>');
     const body = (await page('/tokens')).body;
-    expect(body).toContain('<strong>Easy Renovation · home &lt;b&gt;PC&lt;/b&gt;</strong>');
+    expect(body).toContain('<strong>Acme Shop · home &lt;b&gt;PC&lt;/b&gt;</strong>');
     expect(body).not.toContain('<b>PC</b>');
     await post(`/tokens/${id}/label`, { csrf, label: '   ' });
     expect(listTokens(t.db).find((x) => x.id === id)!.label).toBeNull();

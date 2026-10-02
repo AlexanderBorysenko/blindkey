@@ -7,7 +7,10 @@
 // have, or `cat`ing a `.env`-shaped file). It never fetches or otherwise learns a real secret value.
 export const REDACTED = '[blindkey:redacted]';
 
-const BLINDKEY_TOKEN_RE = /bk_[A-Za-z0-9_-]{20,}/g;
+// Real token shape is bk_<8>_<43> (server crypto/tokens.ts); a left boundary and the fixed 8-char
+// prefix keep ordinary text like `db_bk_2026_10_02_dump.sql` visible, while >= 20 secret chars
+// still catches a cut-off token.
+const BLINDKEY_TOKEN_RE = /(?<![A-Za-z0-9_-])bk_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{20,}/g;
 // Non-greedy body so two adjacent PEM blocks don't get swallowed into a single match.
 const PEM_BLOCK_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 const AKIA_RE = /AKIA[0-9A-Z]{16}/g;

@@ -97,7 +97,7 @@ After meaningful work — a new service, a changed deploy procedure, a decision 
 
 ## Shared infrastructure memory (global docs)
 
-Servers, domains and cross-project conventions are **global** documents (listed under "Global documents" in the session context), e.g. `hacon-vps-1` for Hacon VPS #1, with credentials in the matching global secret.
+Servers, domains and cross-project conventions are **global** documents (listed under "Global documents" in the session context), e.g. `vps-1` for VPS #1, with credentials in the matching global secret.
 - Before touching a server: `read_document` (no `project`) and follow its conventions and "Connecting" section.
 - After changing it (new site, port, service, fix): `write_document` (no `project`) with the full updated body — update the relevant section and append a dated line to its change log. Never put a secret value in it; reference `{{secret:global/Name}}`.
 - A new server gets its own global doc (category `deploy`) plus a global secret (`host`/`port`/`username`/`public_key` via `upsert_secret_meta`, the private key via `secret_request_link`).

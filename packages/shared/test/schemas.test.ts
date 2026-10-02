@@ -115,6 +115,6 @@ describe('secretLookingKey / urlWithPassword', () => {
     expect(urlWithPassword('postgres://app:hunter2@db:5432/x')).toBe(true);
     expect(urlWithPassword('https://user@host/path')).toBe(false);
     expect(urlWithPassword('https://host/a:b@c')).toBe(false);
-    expect(urlWithPassword('https://easy-renovation.hacon.com.ua')).toBe(false);
+    expect(urlWithPassword('https://shop.example.com')).toBe(false);
   });
 });

@@ -64,7 +64,7 @@ Blindkey's job is to keep secrets out of places they shouldn't be. Here is what 
 - Each secret has its own random 256-bit data key (DEK). Field values are encrypted with **AES-256-GCM** under that DEK, and the DEK itself is wrapped with the **master key** (envelope encryption).
 - The master key comes from a file (a Docker secret at `/run/secrets/master_key`) or an environment variable. It is never stored in the database, never baked into the image, and never included in a backup.
 - Key rotation (`blindkey-server rotate-key`) rewraps every DEK and every 2FA secret in one transaction. Old key versions stay readable until you retire them.
-- TOTP secrets for two-factor login are encrypted the same way.
+- TOTP secrets for two-factor login are encrypted with AES-256-GCM under the master key and rewrapped by the same rotation.
 
 ### Boundaries the server enforces
 
@@ -72,7 +72,7 @@ These don't depend on the agent behaving:
 
 - **Agent tokens can't read values.** A token created through the browser approval page can never carry `admin`, `secrets:reveal` or `secrets:write`. The reveal endpoints, the UI and `secret get` are closed to it.
 - **One audited path to values.** Values reach an agent's machine only through `POST …/secrets/:name/use` (scope `secrets:use`), which `blindkey secret exec|write|env` call. Every call writes a `secret.used` audit row with the purpose and field keys, never the values.
-- **Project scope.** A token reaches only the projects you approved. Revoking it in the UI cuts the agent off on its next call.
+- **Project scope.** A token reaches only the projects you approved, **plus every global document and global secret**: globals are shared infrastructure by design, so don't store anything as global that every agent shouldn't be able to use. Revoking a token in the UI cuts the agent off on its next call.
 - **Tokens are stored hashed** (SHA-256). The plaintext is shown once at creation.
 
 ### Credentials and login
@@ -116,7 +116,7 @@ The agent-side layers are heuristics, not a sandbox:
 | Threat | Covered? |
 |---|---|
 | Secret value ends up in the model's context or transcript during normal work | **Yes.** Substitution, redaction and guard hooks. |
-| Agent token stolen from the agent's machine | **Limited.** The attacker gets use of the approved projects' secrets, audited and revocable, but no admin, reveal or write access. |
+| Agent token stolen from the agent's machine | **Limited.** The attacker can use the approved projects' secrets and the global ones (audited, revocable), and, within the token's scopes, change docs and secret metadata, which future agent sessions read. It gets no admin access, cannot reveal values through the API or UI, and cannot write secret values. |
 | Database file or backup stolen without the master key | **Yes.** Values are AES-256-GCM encrypted. |
 | Server host compromised (root, with the master key) | **No.** Whoever controls the server controls the secrets. |
 | An agent deliberately trying to exfiltrate a value it is allowed to use | **No.** Mitigated only by scope, audit and revocation. |
@@ -314,7 +314,7 @@ Claude Code caches an installed plugin by its `version` (`plugin/.claude-plugin/
 ### Admin side
 
 - **Approval page.** `/connect?code=…` is reached from the link `blindkey connect` prints, and requires the admin session. It lists the requesting name, IP and user agent. Only agent scopes are offered: `projects:read`, `projects:write`, `projects:create`, `docs:read`, `docs:write`, `secrets:meta`, `secrets:meta-write`, `secrets:use`. Global docs and secrets are visible to any project-scoped token. With `projects:create` the approval may pick no project at all: projects the agent creates are added to its token. Deny refuses the request.
-- **Tokens page.** An approved request shows under "Approved — waiting for the agent" until the agent's next poll mints the token (the page refreshes itself). Each token is a card; **Manage** renames it (a display name, e.g. "Easy Renovation · home PC" — a reconnect of the same agent session keeps it), changes which projects it can reach (including "all projects"), or revokes it. The approval page can set that name up front. Revoked tokens are folded away at the bottom.
+- **Tokens page.** An approved request shows under "Approved — waiting for the agent" until the agent's next poll mints the token (the page refreshes itself). Each token is a card; **Manage** renames it (a display name, e.g. "Acme Shop · home PC" — a reconnect of the same agent session keeps it), changes which projects it can reach (including "all projects"), or revokes it. The approval page can set that name up front. Revoked tokens are folded away at the bottom.
 - **Tokens.** `/tokens` lists agent tokens with an `agent` pill, next to user tokens. Revoke one there to cut the agent off immediately; its next call gets 401, and Claude will ask for `/blindkey:connect`.
 - **Audit.** `/audit` records `connect.started`, `connect.approved`, `connect.denied`, `connect.token_issued` and every `secret.used` (purpose, field keys, whether an agent made the call).
 

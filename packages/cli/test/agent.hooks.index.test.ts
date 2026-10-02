@@ -113,7 +113,7 @@ describe('runHook — redact', () => {
   });
 
   it('prints the documented PostToolUse updatedToolOutput JSON when something was redacted', async () => {
-    const token = `bk_${'a'.repeat(24)}`;
+    const token = `bk_Prefix01_${'a'.repeat(43)}`;
     const result = await runHook(
       'redact',
       JSON.stringify({ hook_event_name: 'PostToolUse', cwd: '/repo', tool_name: 'Bash', tool_response: { stdout: `token: ${token}`, stderr: '' } }),
@@ -126,7 +126,7 @@ describe('runHook — redact', () => {
   });
 
   it('handles a plain-string tool_response', async () => {
-    const token = `bk_${'b'.repeat(24)}`;
+    const token = `bk_Prefix01_${'b'.repeat(43)}`;
     const result = await runHook('redact', JSON.stringify({ hook_event_name: 'PostToolUse', cwd: '/repo', tool_response: `x=${token}` }), {
       CLAUDE_PLUGIN_DATA: dataDir,
     });

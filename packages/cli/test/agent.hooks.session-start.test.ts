@@ -323,8 +323,8 @@ describe('sessionContext — never throws', () => {
 
 describe('sessionContext — global (shared) docs and secrets', () => {
   it('lists global documents and secrets even when the repo is unbound', async () => {
-    s.doc(null, 'hacon-vps-1', '# Hacon VPS #1');
-    s.secret(null, 'Hacon VPS #1', [
+    s.doc(null, 'vps-1', '# VPS #1');
+    s.secret(null, 'VPS #1', [
       { key: 'host', value: '203.0.113.7', sensitive: false },
       { key: 'private_key', value: 'not-a-real-key', sensitive: true },
     ]);
@@ -335,8 +335,8 @@ describe('sessionContext — global (shared) docs and secrets', () => {
 
     expect(context).toContain('not bound to a Blindkey project');
     expect(context).toContain('Global (shared across all projects');
-    expect(context).toContain('hacon-vps-1 — hacon-vps-1');
-    expect(context).toContain('Hacon VPS #1 (host, private_key*)');
+    expect(context).toContain('vps-1 — vps-1');
+    expect(context).toContain('VPS #1 (host, private_key*)');
     expect(context).not.toContain('not-a-real-key');
     expect(context).toContain('shared infrastructure memory');
     expectGoldenRules(context);

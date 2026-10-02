@@ -102,7 +102,7 @@ describe('bundles run standalone', () => {
   });
 
   it('hook.mjs redact replaces a token in Bash output', async () => {
-    const token = `bk_${'a'.repeat(32)}`;
+    const token = `bk_Prefix01_${'a'.repeat(43)}`;
     const input = JSON.stringify({ hook_event_name: 'PostToolUse', cwd: tmpdir(), tool_name: 'Bash', tool_input: { command: 'x' }, tool_response: { stdout: `t=${token}`, stderr: '' } });
     const r = await run(join(dist, 'hook.mjs'), ['redact'], baseEnv({ CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), 'blindkey-pb-')) }), input);
     expect(r.status).toBe(0);

@@ -1305,7 +1305,7 @@ function guardDecision(input, ctx) {
 
 // packages/cli/src/agent/hooks/redact.ts
 var REDACTED = "[blindkey:redacted]";
-var BLINDKEY_TOKEN_RE = /bk_[A-Za-z0-9_-]{20,}/g;
+var BLINDKEY_TOKEN_RE = /(?<![A-Za-z0-9_-])bk_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{20,}/g;
 var PEM_BLOCK_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 var AKIA_RE = /AKIA[0-9A-Z]{16}/g;
 var SENSITIVE_KEY_NAME_RE = /(PASS(WORD)?|SECRET|TOKEN|API_?KEY|PRIVATE)/i;
