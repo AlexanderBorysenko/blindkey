@@ -1,5 +1,5 @@
-import { SCOPES, type Scope } from '@pidb/shared';
-import type { PidbClient } from '../client.js';
+import { SCOPES, type Scope } from '@blindkey/shared';
+import type { BlindkeyClient } from '../client.js';
 import type { PublicToken } from '../api-types.js';
 import { CliError } from '../errors.js';
 import { fmtTime, table, type CommandResult } from '../output.js';
@@ -37,7 +37,7 @@ export function parseExpires(raw: string | undefined, now: number = Date.now()):
   return now + Number.parseInt(m[1] as string, 10) * unit;
 }
 
-export async function runTokenCreate(client: PidbClient, opts: TokenCreateOptions): Promise<CommandResult> {
+export async function runTokenCreate(client: BlindkeyClient, opts: TokenCreateOptions): Promise<CommandResult> {
   const scopes = parseScopes(opts.scopes);
   const projects =
     opts.projects === undefined
@@ -71,7 +71,7 @@ export async function runTokenCreate(client: PidbClient, opts: TokenCreateOption
   };
 }
 
-export async function runTokenList(client: PidbClient): Promise<CommandResult> {
+export async function runTokenList(client: BlindkeyClient): Promise<CommandResult> {
   const tokens = await client.json<PublicToken[]>('GET', '/api/v1/tokens');
   return {
     json: tokens,
@@ -91,8 +91,8 @@ export async function runTokenList(client: PidbClient): Promise<CommandResult> {
   };
 }
 
-export async function runTokenRevoke(client: PidbClient, id: string): Promise<CommandResult> {
-  if (!/^\d+$/.test(id.trim())) throw new CliError(`invalid token id "${id}" — expected a number (see \`pidb token list\`)`);
+export async function runTokenRevoke(client: BlindkeyClient, id: string): Promise<CommandResult> {
+  if (!/^\d+$/.test(id.trim())) throw new CliError(`invalid token id "${id}" — expected a number (see \`blindkey token list\`)`);
   await client.empty('DELETE', `/api/v1/tokens/${id.trim()}`);
   return { json: { id: Number.parseInt(id, 10), revoked: true }, text: `revoked token ${id.trim()}` };
 }

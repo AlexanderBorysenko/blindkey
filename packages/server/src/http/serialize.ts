@@ -1,4 +1,4 @@
-import type { DocCategory, ProjectStatus } from '@pidb/shared';
+import type { DocCategory, ProjectStatus } from '@blindkey/shared';
 import type { ProjectRow } from '../repos/projects.js';
 import type { DocumentRow, DocumentSummary } from '../repos/documents.js';
 import type { SecretFieldMeta, SecretMeta } from '../repos/secrets.js';

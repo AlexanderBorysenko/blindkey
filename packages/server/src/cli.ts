@@ -16,7 +16,7 @@ import { runBackup, runInit, runKeyVersions, runPasswordReset, runRotateKey, run
  */
 function openExistingDb(config: Config): Db {
   if (!existsSync(config.dbPath)) {
-    throw new Error(`no database at ${config.dbPath} — run init first (or check PIDB_DATA_DIR / the restore)`);
+    throw new Error(`no database at ${config.dbPath} — run init first (or check BLINDKEY_DATA_DIR / the restore)`);
   }
   return openDb(config.dbPath);
 }
@@ -78,7 +78,7 @@ function fatal(err: unknown): never {
   process.exit(1);
 }
 
-const program = new Command().name('pidb-server').description('Projects Info DB server');
+const program = new Command().name('blindkey-server').description('Blindkey server');
 
 program
   .command('init')
@@ -88,8 +88,8 @@ program
       const config = loadConfig();
       mkdirSync(config.dataDir, { recursive: true });
       const db = openDb(config.dbPath);
-      const username = process.env.PIDB_ADMIN_USERNAME ?? (await prompt('Admin username: '));
-      const password = process.env.PIDB_ADMIN_PASSWORD ?? (await promptHidden('Admin password: '));
+      const username = process.env.BLINDKEY_ADMIN_USERNAME ?? (await prompt('Admin username: '));
+      const password = process.env.BLINDKEY_ADMIN_PASSWORD ?? (await promptHidden('Admin password: '));
       if (!username || !password) throw new Error('username and password are required');
       const r = await runInit(db, { username, password });
       console.log(`admin: ${r.adminCreated ? 'created' : 'already exists'}; guidelines: ${r.guidelinesSeeded ? 'seeded' : 'already present'}`);
@@ -173,7 +173,7 @@ program
     try {
       const config = loadConfig();
       const db = openExistingDb(config);
-      let password = process.env.PIDB_ADMIN_PASSWORD;
+      let password = process.env.BLINDKEY_ADMIN_PASSWORD;
       if (!password) {
         password = await promptHidden('New admin password: ');
         // A second readline on piped (non-TTY) stdin can lose buffered input, so the repeat

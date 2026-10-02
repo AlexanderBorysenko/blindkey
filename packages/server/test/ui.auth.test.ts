@@ -13,7 +13,7 @@ let t: TestCtx;
 
 async function login(username = 'alex', password = 'correct horse'): Promise<string | undefined> {
   const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username, password } });
-  return res.cookies.find((c) => c.name === 'pidb_session')?.value;
+  return res.cookies.find((c) => c.name === 'blindkey_session')?.value;
 }
 
 beforeAll(async () => {
@@ -32,6 +32,15 @@ describe('ui auth', () => {
     expect(res.body).toContain('name="password"');
   });
 
+  it('brands the login page: favicon, logo, name and tagline', async () => {
+    const res = await t.app.inject({ method: 'GET', url: '/login' });
+    expect(res.body).toContain('<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"');
+    expect(res.body).toContain('href="#i-blindkey"');
+    expect(res.body).toContain('Blindkey');
+    expect(res.body).toContain('Secrets your AI agents can use but never see.');
+    expect(res.body).toMatch(/<title>[^<]*· Blindkey<\/title>/);
+  });
+
   it('renders the login page without a sidebar', async () => {
     const res = await t.app.inject({ method: 'GET', url: '/login' });
     expect(res.body).not.toContain('class="sidebar"');
@@ -48,7 +57,7 @@ describe('ui auth', () => {
     const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'correct horse' } });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/');
-    const cookie = res.cookies.find((c) => c.name === 'pidb_session');
+    const cookie = res.cookies.find((c) => c.name === 'blindkey_session');
     expect(cookie).toBeDefined();
     expect(cookie!.httpOnly).toBe(true);
     expect(cookie!.sameSite?.toLowerCase()).toBe('lax');
@@ -60,7 +69,7 @@ describe('ui auth', () => {
     const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'wrong' } });
     expect(res.statusCode).toBe(401);
     expect(res.body).toContain('Invalid username or password');
-    expect(res.cookies.find((c) => c.name === 'pidb_session')).toBeUndefined();
+    expect(res.cookies.find((c) => c.name === 'blindkey_session')).toBeUndefined();
     expect(listAudit(t.db, { limit: 5 }).some((r) => r.action === 'auth.login_failed')).toBe(true);
   });
 
@@ -71,33 +80,33 @@ describe('ui auth', () => {
 
   it('lets a session through to a page', async () => {
     const session = await login();
-    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session! } });
+    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session! } });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Projects');
   });
 
   it('rejects a POST without a CSRF token', async () => {
     const session = await login();
-    const res = await t.app.inject({ method: 'POST', url: '/logout', cookies: { pidb_session: session! }, payload: {} });
+    const res = await t.app.inject({ method: 'POST', url: '/logout', cookies: { blindkey_session: session! }, payload: {} });
     expect(res.statusCode).toBe(403);
-    const still = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session! } });
+    const still = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session! } });
     expect(still.statusCode).toBe(200);
   });
 
   it('logs out with a valid CSRF token and invalidates the session', async () => {
     const session = await login();
-    const page = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session! } });
+    const page = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session! } });
     const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)?.[1];
     expect(csrf).toBeTruthy();
-    const res = await t.app.inject({ method: 'POST', url: '/logout', cookies: { pidb_session: session! }, payload: { csrf } });
+    const res = await t.app.inject({ method: 'POST', url: '/logout', cookies: { blindkey_session: session! }, payload: { csrf } });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/login');
-    const after = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session! } });
+    const after = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session! } });
     expect(after.statusCode).toBe(302);
   });
 
   it('ignores an unknown or expired session cookie', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: 'deadbeef'.repeat(8) } });
+    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: 'deadbeef'.repeat(8) } });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/login');
   });
@@ -109,7 +118,7 @@ describe('ui auth', () => {
 
   it('does not accept the UI session cookie as auth for the JSON API', async () => {
     const session = await login();
-    const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', cookies: { pidb_session: session! } });
+    const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', cookies: { blindkey_session: session! } });
     expect(res.statusCode).toBe(401);
     expect(res.json()).toMatchObject({ error: 'unauthorized' });
   });
@@ -119,7 +128,7 @@ describe('ui auth', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/mcp',
-      cookies: { pidb_session: session! },
+      cookies: { blindkey_session: session! },
       payload: { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
     });
     expect(res.statusCode).toBe(401);
@@ -128,7 +137,7 @@ describe('ui auth', () => {
 
   it('does not mark the session cookie Secure when the request is not trusted as HTTPS', async () => {
     const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'correct horse' } });
-    const cookie = res.cookies.find((c) => c.name === 'pidb_session');
+    const cookie = res.cookies.find((c) => c.name === 'blindkey_session');
     expect(cookie).toBeDefined();
     expect(cookie!.secure).toBeFalsy();
   });
@@ -145,7 +154,7 @@ describe('ui auth', () => {
       headers: { 'x-forwarded-proto': 'https' },
       payload: { username: 'alex', password: 'correct horse' },
     });
-    const cookie = res.cookies.find((c) => c.name === 'pidb_session');
+    const cookie = res.cookies.find((c) => c.name === 'blindkey_session');
     expect(cookie).toBeDefined();
     expect(cookie!.secure).toBe(true);
     await app.close();

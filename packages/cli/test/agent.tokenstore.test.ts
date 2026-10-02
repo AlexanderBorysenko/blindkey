@@ -10,18 +10,18 @@ describe('memoryStore', () => {
 
   it('set/get/delete round-trip', async () => {
     const store = memoryStore();
-    await store.set('work', 'pidb_abc123');
-    expect(await store.get('work')).toBe('pidb_abc123');
+    await store.set('work', 'bk_abc123');
+    expect(await store.get('work')).toBe('bk_abc123');
     await store.delete('work');
     expect(await store.get('work')).toBeNull();
   });
 
   it('accepts a seed map and keeps profiles independent', async () => {
-    const store = memoryStore({ work: 'pidb_seed' });
-    expect(await store.get('work')).toBe('pidb_seed');
+    const store = memoryStore({ work: 'bk_seed' });
+    expect(await store.get('work')).toBe('bk_seed');
     expect(await store.get('personal')).toBeNull();
-    await store.set('personal', 'pidb_other');
-    expect(await store.get('work')).toBe('pidb_seed');
+    await store.set('personal', 'bk_other');
+    expect(await store.get('work')).toBe('bk_seed');
   });
 });
 
@@ -55,9 +55,9 @@ describe('keyringStore', () => {
     }
     const store = keyringStore('/nonexistent/data/dir', () => ({ Entry: FakeEntry }));
     expect(await store.get('work')).toBeNull();
-    await store.set('work', 'pidb_fake');
-    expect(await store.get('work')).toBe('pidb_fake');
-    expect(saved.get('pidb:profile:work')).toBe('pidb_fake');
+    await store.set('work', 'bk_fake');
+    expect(await store.get('work')).toBe('bk_fake');
+    expect(saved.get('blindkey:profile:work')).toBe('bk_fake');
     await store.delete('work');
     expect(await store.get('work')).toBeNull();
   });

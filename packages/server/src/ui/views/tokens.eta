@@ -19,7 +19,7 @@
       <div><button class="btn sm ghost" type="button" data-action="copy-new-token">Copy</button></div>
     </div>
   </div>
-  <p class="note">Copy it now: pidb stores only a hash, so this value cannot be shown again.</p>
+  <p class="note">Copy it now: blindkey stores only a hash, so this value cannot be shown again.</p>
 </div>
 <% } %>
 
@@ -90,7 +90,7 @@
 
       <form method="post" action="/tokens/<%= t.id %>/label" class="form-grid">
         <input type="hidden" name="csrf" value="<%= it.csrf %>" />
-        <label>Name shown here <input name="label" value="<%= t.label || '' %>" maxlength="100" placeholder="e.g. Easy Renovation · home PC" /></label>
+        <label>Name shown here <input name="label" value="<%= t.label || '' %>" maxlength="100" placeholder="e.g. Acme Shop · home PC" /></label>
         <p class="note">Only for telling tokens apart. Leave empty to show <%= t.name %>.<% if (t.kind === 'agent') { %> A reconnect of the same session keeps it.<% } %></p>
         <div class="actions"><button class="btn primary" type="submit">Save name</button></div>
       </form>

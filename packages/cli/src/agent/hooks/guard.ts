@@ -6,9 +6,9 @@
 //
 // Fix round 4 — SEGMENT model throughout (see `shell.ts`): a Bash command is expanded into segments
 // by recursively unwrapping `sh|bash|zsh|dash|ksh -<flags with c> '<script>'`, `powershell|pwsh -c`,
-// `cmd /c|/k`, and `pidb secret exec ... -- <child>`, splitting on newlines/`;`/`&&`/`||`/`|`/`&`/
+// `cmd /c|/k`, and `blindkey secret exec ... -- <child>`, splitting on newlines/`;`/`&&`/`||`/`|`/`&`/
 // `(`/`)` and command substitutions (also inside double quotes). Every segment carries its effective
-// cwd (`cd` tracking) and whether it runs inside a `pidb secret exec` child. Each rule then looks at
+// cwd (`cd` tracking) and whether it runs inside a `blindkey secret exec` child. Each rule then looks at
 // segments' resolved command words (basename, prefixes such as `env`/`sudo`/`time`/`npx` skipped)
 // instead of raw text. Path matching lives in `paths.ts`.
 //
@@ -78,7 +78,7 @@ interface Segment {
   index: number;
   /** Effective working directory (after preceding `cd`s in the same script). */
   cwd: string;
-  /** Whether this segment runs inside (or after) a `pidb secret exec ... --` child. */
+  /** Whether this segment runs inside (or after) a `blindkey secret exec ... --` child. */
   inExec: boolean;
   /** The sibling segments of the same script (for `find ... | xargs cat`). */
   group: Segment[];
@@ -87,12 +87,12 @@ interface Segment {
 const MAX_DEPTH = 8;
 const CD_WORDS = new Set(['cd', 'pushd', 'chdir', 'set-location', 'sl']);
 
-function isPidbWord(word: string | null): boolean {
-  return word === 'pidb';
+function isBlindkeyWord(word: string | null): boolean {
+  return word === 'blindkey';
 }
 
-/** pidb's own args (between the command word and its first exact `--`) and the child text after it. */
-function pidbArgs(seg: Segment): { own: string[]; childStart: number | null; hasDashDash: boolean } {
+/** blindkey's own args (between the command word and its first exact `--`) and the child text after it. */
+function blindkeyArgs(seg: Segment): { own: string[]; childStart: number | null; hasDashDash: boolean } {
   const after = seg.tokens.slice(seg.index + 1);
   const dd = after.indexOf('--');
   if (dd === -1) return { own: after, childStart: null, hasDashDash: false };
@@ -101,8 +101,8 @@ function pidbArgs(seg: Segment): { own: string[]; childStart: number | null; has
 }
 
 function isSecretExec(seg: Segment): boolean {
-  if (!isPidbWord(seg.word)) return false;
-  const own = pidbArgs(seg).own.map((t) => t.toLowerCase());
+  if (!isBlindkeyWord(seg.word)) return false;
+  const own = blindkeyArgs(seg).own.map((t) => t.toLowerCase());
   const s = own.indexOf('secret');
   return s !== -1 && own[s + 1] === 'exec';
 }
@@ -127,7 +127,7 @@ function expandSegments(text: string, cwd: string, ctx: GuardContext, inExec = f
       // Everything after the exec in the same script is treated as the child too (a trailing `; env`
       // or a newline after `--` is almost certainly meant for it) — biased toward catching leaks.
       execSeen = true;
-      const { childStart } = pidbArgs(seg);
+      const { childStart } = blindkeyArgs(seg);
       if (childStart !== null) expandSegments(raw.slice(childStart), seg.cwd, ctx, true, depth + 1, out);
     }
   }
@@ -135,19 +135,19 @@ function expandSegments(text: string, cwd: string, ctx: GuardContext, inExec = f
 }
 
 // =================================================================================================
-// Rule 1: `pidb` + a disabled subcommand — only pidb's OWN args (before its own first ` -- `).
+// Rule 1: `blindkey` + a disabled subcommand — only blindkey's OWN args (before its own first ` -- `).
 // =================================================================================================
 
 /**
  * Any segment — top-level, chained, substituted (`$(...)`/backticks, also inside double quotes),
- * unwrapped from `sh -c`/`cmd /c`, or itself an exec child — whose command word is `pidb` (by
+ * unwrapped from `sh -c`/`cmd /c`, or itself an exec child — whose command word is `blindkey` (by
  * basename, after `npx`/`npm exec`/`pnpm`/`time`/... prefixes) with `login`/`token` as its first
  * arg, or `secret` followed by an exact `get`/`--print` token.
  */
-function runsDisabledPidbCommand(segments: Segment[]): boolean {
+function runsDisabledBlindkeyCommand(segments: Segment[]): boolean {
   return segments.some((seg) => {
-    if (!isPidbWord(seg.word)) return false;
-    const own = pidbArgs(seg).own;
+    if (!isBlindkeyWord(seg.word)) return false;
+    const own = blindkeyArgs(seg).own;
     const next = (own[0] ?? '').toLowerCase();
     if (next === 'login' || next === 'token') return true;
     if (next !== 'secret') return false;
@@ -156,10 +156,10 @@ function runsDisabledPidbCommand(segments: Segment[]): boolean {
 }
 
 // =================================================================================================
-// Rule 2: `pidb secret exec`'s child printing the environment.
+// Rule 2: `blindkey secret exec`'s child printing the environment.
 // =================================================================================================
 
-const PIDB_VAR_REF = /\$\{?PIDB_[A-Za-z0-9_]*\}?|%PIDB_[A-Za-z0-9_]*%|\$\{?env:PIDB_[A-Za-z0-9_]*\}?/i;
+const BLINDKEY_VAR_REF = /\$\{?BLINDKEY_[A-Za-z0-9_]*\}?|%BLINDKEY_[A-Za-z0-9_]*%|\$\{?env:BLINDKEY_[A-Za-z0-9_]*\}?/i;
 const PRINT_WORDS = new Set([
   'echo', 'printf', 'print', 'write-output', 'write', 'write-host', 'write-information', 'write-error',
   'write-warning', 'write-verbose', 'out-host', 'out-default', 'echo.', 'cat', 'type', 'tee', 'say',
@@ -231,13 +231,13 @@ function inlineCodeOf(seg: Segment): InlineCode | null {
 function segmentPrintsEnvironment(seg: Segment): boolean {
   const word = seg.word ?? '';
   const args = seg.tokens.slice(seg.index + 1);
-  if (/^\$\{?env:pidb_[a-z0-9_]*\}?$/i.test(word)) return true; // bare PowerShell expression statement
+  if (/^\$\{?env:BLINDKEY_[a-z0-9_]*\}?$/i.test(word)) return true; // bare PowerShell expression statement
   if (word === 'env' || word === 'printenv' || word === 'typeset') return true;
   if (word === 'export' && (args.length === 0 || args[0] === '-p')) return true;
   if (word === 'declare' && args.every((a) => a.startsWith('-'))) return true;
   if (word === 'compgen' && args.some((a) => a === '-v' || a === '-e')) return true;
-  if (word === 'set' && (args.length === 0 || /^pidb/i.test(args[0]!))) return true;
-  if (PRINT_WORDS.has(word) && PIDB_VAR_REF.test(seg.raw)) return true;
+  if (word === 'set' && (args.length === 0 || /^blindkey/i.test(args[0]!))) return true;
+  if (PRINT_WORDS.has(word) && BLINDKEY_VAR_REF.test(seg.raw)) return true;
   if (ENV_PROVIDER_WORDS.has(word) && args.some((a) => /^env:/i.test(a))) return true;
   if (DOTNET_GETENV_RE.test(seg.raw) || PROC_ENVIRON_RE.test(seg.raw)) return true;
   const inline = inlineCodeOf(seg);
@@ -248,7 +248,7 @@ function segmentPrintsEnvironment(seg: Segment): boolean {
 }
 
 // =================================================================================================
-// Rule 3: protected paths (plugin data dir, `~/.config/pidb`, `%APPDATA%\pidb`, `written.json`).
+// Rule 3: protected paths (plugin data dir, `~/.config/blindkey`, `%APPDATA%\blindkey`, `written.json`).
 // =================================================================================================
 
 const READ_WORDS = new Set([
@@ -505,7 +505,7 @@ function readsCredentialStore(command: string, segments: Segment[]): boolean {
 }
 
 // =================================================================================================
-// Rule 5: direct HTTP against a configured pidb server.
+// Rule 5: direct HTTP against a configured blindkey server.
 // =================================================================================================
 
 const NETWORK_WORDS = new Set([
@@ -540,43 +540,43 @@ function targetsConfiguredServer(command: string, segments: Segment[], ctx: Guar
 // =================================================================================================
 
 /**
- * Escaping agent mode (spec §2.3): a user-installed `pidb` runs in agent mode because Claude Code sets
- * `CLAUDECODE=1`; `PIDB_ALLOW_USER_MODE=1` is the *user's* opt-out, and clearing/overriding
+ * Escaping agent mode (spec §2.3): a user-installed `blindkey` runs in agent mode because Claude Code sets
+ * `CLAUDECODE=1`; `BLINDKEY_ALLOW_USER_MODE=1` is the *user's* opt-out, and clearing/overriding
  * `CLAUDECODE` would defeat it too — neither is for the agent.
  */
-const AGENT_MODE_ESCAPE_RE = /\bPIDB_ALLOW_USER_MODE\b|\bCLAUDECODE\s*=|(?:\s-u\s*|--unset[=\s]\s*|\bunset\s+(?:-v\s+)?)CLAUDECODE\b|env:CLAUDECODE\b/i;
+const AGENT_MODE_ESCAPE_RE = /\bBLINDKEY_ALLOW_USER_MODE\b|\bCLAUDECODE\s*=|(?:\s-u\s*|--unset[=\s]\s*|\bunset\s+(?:-v\s+)?)CLAUDECODE\b|env:CLAUDECODE\b/i;
 
 function guardBashCommand(command: string, cwd: string, ctx: GuardContext): GuardDecision {
   if (AGENT_MODE_ESCAPE_RE.test(command)) {
-    return deny('switching pidb out of agent mode (PIDB_ALLOW_USER_MODE / CLAUDECODE) is for the user only — ask the user to run this themselves.');
+    return deny('switching blindkey out of agent mode (BLINDKEY_ALLOW_USER_MODE / CLAUDECODE) is for the user only — ask the user to run this themselves.');
   }
   const segments = expandSegments(command, cwd, ctx);
-  if (runsDisabledPidbCommand(segments)) {
+  if (runsDisabledBlindkeyCommand(segments)) {
     return deny(
-      'pidb login/token/secret get/--print are not available to the Claude agent — ask the user to run this themselves, or use `pidb connect`/`pidb secret exec` instead.',
+      'blindkey login/token/secret get/--print are not available to the Claude agent — ask the user to run this themselves, or use `blindkey connect`/`blindkey secret exec` instead.',
     );
   }
   if (segments.some((s) => s.inExec && segmentPrintsEnvironment(s))) {
     return deny(
-      'this looks like it would print the environment inside `pidb secret exec`, which would leak the substituted secret — use the value only inside the invoked program, e.g. `pidb secret exec <target> "<name>" -- npm test`.',
+      'this looks like it would print the environment inside `blindkey secret exec`, which would leak the substituted secret — use the value only inside the invoked program, e.g. `blindkey secret exec <target> "<name>" -- npm test`.',
     );
   }
   const access = segments.map((s) => segmentReadsProtected(s, ctx));
   if (!access.includes('read') && access.includes('overwrite')) {
     return deny(
-      'this would overwrite a pidb-written secret file (produced by `pidb secret write|env`) — regenerate it with `pidb secret write|env --out <file>` instead, or write to a different path.',
+      'this would overwrite a blindkey-written secret file (produced by `blindkey secret write|env`) — regenerate it with `blindkey secret write|env --out <file>` instead, or write to a different path.',
     );
   }
   if (access.includes('read')) {
     return deny(
-      "this command reads pidb's protected data (the plugin data dir, its config, or a file `pidb secret write|env` produced) — use the pidb CLI/MCP tools instead of reading it directly.",
+      "this command reads blindkey's protected data (the plugin data dir, its config, or a file `blindkey secret write|env` produced) — use the Blindkey CLI/MCP tools instead of reading it directly.",
     );
   }
   if (readsCredentialStore(command, segments)) {
-    return deny('reading the OS credential store directly is not available to the agent — use `pidb connect` (or the MCP tools) instead.');
+    return deny('reading the OS credential store directly is not available to the agent — use `blindkey connect` (or the MCP tools) instead.');
   }
   if (targetsConfiguredServer(command, segments, ctx)) {
-    return deny('direct HTTP calls to the pidb server are not available to the agent — use the pidb MCP tools or CLI instead.');
+    return deny('direct HTTP calls to the Blindkey server are not available to the agent — use the blindkey MCP tools or CLI instead.');
   }
   return ALLOW;
 }
@@ -587,7 +587,7 @@ function guardBashCommand(command: string, cwd: string, ctx: GuardContext): Guar
 
 const PATH_KEYS = ['file_path', 'path', 'notebook_path'];
 const PROTECTED_PATH_REASON =
-  "this path is inside pidb's protected data (the plugin data dir, its config, or a file `pidb secret write|env` produced) — use the pidb CLI/MCP tools instead of reading it directly.";
+  "this path is inside blindkey's protected data (the plugin data dir, its config, or a file `blindkey secret write|env` produced) — use the Blindkey CLI/MCP tools instead of reading it directly.";
 
 function collectStrings(value: unknown, depth = 0): string[] {
   if (depth > 8) return [];
@@ -621,7 +621,7 @@ function guardGrepTool(toolInput: HookToolInput, cwd: string, ctx: GuardContext)
   const hits = admittedProtected(root, globs, types, ctx);
   if (hits.length === 0) return ALLOW;
   return deny(
-    `this search would reach a file \`pidb secret write|env\` produced (${hits.slice(0, 5).join(', ')}) — ` +
+    `this search would reach a file \`blindkey secret write|env\` produced (${hits.slice(0, 5).join(', ')}) — ` +
       'pass a `path` that does not contain it, or a `glob`/`type` that excludes it (e.g. `glob: "*.ts"`), and never read that file.',
   );
 }

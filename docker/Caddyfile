@@ -1,8 +1,8 @@
 {
-	email {$PIDB_ACME_EMAIL}
+	email {$BLINDKEY_ACME_EMAIL}
 }
 
-{$PIDB_DOMAIN} {
+{$BLINDKEY_DOMAIN} {
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000"
 	reverse_proxy server:8080

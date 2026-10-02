@@ -5,9 +5,9 @@ import type { AppContext } from '../http/context.js';
 import { getSession, purgeExpiredSessions } from '../repos/admin.js';
 import { isUiRequest } from './render.js';
 
-export const SESSION_COOKIE = 'pidb_session';
+export const SESSION_COOKIE = 'blindkey_session';
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-export const CHALLENGE_COOKIE = 'pidb_2fa';
+export const CHALLENGE_COOKIE = 'blindkey_2fa';
 export const CHALLENGE_TTL_S = 300;
 
 export function uiSessionId(req: FastifyRequest): string | null {

@@ -36,7 +36,7 @@ async function readStdin(): Promise<string> {
 export async function main(): Promise<void> {
   const kindArg = process.argv[2];
   if (!isValidKind(kindArg)) {
-    console.error(`pidb hook: unknown or missing kind "${kindArg ?? ''}" (expected guard|redact|session-start)`);
+    console.error(`blindkey hook: unknown or missing kind "${kindArg ?? ''}" (expected guard|redact|session-start)`);
     process.exit(0);
   }
 
@@ -89,7 +89,7 @@ if (isEntryPoint()) {
   void main().catch((err: unknown) => {
     // `runHook` itself is documented to never throw, but guard the process boundary too — a bug that
     // somehow escapes it must still never crash Claude Code's tool loop.
-    console.error(`pidb hook: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`blindkey hook: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(0);
   });
 }

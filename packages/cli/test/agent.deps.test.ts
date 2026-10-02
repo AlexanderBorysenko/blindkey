@@ -8,10 +8,10 @@ import { sessionContext } from '../src/agent/hooks/session-start.js';
 import { memoryStore } from '../src/agent/tokenstore.js';
 
 function fakePluginRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'pidb-plugin-root-'));
+  const root = mkdtempSync(join(tmpdir(), 'blindkey-plugin-root-'));
   mkdirSync(join(root, '.claude-plugin'));
-  writeFileSync(join(root, '.claude-plugin', 'plugin.json'), '{"name":"pidb"}');
-  writeFileSync(join(root, 'package.json'), '{"name":"pidb-plugin-runtime","private":true,"dependencies":{"@napi-rs/keyring":"^2.1.0"}}');
+  writeFileSync(join(root, '.claude-plugin', 'plugin.json'), '{"name":"blindkey"}');
+  writeFileSync(join(root, 'package.json'), '{"name":"blindkey-plugin-runtime","private":true,"dependencies":{"@napi-rs/keyring":"^2.1.0"}}');
   return root;
 }
 
@@ -55,7 +55,7 @@ describe('ensureDeps', () => {
   const never = (): boolean => false;
 
   it('does nothing when the keyring module is installed and loads', () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-'));
     mkdirSync(join(dataDir, 'node_modules', '@napi-rs', 'keyring'), { recursive: true });
     writeFileSync(join(dataDir, 'node_modules', '@napi-rs', 'keyring', 'package.json'), '{}');
     const calls: Call[] = [];
@@ -64,7 +64,7 @@ describe('ensureDeps', () => {
   });
 
   it('reinstalls when the package is present but does not load (e.g. missing platform binding)', () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-'));
     mkdirSync(join(dataDir, 'node_modules', '@napi-rs', 'keyring'), { recursive: true });
     writeFileSync(join(dataDir, 'node_modules', '@napi-rs', 'keyring', 'package.json'), '{}');
     const calls: Call[] = [];
@@ -74,15 +74,15 @@ describe('ensureDeps', () => {
   });
 
   it('does nothing outside an installed plugin (dev: no plugin.json next to package.json)', () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-'));
     const calls: Call[] = [];
     expect(ensureDeps({ dataDir, pluginRoot: mkdtempSync(join(tmpdir(), 'nope-')), spawnImpl: recordingSpawn(calls), canLoad: never })).toBeUndefined();
     expect(calls).toHaveLength(0);
   });
 
   it('claims the marker (wx) BEFORE spawning, copies package.json, and spawns the detached node wrapper around npm', () => {
-    const base = mkdtempSync(join(tmpdir(), 'pidb-deps-'));
-    const dataDir = join(base, 'data', 'pidb-pidb'); // not created yet
+    const base = mkdtempSync(join(tmpdir(), 'blindkey-deps-'));
+    const dataDir = join(base, 'data', 'blindkey-blindkey'); // not created yet
     const root = fakePluginRoot();
     const calls: Call[] = [];
     let markerAtSpawn: string | null = null;
@@ -107,7 +107,7 @@ describe('ensureDeps', () => {
   });
 
   it('never starts a second install while one is running; retries once it is 10 min stale', () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-'));
     const root = fakePluginRoot();
     const calls: Call[] = [];
     const spawnImpl = recordingSpawn(calls);
@@ -120,7 +120,7 @@ describe('ensureDeps', () => {
   });
 
   it('a running marker left by another session is respected (no second install)', () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-'));
     const calls: Call[] = [];
     writeFileSync(join(dataDir, MARKER), JSON.stringify({ startedAt: 5_000 }));
     expect(ensureDeps({ dataDir, pluginRoot: fakePluginRoot(), env: {}, spawnImpl: recordingSpawn(calls), now: () => 6_000, canLoad: never })).toMatch(/still installing/);
@@ -128,7 +128,7 @@ describe('ensureDeps', () => {
   });
 
   it('reports a failed install with the log path, and retries after 10 min', () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-'));
     writeFileSync(join(dataDir, MARKER), JSON.stringify({ startedAt: 1_000, finishedAt: 2_000, exitCode: 1 }));
     const calls: Call[] = [];
     const root = fakePluginRoot();
@@ -142,7 +142,7 @@ describe('ensureDeps', () => {
   });
 
   it('reports (never throws) when the wrapper cannot be started, and releases the claim', () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-'));
     const note = ensureDeps({
       dataDir,
       pluginRoot: fakePluginRoot(),
@@ -167,7 +167,7 @@ describe('WRAPPER_SCRIPT (real subprocess)', () => {
   }
 
   it('records the child exit status in the marker', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-wrap-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-wrap-'));
     await runWrapper(dataDir, { command: process.execPath, args: ['-e', 'process.exit(3)'] });
     const marker = JSON.parse(readFileSync(join(dataDir, MARKER), 'utf8')) as { startedAt: number; finishedAt: number; exitCode: number };
     expect(marker.startedAt).toBe(1234);
@@ -176,7 +176,7 @@ describe('WRAPPER_SCRIPT (real subprocess)', () => {
   });
 
   it('records -1 when the command cannot be spawned', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-wrap-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-wrap-'));
     await runWrapper(dataDir, { command: join(dataDir, 'no-such-npm'), args: [] });
     const marker = JSON.parse(readFileSync(join(dataDir, MARKER), 'utf8')) as { exitCode: number };
     expect(marker.exitCode).toBe(-1);
@@ -185,17 +185,17 @@ describe('WRAPPER_SCRIPT (real subprocess)', () => {
 
 describe('sessionContext surfaces the ensureDeps note', () => {
   it('prepends a string returned by ensureDeps', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-ctx-'));
-    const context = await sessionContext({ cwd: dataDir, dataDir, store: memoryStore(), ensureDeps: () => 'pidb: installing plugin dependencies…' });
-    expect(context.startsWith('pidb: installing plugin dependencies…')).toBe(true);
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-ctx-'));
+    const context = await sessionContext({ cwd: dataDir, dataDir, store: memoryStore(), ensureDeps: () => 'blindkey: installing plugin dependencies…' });
+    expect(context.startsWith('blindkey: installing plugin dependencies…')).toBe(true);
     expect(context).toContain('Golden rules:');
   });
 
   it('keeps the note in the fallback status when building the context fails', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-deps-ctx-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-deps-ctx-'));
     writeFileSync(join(dataDir, 'profiles.json'), '{ not json');
-    const context = await sessionContext({ cwd: dataDir, dataDir, store: memoryStore(), ensureDeps: () => 'pidb: installing plugin dependencies…' });
-    expect(context.startsWith('pidb: installing plugin dependencies…\npidb: session context unavailable (')).toBe(true);
+    const context = await sessionContext({ cwd: dataDir, dataDir, store: memoryStore(), ensureDeps: () => 'blindkey: installing plugin dependencies…' });
+    expect(context.startsWith('blindkey: installing plugin dependencies…\nblindkey: session context unavailable (')).toBe(true);
     expect(context).toContain('Golden rules:');
   });
 });

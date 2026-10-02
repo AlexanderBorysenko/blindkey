@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { projectInputSchema, projectPatchSchema } from '@pidb/shared';
+import { projectInputSchema, projectPatchSchema } from '@blindkey/shared';
 import type { AppContext } from '../context.js';
 import { actorOf, parseBody, principalOf } from '../helpers.js';
 import { createProjectFor, deleteProjectFor, getProjectDetailFor, listProjectsFor, updateProjectFor } from '../../services/projects.js';

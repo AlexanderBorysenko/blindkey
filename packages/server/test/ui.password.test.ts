@@ -13,7 +13,7 @@ function main(html: string): string {
 }
 
 async function refreshCsrf(t: TestCtx, session: string): Promise<string> {
-  const res = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+  const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
   return /name="csrf" value="([^"]+)"/.exec(res.body)![1]!;
 }
 
@@ -26,12 +26,12 @@ describe('ui password change — no 2FA', () => {
     t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('old-password!!'));
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'old-password!!' } });
-    session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
     csrf = await refreshCsrf(t, session);
   });
 
   it('1. GET shows current/next/confirm and no code field, no-store', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/settings/password', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/settings/password', cookies: { blindkey_session: session } });
     expect(res.statusCode).toBe(200);
     expect(res.headers['cache-control']).toContain('no-store');
     const body = main(res.body);
@@ -46,7 +46,7 @@ describe('ui password change — no 2FA', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'nope', next: 'brand-new-pass1', confirm: 'brand-new-pass1' },
     });
     expect(res.statusCode).toBe(400);
@@ -61,7 +61,7 @@ describe('ui password change — no 2FA', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'old-password!!', next: 'brand-new-pass1', confirm: 'different-pass1' },
     });
     expect(res.statusCode).toBe(400);
@@ -72,7 +72,7 @@ describe('ui password change — no 2FA', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'old-password!!', next: 'elevenchars', confirm: 'elevenchars' },
     });
     expect(res.statusCode).toBe(400);
@@ -83,7 +83,7 @@ describe('ui password change — no 2FA', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'old-password!!', next: 'old-password!!', confirm: 'old-password!!' },
     });
     expect(res.statusCode).toBe(400);
@@ -94,7 +94,7 @@ describe('ui password change — no 2FA', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { current: 'old-password!!', next: 'brand-new-pass1', confirm: 'brand-new-pass1' },
     });
     expect(res.statusCode).toBe(403);
@@ -102,12 +102,12 @@ describe('ui password change — no 2FA', () => {
 
   it('6. success redirects 303, revokes other sessions, keeps the current one, and audits sessions_revoked', async () => {
     const other = createSession(t.db, 1, SESSION_TTL_MS, '', '');
-    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: other } })).statusCode).toBe(200);
+    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: other } })).statusCode).toBe(200);
 
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'old-password!!', next: 'brand-new-pass1', confirm: 'brand-new-pass1' },
     });
     expect(res.statusCode).toBe(303);
@@ -118,8 +118,8 @@ describe('ui password change — no 2FA', () => {
     const newLogin = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'brand-new-pass1' } });
     expect(newLogin.statusCode).toBe(302);
 
-    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: other } })).statusCode).toBe(302);
-    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: session } })).statusCode).toBe(200);
+    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: other } })).statusCode).toBe(302);
+    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } })).statusCode).toBe(200);
 
     const rows = listAudit(t.db, { action: 'auth.password_changed', limit: 1 });
     expect(rows).toHaveLength(1);
@@ -137,7 +137,7 @@ describe('ui password change — no 2FA', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'brand-new-pass1', next: 'another-new-pass1', confirm: 'another-new-pass1' },
     });
     expect(res.statusCode).toBe(303);
@@ -160,7 +160,7 @@ describe('ui password change — with 2FA enabled', () => {
     t = await makeTestApp();
     createAdmin(t.db, 'bob', await hashPassword('correct-password1'));
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'correct-password1' } });
-    session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
     csrf = await refreshCsrf(t, session);
     startEnrollment(t.ctx, 1);
     const codes = await confirmEnrollment(
@@ -174,7 +174,7 @@ describe('ui password change — with 2FA enabled', () => {
   });
 
   it('1. GET shows a code field when 2FA is on', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/settings/password', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/settings/password', cookies: { blindkey_session: session } });
     expect(main(res.body)).toContain('name="code"');
   });
 
@@ -182,7 +182,7 @@ describe('ui password change — with 2FA enabled', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'correct-password1', next: 'brand-new-pass1', confirm: 'brand-new-pass1', code: '' },
     });
     expect(res.statusCode).toBe(400);
@@ -194,7 +194,7 @@ describe('ui password change — with 2FA enabled', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'correct-password1', next: 'brand-new-pass1', confirm: 'brand-new-pass1', code: '000000' },
     });
     expect(res.statusCode).toBe(400);
@@ -210,7 +210,7 @@ describe('ui password change — with 2FA enabled', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'correct-password1', next: 'brand-new-pass1', confirm: 'brand-new-pass1', code: codeFor(1) },
     });
     expect(res.statusCode).toBe(429);
@@ -229,7 +229,7 @@ describe('ui password change — with 2FA enabled', () => {
     const mismatched = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'correct-password1', next: 'brand-new-pass1', confirm: 'different-pass1', code },
     });
     expect(mismatched.statusCode).toBe(400);
@@ -240,7 +240,7 @@ describe('ui password change — with 2FA enabled', () => {
     const success = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'correct-password1', next: 'brand-new-pass1', confirm: 'brand-new-pass1', code },
     });
     expect(success.statusCode).toBe(303);
@@ -254,7 +254,7 @@ describe('ui password change — with 2FA enabled', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/password',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, current: 'brand-new-pass1', next: 'another-new-pass1', confirm: 'another-new-pass1', code },
     });
     expect(res.statusCode).toBe(303);

@@ -1,10 +1,10 @@
-import type { PidbClient } from '../client.js';
+import type { BlindkeyClient } from '../client.js';
 import { seg } from '../client.js';
 import type { ProjectDetail, PublicProject, SearchResult } from '../api-types.js';
 import { fmtTime, table, type CommandResult } from '../output.js';
 import { CliError, EXIT_AUTH } from '../errors.js';
 
-export async function runProjectsList(client: PidbClient): Promise<CommandResult> {
+export async function runProjectsList(client: BlindkeyClient): Promise<CommandResult> {
   const projects = await client.json<PublicProject[]>('GET', '/api/v1/projects');
   return {
     json: projects,
@@ -15,7 +15,7 @@ export async function runProjectsList(client: PidbClient): Promise<CommandResult
   };
 }
 
-export async function runProjectsGet(client: PidbClient, slug: string): Promise<CommandResult> {
+export async function runProjectsGet(client: BlindkeyClient, slug: string): Promise<CommandResult> {
   const detail = await client.json<ProjectDetail>('GET', `/api/v1/projects/${seg(slug)}`);
   const sections = [
     `${detail.slug}  ${detail.name}  [${detail.status}]${detail.tags.length ? `  tags: ${detail.tags.join(',')}` : ''}`,
@@ -30,11 +30,11 @@ export async function runProjectsGet(client: PidbClient, slug: string): Promise<
       s.tags.join(','),
       s.description,
     ])));
-  sections.push('', '* = sensitive; consume values with `pidb secret exec|write|env`');
+  sections.push('', '* = sensitive; consume values with `blindkey secret exec|write|env`');
   return { json: detail, text: sections.join('\n') };
 }
 
-export async function runSearch(client: PidbClient, query: string): Promise<CommandResult> {
+export async function runSearch(client: BlindkeyClient, query: string): Promise<CommandResult> {
   const result = await client.json<SearchResult>('GET', '/api/v1/search', { query: { q: query } });
   const sections: string[] = [];
   if (result.projects) {

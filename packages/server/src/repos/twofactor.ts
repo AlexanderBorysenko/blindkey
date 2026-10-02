@@ -166,7 +166,7 @@ export function rewrapTotpSecrets(db: Db, ring: KeyRing): number {
   })();
 }
 
-/** One status per key_version present in `admin_totp`, for `pidb-server key-versions` (spec §4). */
+/** One status per key_version present in `admin_totp`, for `blindkey-server key-versions` (spec §4). */
 export function totpKeyVersionReport(db: Db, ring: KeyRing): KeyVersionStatus[] {
   const rows = db.prepare(`SELECT admin_id, secret_enc, key_version, enabled_at, last_used_step, created_at FROM admin_totp ORDER BY key_version`).all() as TotpRow[];
   return keyVersionReport(rows, (row) => row.key_version, ring, (row, key) => open(key, row.secret_enc, aad(row.admin_id)));

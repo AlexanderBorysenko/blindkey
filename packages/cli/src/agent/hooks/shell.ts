@@ -62,7 +62,7 @@ const DQ_ESCAPABLE = new Set(['"', '\\', '$', '`']);
  * stripped (`"get token"` is ONE token, `''` is an explicit empty token); `$(...)` and `` `...` `` are
  * kept whole inside their token. Backslash escapes are resolved only where POSIX and Windows paths
  * can't be confused: inside double quotes before `"`/`\`/`$`/`` ` ``, and unquoted before a quote or
- * whitespace — so `.\.env` and `%APPDATA%\pidb` survive intact.
+ * whitespace — so `.\.env` and `%APPDATA%\blindkey` survive intact.
  */
 export function tokenizeSpans(text: string): Token[] {
   const tokens: Token[] = [];
@@ -266,7 +266,7 @@ function consumeHeredocBodies(text: string, from: number, docs: Array<{ delim: s
     const ownerTokens = tokenize(doc.owner);
     let owner = commandWordOf(ownerTokens).word;
     const dd = ownerTokens.indexOf('--');
-    if (owner === 'pidb' && dd !== -1) owner = commandWordOf(ownerTokens.slice(dd + 1)).word; // `pidb secret exec ... -- sh <<EOF`
+    if (owner === 'blindkey' && dd !== -1) owner = commandWordOf(ownerTokens.slice(dd + 1)).word; // `blindkey secret exec ... -- sh <<EOF`
     if (owner && SCRIPT_CONSUMERS.has(owner)) out.push(...splitSegments(lines.join('\n')));
   }
   return i;

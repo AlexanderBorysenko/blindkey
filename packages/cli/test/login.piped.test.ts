@@ -11,26 +11,26 @@ import type { Actor } from '../../server/src/auth/principal.js';
 import type { AppContext } from '../../server/src/http/context.js';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
-const baseEnv = (dir: string) => ({ PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_CONFIG_HOME: dir });
+const baseEnv = (dir: string) => ({ PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', BLINDKEY_CONFIG_HOME: dir });
 
 /**
- * `pidb login` reads its prompts from real stdin (packages/cli/src/prompt.ts),
+ * `blindkey login` reads its prompts from real stdin (packages/cli/src/prompt.ts),
  * not the injectable `LoginIo` used by login.test.ts. These tests spawn the
  * actual CLI with a piped, non-TTY stdin carrying several newline-separated
  * answers, to exercise the shared line reader end to end — the bug this
  * guards against only reproduces across a real process boundary with a real
  * pipe, never via the in-process `io` fixture.
  */
-describe('pidb login — piped (non-interactive) stdin', () => {
+describe('blindkey login — piped (non-interactive) stdin', () => {
   it('answers a piped username + password prompt sequence (no 2FA)', async () => {
     const s = await makeServer();
     try {
       await s.admin('alex', 'correct horse battery');
-      const dir = mkdtempSync(join(tmpdir(), 'pidb-piped-'));
+      const dir = mkdtempSync(join(tmpdir(), 'blindkey-piped-'));
       const r = await runCliAsync(['login', s.url], baseEnv(dir), repoRoot, 'alex\ncorrect horse battery\n');
       expect(r.status).toBe(0);
       const saved = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { token: string };
-      expect(saved.token).toMatch(/^pidb_/);
+      expect(saved.token).toMatch(/^bk_/);
       expect(r.stdout).not.toContain('correct horse battery');
       expect(r.stderr).not.toContain('correct horse battery');
     } finally {
@@ -50,11 +50,11 @@ describe('pidb login — piped (non-interactive) stdin', () => {
       await confirmEnrollment(ctx, actor, hotp(enrollSecret, stepAt(Date.now())));
       const code = hotp(openTotpSecret(s.ring, getTotp(s.db, adminId)!), stepAt(Date.now()) + 1);
 
-      const dir = mkdtempSync(join(tmpdir(), 'pidb-piped-2fa-'));
+      const dir = mkdtempSync(join(tmpdir(), 'blindkey-piped-2fa-'));
       const r = await runCliAsync(['login', s.url], baseEnv(dir), repoRoot, `jo\ncorrect horse battery\n${code}\n`);
       expect(r.status).toBe(0);
       const saved = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { token: string };
-      expect(saved.token).toMatch(/^pidb_/);
+      expect(saved.token).toMatch(/^bk_/);
       expect(r.stdout).not.toContain('correct horse battery');
       expect(r.stdout).not.toContain(code);
       expect(r.stderr).not.toContain('correct horse battery');
@@ -70,17 +70,17 @@ describe('pidb login — piped (non-interactive) stdin', () => {
       // Regression: the shared reader must go idle (paused + unref'd) between
       // prompts, not just once the pipe finally reaches EOF. A caller that
       // holds its end of the pipe open (spawn's default stdio: 'pipe', `docker
-      // exec -i`, a CI harness) must still see `pidb login` exit right after it
+      // exec -i`, a CI harness) must still see `blindkey login` exit right after it
       // has every answer it needs.
       const s = await makeServer();
       try {
         await s.admin('robin', 'correct horse battery');
-        const dir = mkdtempSync(join(tmpdir(), 'pidb-piped-keepopen-'));
+        const dir = mkdtempSync(join(tmpdir(), 'blindkey-piped-keepopen-'));
         const r = await runCliKeepStdinOpen(['login', s.url], baseEnv(dir), repoRoot, 'robin\ncorrect horse battery\n', 5000);
         expect(r.timedOut).toBe(false);
         expect(r.status).toBe(0);
         const saved = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { token: string };
-        expect(saved.token).toMatch(/^pidb_/);
+        expect(saved.token).toMatch(/^bk_/);
       } finally {
         await s.close();
       }
@@ -93,18 +93,18 @@ describe('pidb login — piped (non-interactive) stdin', () => {
     // file (or /dev/null), and unlike a socket/pipe it has no ref()/unref()
     // at runtime, even though NodeJS.ReadStream's type declares both
     // unconditionally. Calling them unguarded throws before any request is
-    // sent — this must work exactly like `pidb login <url> < answers.txt`.
+    // sent — this must work exactly like `blindkey login <url> < answers.txt`.
     const s = await makeServer();
     try {
       await s.admin('dana', 'correct horse battery');
-      const dir = mkdtempSync(join(tmpdir(), 'pidb-file-stdin-'));
+      const dir = mkdtempSync(join(tmpdir(), 'blindkey-file-stdin-'));
       const answersFile = join(dir, 'answers.txt');
       writeFileSync(answersFile, 'dana\ncorrect horse battery\n');
       const r = await runCliWithFileStdin(['login', s.url], baseEnv(dir), repoRoot, answersFile);
       expect(r.stderr).not.toContain('TypeError');
       expect(r.status).toBe(0);
       const saved = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { token: string };
-      expect(saved.token).toMatch(/^pidb_/);
+      expect(saved.token).toMatch(/^bk_/);
     } finally {
       await s.close();
     }
@@ -114,7 +114,7 @@ describe('pidb login — piped (non-interactive) stdin', () => {
     // No server interaction is expected here: an empty password from a
     // closed stdin must be rejected before any /auth/token request is made,
     // so this doesn't spend any of the 5/min rate-limit budget on a server.
-    const dir = mkdtempSync(join(tmpdir(), 'pidb-devnull-'));
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-devnull-'));
     const r = await runCliWithFileStdin(['login', 'http://127.0.0.1:1', '--username', 'alex'], baseEnv(dir), repoRoot, '/dev/null');
     expect(r.stderr).not.toContain('TypeError');
     expect(r.stderr).not.toContain('is not a function');

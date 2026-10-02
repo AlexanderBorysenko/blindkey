@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AGENT_SCOPES } from '@pidb/shared';
+import { AGENT_SCOPES } from '@blindkey/shared';
 import { buildVerificationUrl, runConnect } from '../src/agent/connect.js';
 import { loadProfiles, saveBindings, saveProfiles } from '../src/agent/state.js';
 import { memoryStore, type TokenStore } from '../src/agent/tokenstore.js';
@@ -21,7 +21,7 @@ beforeEach(async () => {
   s = await makeServer();
   s.project('acme');
   s.project('beta');
-  dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-connect-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-connect-'));
   store = memoryStore();
 });
 afterEach(async () => {
@@ -106,9 +106,9 @@ describe('runConnect: happy path', () => {
 
     const result = await connectPromise;
 
-    expect(await store.get('work')).toMatch(/^pidb_/);
-    expect(JSON.stringify(result.json)).not.toMatch(/pidb_/);
-    expect(result.text).not.toMatch(/pidb_/);
+    expect(await store.get('work')).toMatch(/^bk_/);
+    expect(JSON.stringify(result.json)).not.toMatch(/bk_/);
+    expect(result.text).not.toMatch(/bk_/);
     expect(result.json).toMatchObject({ profile: 'work', scopes: ['projects:read', 'docs:read'], projects: ['acme', 'beta'] });
 
     const profiles = loadProfiles(dataDir);
@@ -162,7 +162,7 @@ describe('runConnect: happy path', () => {
     approveByLine(line, ['projects:read'], ['acme']);
     await connectPromise;
     expect(loadProfiles(dataDir).default).toBe('fresh');
-    expect(await store.get('fresh')).toMatch(/^pidb_/);
+    expect(await store.get('fresh')).toMatch(/^bk_/);
   });
 
   it('never prints the token to the injected out stream', async () => {
@@ -212,7 +212,7 @@ describe('runConnect: denied / expired / not configured', () => {
 
   it('no profile configured at all and no --profile/--url → CliError pointing at profile add', async () => {
     await expect(runConnect({}, { cwd: dataDir, store, dataDir })).rejects.toMatchObject({
-      message: expect.stringMatching(/no server configured.*pidb profile add/),
+      message: expect.stringMatching(/no server configured.*blindkey profile add/),
     });
   });
 
@@ -269,7 +269,7 @@ describe('buildVerificationUrl (F6: built locally, never the server-supplied url
   });
 
   it('keeps a profile url path prefix', () => {
-    expect(buildVerificationUrl('https://good.example.com/pidb', code)).toBe(`https://good.example.com/pidb/connect?code=${code}`);
+    expect(buildVerificationUrl('https://good.example.com/blindkey', code)).toBe(`https://good.example.com/blindkey/connect?code=${code}`);
   });
 
   it('rejects a malformed user_code (lowercase, no dash, wrong length, smuggled characters)', () => {
@@ -396,7 +396,7 @@ describe('runConnect: profile resolution (Important 3, Minor 5)', () => {
     const line = await waitForLine(out);
     approveByLine(line, ['projects:read'], ['acme']);
     await connectPromise;
-    expect(await store.get('side')).toMatch(/^pidb_/);
+    expect(await store.get('side')).toMatch(/^bk_/);
     expect(await store.get('work')).toBeNull();
   });
 
@@ -411,7 +411,7 @@ describe('runConnect: profile resolution (Important 3, Minor 5)', () => {
     const line = await waitForLine(out);
     approveByLine(line, ['projects:read'], ['acme']);
     await connectPromise;
-    expect(await store.get('work')).toMatch(/^pidb_/);
+    expect(await store.get('work')).toMatch(/^bk_/);
   });
 
   it('--url differing from an existing profile\'s stored url refuses (exit 2) with a set-url hint', async () => {
@@ -446,7 +446,7 @@ describe('runConnect: profile resolution (Important 3, Minor 5)', () => {
     const line = await waitForLine(out);
     approveByLine(line, ['projects:read'], ['acme']);
     await connectPromise;
-    expect(await store.get('work')).toMatch(/^pidb_/);
+    expect(await store.get('work')).toMatch(/^bk_/);
   });
 });
 
@@ -555,7 +555,7 @@ describe('runConnect: poll bounds (Important 4)', () => {
       pollCount++;
       if (pollCount <= 2) return new Response(JSON.stringify({ error: 'rate_limited' }), { status: 429 });
       return new Response(
-        JSON.stringify({ token: 'pidb_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: Date.now() + 1000 }),
+        JSON.stringify({ token: 'bk_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: Date.now() + 1000 }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     }) as unknown as typeof fetch;
@@ -595,7 +595,7 @@ describe('runConnect: poll bounds (Important 4)', () => {
       pollCount++;
       if (pollCount === 1) return new Response(JSON.stringify({ error: 'slow_down' }), { status: 400 });
       return new Response(
-        JSON.stringify({ token: 'pidb_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: Date.now() + 1000 }),
+        JSON.stringify({ token: 'bk_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: Date.now() + 1000 }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     }) as unknown as typeof fetch;
@@ -623,7 +623,7 @@ describe('runConnect: poll bounds (Important 4)', () => {
         );
       }
       return new Response(
-        JSON.stringify({ token: 'pidb_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: null }),
+        JSON.stringify({ token: 'bk_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: null }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     }) as unknown as typeof fetch;
@@ -645,7 +645,7 @@ describe('runConnect: profiles.json reload before save (Minor 6)', () => {
       { cwd: dataDir, store, dataDir, now, sleep, out, openBrowserImpl: (url) => ({ cmd: 'open', args: [url] }) },
     );
     const line = await waitForLine(out);
-    // Simulate a concurrent `pidb profile add other https://other.example.com` completing while
+    // Simulate a concurrent `blindkey profile add other https://other.example.com` completing while
     // this connect is still polling.
     const mid = loadProfiles(dataDir);
     mid.profiles.other = { url: 'https://other.example.com' };
@@ -680,7 +680,7 @@ describe('runConnect: expires_at null (Minor 9)', () => {
         );
       }
       return new Response(
-        JSON.stringify({ token: 'pidb_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: null }),
+        JSON.stringify({ token: 'bk_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: null }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     }) as unknown as typeof fetch;
@@ -819,7 +819,7 @@ describe('runConnect: fix round 2', () => {
       pollCount++;
       if (pollCount <= 3) return new Response(JSON.stringify({ error: 'rate_limited' }), { status: 429 });
       return new Response(
-        JSON.stringify({ token: 'pidb_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: null }),
+        JSON.stringify({ token: 'bk_x', id: 1, name: 'n', scopes: ['projects:read'], projects: ['acme'], expires_at: null }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     }) as unknown as typeof fetch;

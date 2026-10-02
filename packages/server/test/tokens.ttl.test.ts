@@ -84,7 +84,7 @@ describe('expired tokens', () => {
   });
 
   it('keeps unknown tokens generic', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth('pidb_nope_nope') });
+    const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth('bk_nope_nope') });
     expect(res.json().error).toBe('unauthorized');
   });
 });

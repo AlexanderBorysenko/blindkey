@@ -1,4 +1,4 @@
-import type { Scope } from '@pidb/shared';
+import type { Scope } from '@blindkey/shared';
 import type { Db } from '../db/connection.js';
 import { now, parseJsonArray } from './util.js';
 

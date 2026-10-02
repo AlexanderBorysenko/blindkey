@@ -1,13 +1,13 @@
 {
-  "name": "pidb-monorepo",
+  "name": "blindkey-monorepo",
   "private": true,
   "type": "module",
   "engines": { "node": ">=22" },
   "workspaces": ["packages/*"],
   "scripts": {
-    "build": "npm run build -w @pidb/shared && npm run build -w @pidb/server && npm run build -w @pidb/cli",
+    "build": "npm run build -w @blindkey/shared && npm run build -w @blindkey/server && npm run build -w @blindkey/cli",
     "build:plugin": "node scripts/build-plugin.mjs",
-    "typecheck": "npm run build -w @pidb/shared && tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit",
+    "typecheck": "npm run build -w @blindkey/shared && tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },

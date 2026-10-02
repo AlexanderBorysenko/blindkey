@@ -14,7 +14,7 @@ describe('http auth', () => {
     const t = await makeTestApp();
     expect((await t.app.inject({ method: 'GET', url: '/api/v1/me' })).statusCode).toBe(401);
     expect((await t.app.inject({ method: 'GET', url: '/api/v1/me', headers: { authorization: 'Basic x' } })).statusCode).toBe(401);
-    const bad = await t.app.inject({ method: 'GET', url: '/api/v1/me', headers: auth('pidb_AAAAAAAA_' + 'B'.repeat(43)) });
+    const bad = await t.app.inject({ method: 'GET', url: '/api/v1/me', headers: auth('bk_AAAAAAAA_' + 'B'.repeat(43)) });
     expect(bad.statusCode).toBe(401);
     expect(bad.json()).toEqual({ error: 'unauthorized', message: 'unauthorized' });
     const audit = listAudit(t.db, { action: 'auth.token_failed' });
@@ -35,7 +35,7 @@ describe('http auth', () => {
     const t = await makeTestApp();
     let last = 0;
     for (let i = 0; i < 21; i++) {
-      last = (await t.app.inject({ method: 'GET', url: '/api/v1/me', headers: auth('pidb_AAAAAAAA_' + 'B'.repeat(43)) })).statusCode;
+      last = (await t.app.inject({ method: 'GET', url: '/api/v1/me', headers: auth('bk_AAAAAAAA_' + 'B'.repeat(43)) })).statusCode;
     }
     expect(last).toBe(429);
   });
@@ -44,7 +44,7 @@ describe('http auth', () => {
     await t.app.inject({
       method: 'GET',
       url: '/api/v1/me',
-      headers: { ...auth('pidb_AAAAAAAA_' + 'B'.repeat(43)), 'user-agent': 'test-agent/1.0' },
+      headers: { ...auth('bk_AAAAAAAA_' + 'B'.repeat(43)), 'user-agent': 'test-agent/1.0' },
     });
     const audit = listAudit(t.db, { action: 'auth.token_failed' });
     expect(audit).toHaveLength(1);
@@ -55,7 +55,7 @@ describe('http auth', () => {
     await t.app.inject({
       method: 'GET',
       url: '/api/v1/me',
-      headers: { ...auth('pidb_AAAAAAAA_' + 'B'.repeat(43)), 'x-forwarded-for': '9.9.9.9' },
+      headers: { ...auth('bk_AAAAAAAA_' + 'B'.repeat(43)), 'x-forwarded-for': '9.9.9.9' },
       remoteAddress: '10.0.0.5',
     });
     const audit = listAudit(t.db, { action: 'auth.token_failed' });

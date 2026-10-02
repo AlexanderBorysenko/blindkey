@@ -20,10 +20,10 @@ export function appDataOf(ctx: PathContext): string {
   return pathModFor(ctx.platform).join(ctx.home, 'AppData', 'Roaming');
 }
 
-/** The plugin data dir, `~/.config/pidb`, `%APPDATA%\pidb` (resolved). */
+/** The plugin data dir, `~/.config/blindkey`, `%APPDATA%\blindkey` (resolved). */
 export function protectedRoots(ctx: PathContext): string[] {
   const pm = pathModFor(ctx.platform);
-  return [ctx.dataDir, pm.join(ctx.home, '.config', 'pidb'), pm.join(appDataOf(ctx), 'pidb')].map((p) => pm.resolve(p));
+  return [ctx.dataDir, pm.join(ctx.home, '.config', 'blindkey'), pm.join(appDataOf(ctx), 'blindkey')].map((p) => pm.resolve(p));
 }
 
 export function writtenFiles(ctx: PathContext): string[] {
@@ -133,7 +133,7 @@ export function globToRegExp(rawGlob: string, platform: NodeJS.Platform): RegExp
 /**
  * Whether a wildcard token (resolved against `baseDir`) could name a protected/written path: the glob
  * matches a target itself, or its static directory prefix lies inside a protected root
- * (`~/.config/pidb/*`). For a recursive search the glob may also match one of a target's ancestor
+ * (`~/.config/blindkey/*`). For a recursive search the glob may also match one of a target's ancestor
  * directories (`grep -r X *` reaches `config/db.env` through `config`).
  */
 export function globHitsProtected(token: string, baseDir: string, ctx: PathContext, recursive: boolean): boolean {

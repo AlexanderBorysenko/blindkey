@@ -14,7 +14,7 @@ const CSP =
 let t: TestCtx;
 let session: string;
 let csrf: string;
-const cookies = () => ({ pidb_session: session });
+const cookies = () => ({ blindkey_session: session });
 const get = (url: string) => t.app.inject({ method: 'GET', url, cookies: cookies() });
 const post = (url: string, payload: Record<string, unknown>) => t.app.inject({ method: 'POST', url, cookies: cookies(), payload });
 
@@ -29,7 +29,7 @@ beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
   const acme = getProjectBySlug(t.db, 'acme')!.id;
   createSecret(t.db, t.ring, { projectId: acme, name: 'DB', description: '', tags: [], fields: [{ key: 'host', value: 'db' }, { key: 'password', value: 'hunter2hunter2' }] });
@@ -53,6 +53,15 @@ describe('strict CSP', () => {
   it('sends the exact policy', async () => {
     const res = await get('/');
     expect(res.headers['content-security-policy']).toBe(CSP);
+  });
+
+  it('serves the favicon as a same-origin SVG with no script or inline style', async () => {
+    const res = await t.app.inject({ method: 'GET', url: '/assets/favicon.svg' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('image/svg+xml');
+    expect(res.body).not.toMatch(/<script/i);
+    expect(res.body).not.toMatch(/\sstyle\s*=/i);
+    expect(res.body).not.toMatch(/\son[a-z]+\s*=/i);
   });
 
   it('serves app.js with the delegated handlers', async () => {
@@ -84,8 +93,8 @@ describe('strict CSP', () => {
     try {
       createAdmin(t2.db, 'bob', await hashPassword('pw'));
       const bobLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
-      const bobSession = bobLogin.cookies.find((c) => c.name === 'pidb_session')!.value;
-      const bobCookies = { pidb_session: bobSession };
+      const bobSession = bobLogin.cookies.find((c) => c.name === 'blindkey_session')!.value;
+      const bobCookies = { blindkey_session: bobSession };
       const bobHome = await t2.app.inject({ method: 'GET', url: '/', cookies: bobCookies });
       const bobCsrf = /name="csrf" value="([^"]+)"/.exec(bobHome.body)![1]!;
 
@@ -105,8 +114,8 @@ describe('strict CSP', () => {
       assertNoInlineCode(confirmRes.body, 'recovery codes page');
 
       const secondLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
-      const bobChallenge = secondLogin.cookies.find((c) => c.name === 'pidb_2fa')!.value;
-      const challengeRes = await t2.app.inject({ method: 'GET', url: '/login/2fa', cookies: { pidb_2fa: bobChallenge } });
+      const bobChallenge = secondLogin.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
+      const challengeRes = await t2.app.inject({ method: 'GET', url: '/login/2fa', cookies: { blindkey_2fa: bobChallenge } });
       assertNoInlineCode(challengeRes.body, '/login/2fa with a live challenge');
 
       // The "on" state, and the settings error re-render (wrong password).

@@ -1,4 +1,4 @@
-// pidb admin UI behaviour. Loaded with `defer` after htmx; every handler is delegated from
+// blindkey admin UI behaviour. Loaded with `defer` after htmx; every handler is delegated from
 // `document`, so markup swapped in by htmx (reveal partial, preview) needs no re-binding.
 // The CSP forbids inline scripts, handlers and style attributes: all behaviour lives here.
 (function () {

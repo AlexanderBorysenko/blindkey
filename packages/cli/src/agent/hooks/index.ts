@@ -80,7 +80,7 @@ function loadWrittenPathsSafe(dataDir: string): { paths: string[]; note?: string
     return { paths: loadWritten(dataDir).paths };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { paths: [], note: `pidb hook (guard): written.json unreadable (${message}) — treating as empty` };
+    return { paths: [], note: `blindkey hook (guard): written.json unreadable (${message}) — treating as empty` };
   }
 }
 
@@ -104,7 +104,7 @@ function sessionStartOutput(additionalContext: string): string {
 /**
  * The plugin's bin/ shim runs inside Claude's Bash tool, which never receives CLAUDE_PLUGIN_DATA.
  * Claude Code sources CLAUDE_ENV_FILE (handed to SessionStart hooks) before every later Bash command,
- * so exporting PIDB_PLUGIN_DATA there keeps the CLI on the same data dir as the hooks and the MCP
+ * so exporting BLINDKEY_PLUGIN_DATA there keeps the CLI on the same data dir as the hooks and the MCP
  * bridge — this matters for `--plugin-dir` loads, whose data dir differs from the one the shim derives.
  */
 export function exportDataDir(env: NodeJS.ProcessEnv, dataDir: string): void {
@@ -112,7 +112,7 @@ export function exportDataDir(env: NodeJS.ProcessEnv, dataDir: string): void {
   if (!file) return;
   const quoted = `'${dataDir.replace(/'/g, `'\\''`)}'`;
   try {
-    appendFileSync(file, `export PIDB_PLUGIN_DATA=${quoted}\n`);
+    appendFileSync(file, `export BLINDKEY_PLUGIN_DATA=${quoted}\n`);
   } catch {
     // Best effort: without it the CLI still derives the data dir from its own install path.
   }
@@ -184,8 +184,8 @@ export async function runHook(kind: HookKind, stdinText: string, env: NodeJS.Pro
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (kind === 'session-start') {
-      return { stdout: sessionStartOutput(fallbackContext(message)), exitCode: 0, stderr: `pidb hook (session-start): ${message}` };
+      return { stdout: sessionStartOutput(fallbackContext(message)), exitCode: 0, stderr: `blindkey hook (session-start): ${message}` };
     }
-    return { stdout: '', exitCode: 0, stderr: `pidb hook (${kind}): ${message} — allowing by default` };
+    return { stdout: '', exitCode: 0, stderr: `blindkey hook (${kind}): ${message} — allowing by default` };
   }
 }

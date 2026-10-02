@@ -68,8 +68,8 @@ export function verifyTotp(secret: Buffer, code: string, lastUsedStep: number, n
 }
 
 export function otpauthUri(username: string, secret: Buffer): string {
-  const label = `pidb:${encodeURIComponent(username)}`;
-  return `otpauth://totp/${label}?secret=${base32Encode(secret)}&issuer=pidb&algorithm=SHA1&digits=${DIGITS}&period=${TOTP_PERIOD_S}`;
+  const label = `blindkey:${encodeURIComponent(username)}`;
+  return `otpauth://totp/${label}?secret=${base32Encode(secret)}&issuer=Blindkey&algorithm=SHA1&digits=${DIGITS}&period=${TOTP_PERIOD_S}`;
 }
 
 export function generateRecoveryCode(): string {

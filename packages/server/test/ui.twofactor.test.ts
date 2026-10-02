@@ -29,12 +29,12 @@ async function login(username = 'alex', password = 'pw') {
 
 function login2fa(cookie: string, code: string) {
   login2faCount += 1;
-  return t.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: cookie }, payload: { code } });
+  return t.app.inject({ method: 'POST', url: '/login/2fa', cookies: { blindkey_2fa: cookie }, payload: { code } });
 }
 
 /** The CSRF token is an HMAC of the session id, so it changes every time `session` is reassigned. */
 async function refreshCsrf(): Promise<void> {
-  const res = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+  const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
   csrf = /name="csrf" value="([^"]+)"/.exec(res.body)![1]!;
 }
 
@@ -61,34 +61,34 @@ describe('ui two-factor', () => {
     const res = await login();
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/');
-    expect(res.cookies.find((c) => c.name === 'pidb_2fa')).toBeUndefined();
-    session = res.cookies.find((c) => c.name === 'pidb_session')!.value;
+    expect(res.cookies.find((c) => c.name === 'blindkey_2fa')).toBeUndefined();
+    session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
     expect(session).toBeTruthy();
     await refreshCsrf();
   });
 
   it('1. shows the enrollment banner on the home page', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     const body = main(res.body);
     expect(body).toContain('Two-factor authentication is off');
     expect(body).toContain('href="/settings/2fa"');
   });
 
   it('1. the sidebar links to /settings/2fa', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     const sidebar = res.body.split('<aside')[1]!.split('</aside>')[0]!;
     expect(sidebar).toContain('href="/settings/2fa"');
   });
 
   it('2. GET /settings/2fa shows Set up two-factor, no-store', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     expect(res.statusCode).toBe(200);
     expect(main(res.body)).toContain('Set up two-factor');
     expect(res.headers['cache-control']).toContain('no-store');
   });
 
   it('2. POST /settings/2fa/start with csrf shows the QR, secret and code input', async () => {
-    const res = await t.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { pidb_session: session }, payload: { csrf } });
+    const res = await t.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { blindkey_session: session }, payload: { csrf } });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('<img');
     expect(res.body).toContain('src="data:image/svg+xml;base64,');
@@ -97,26 +97,26 @@ describe('ui two-factor', () => {
   });
 
   it('F5c: the confirm form keeps inputmode numeric', async () => {
-    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { pidb_session: session } });
+    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     const inputs = main(settings.body).match(/<input name="code"[^>]*>/g) ?? [];
     expect(inputs).toHaveLength(1);
     expect(inputs[0]).toContain('inputmode="numeric"');
   });
 
   it('2. POST /settings/2fa/start without csrf is rejected', async () => {
-    const res = await t.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { pidb_session: session }, payload: {} });
+    const res = await t.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { blindkey_session: session }, payload: {} });
     expect(res.statusCode).toBe(403);
   });
 
   it('3. a pending enrollment still shows the banner and still logs in with no challenge', async () => {
-    const home = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const home = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     expect(main(home.body)).toContain('Two-factor authentication is off');
 
     const res = await login();
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/');
-    expect(res.cookies.find((c) => c.name === 'pidb_2fa')).toBeUndefined();
-    session = res.cookies.find((c) => c.name === 'pidb_session')!.value;
+    expect(res.cookies.find((c) => c.name === 'blindkey_2fa')).toBeUndefined();
+    session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
     await refreshCsrf();
   });
 
@@ -124,12 +124,12 @@ describe('ui two-factor', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/2fa/confirm',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, code: '000000' },
     });
     expect(main(res.body)).toContain('Invalid code');
     // Still pending: the settings page still offers setup, not "Enabled since".
-    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { pidb_session: session } });
+    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     expect(main(settings.body)).not.toContain('Enabled since');
   });
 
@@ -137,7 +137,7 @@ describe('ui two-factor', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/2fa/confirm',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, code: codeFor(0) },
     });
     expect(res.statusCode).toBe(200);
@@ -148,15 +148,15 @@ describe('ui two-factor', () => {
   });
 
   it('4. settings now shows Enabled since / unused codes, and the banner is gone', async () => {
-    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { pidb_session: session } });
+    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     expect(main(settings.body)).toContain('Enabled since');
     expect(main(settings.body)).toContain('10 unused recovery codes');
-    const home = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const home = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     expect(main(home.body)).not.toContain('Two-factor authentication is off');
   });
 
   it('F5c: the recovery/disable code inputs use inputmode text (they accept recovery codes)', async () => {
-    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { pidb_session: session } });
+    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     const inputs = main(settings.body).match(/<input name="code"[^>]*>/g) ?? [];
     expect(inputs).toHaveLength(2);
     for (const input of inputs) {
@@ -171,8 +171,8 @@ describe('ui two-factor', () => {
     const res = await login();
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/login/2fa');
-    expect(res.cookies.find((c) => c.name === 'pidb_session')).toBeUndefined();
-    const chCookie = res.cookies.find((c) => c.name === 'pidb_2fa')!;
+    expect(res.cookies.find((c) => c.name === 'blindkey_session')).toBeUndefined();
+    const chCookie = res.cookies.find((c) => c.name === 'blindkey_2fa')!;
     expect(chCookie).toBeTruthy();
     expect(chCookie.path).toBe('/login');
     expect(chCookie.httpOnly).toBe(true);
@@ -180,7 +180,7 @@ describe('ui two-factor', () => {
   });
 
   it('5. GET /login/2fa with that cookie shows the code input', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/login/2fa', cookies: { pidb_2fa: challengeCookie } });
+    const res = await t.app.inject({ method: 'GET', url: '/login/2fa', cookies: { blindkey_2fa: challengeCookie } });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('name="code"');
     expect(res.body).toContain('autocomplete="one-time-code"');
@@ -190,28 +190,28 @@ describe('ui two-factor', () => {
     const res = await login2fa(challengeCookie, codeFor(1));
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/');
-    session = res.cookies.find((c) => c.name === 'pidb_session')!.value;
+    session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
     expect(session).toBeTruthy();
     const rows = listAudit(t.db, { action: 'auth.login', limit: 1 });
     expect(rows[0]!.meta).toMatchObject({ second_factor: 'totp' });
     await refreshCsrf();
   });
 
-  it('6. replaying the same pidb_2fa cookie after a completed login is rejected', async () => {
+  it('6. replaying the same blindkey_2fa cookie after a completed login is rejected', async () => {
     const res = await login2fa(challengeCookie, '123456');
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/login');
-    expect(res.cookies.find((c) => c.name === 'pidb_session')).toBeUndefined();
+    expect(res.cookies.find((c) => c.name === 'blindkey_session')).toBeUndefined();
   });
 
   it('7. a normalized recovery code (uppercase, no dash) logs in and audits recovery_used', async () => {
     const loginRes = await login();
-    const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+    const ch = loginRes.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
     const raw = recoveryCodes[0]!.toUpperCase().replace('-', '');
     const res = await login2fa(ch, raw);
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/');
-    session = res.cookies.find((c) => c.name === 'pidb_session')!.value;
+    session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
     expect(session).toBeTruthy();
     const rows = listAudit(t.db, { action: 'auth.recovery_used', limit: 1 });
     expect(rows).toHaveLength(1);
@@ -220,7 +220,7 @@ describe('ui two-factor', () => {
 
   it('7. the same recovery code cannot be used again on a new challenge', async () => {
     const loginRes = await login();
-    const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+    const ch = loginRes.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
     const raw = recoveryCodes[0]!.toUpperCase().replace('-', '');
     const res = await login2fa(ch, raw);
     expect(res.statusCode).toBe(401);
@@ -229,7 +229,7 @@ describe('ui two-factor', () => {
 
   it('8. 5 wrong codes lock the challenge, clear the cookie, and delete the row', async () => {
     const loginRes = await login();
-    const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+    const ch = loginRes.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
     for (let i = 0; i < 4; i++) {
       const res = await login2fa(ch, '000000');
       expect(res.statusCode).toBe(401);
@@ -238,14 +238,14 @@ describe('ui two-factor', () => {
     const last = await login2fa(ch, '000000');
     expect(last.statusCode).toBe(401);
     expect(main(last.body)).toContain('Too many attempts');
-    const cleared = last.cookies.find((c) => c.name === 'pidb_2fa');
+    const cleared = last.cookies.find((c) => c.name === 'blindkey_2fa');
     expect(cleared?.value).toBe('');
     expect(getChallenge(t.db, ch)).toBeNull();
   });
 
   it('9. an already-expired challenge redirects GET /login/2fa to /login', async () => {
     const id = createChallenge(t.db, 1, -1, '', '');
-    const res = await t.app.inject({ method: 'GET', url: '/login/2fa', cookies: { pidb_2fa: id } });
+    const res = await t.app.inject({ method: 'GET', url: '/login/2fa', cookies: { blindkey_2fa: id } });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/login');
   });
@@ -254,7 +254,7 @@ describe('ui two-factor', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/2fa/recovery',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, password: 'not-the-password', code: recoveryCodes[2] },
     });
     expect(res.statusCode).toBe(400);
@@ -265,7 +265,7 @@ describe('ui two-factor', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/2fa/recovery',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, password: 'pw', code: recoveryCodes[2] },
     });
     expect(res.statusCode).toBe(200);
@@ -284,7 +284,7 @@ describe('ui two-factor', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/2fa/recovery',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, password: 'pw', code: recoveryCodes[1] },
     });
     expect(res.statusCode).toBe(400);
@@ -295,15 +295,15 @@ describe('ui two-factor', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/2fa/disable',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, password: 'pw', code: newRecoveryCodes[0] },
     });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/settings/2fa?done=saved');
 
-    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { pidb_session: session } });
+    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     expect(main(settings.body)).toContain('Set up two-factor');
-    const home = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const home = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     expect(main(home.body)).toContain('Two-factor authentication is off');
   });
 
@@ -311,7 +311,7 @@ describe('ui two-factor', () => {
     const res = await login();
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/');
-    expect(res.cookies.find((c) => c.name === 'pidb_2fa')).toBeUndefined();
+    expect(res.cookies.find((c) => c.name === 'blindkey_2fa')).toBeUndefined();
   });
 
   it('12. GET /login/2fa without any cookie redirects to /login', async () => {
@@ -336,29 +336,29 @@ describe('R7: malformed code body on POST /login/2fa', () => {
     createAdmin(t2.db, 'carol', await hashPassword('pw'));
 
     const login1 = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'carol', password: 'pw' } });
-    const session2 = login1.cookies.find((c) => c.name === 'pidb_session')!.value;
-    const home = await t2.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session2 } });
+    const session2 = login1.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const home = await t2.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session2 } });
     const csrf2 = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
 
-    await t2.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { pidb_session: session2 }, payload: { csrf: csrf2 } });
+    await t2.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { blindkey_session: session2 }, payload: { csrf: csrf2 } });
     const totpRow = getTotp(t2.db, 1)!;
     const code = hotp(openTotpSecret(t2.ring, totpRow), stepAt(Date.now()));
     await t2.app.inject({
       method: 'POST',
       url: '/settings/2fa/confirm',
-      cookies: { pidb_session: session2 },
+      cookies: { blindkey_session: session2 },
       payload: { csrf: csrf2, code },
     });
 
     // Fresh login (2FA now enabled): 2nd POST /login on this instance.
     const loginRes = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'carol', password: 'pw' } });
-    const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+    const ch = loginRes.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
 
     // A repeated form field parses `code` as an array — historically threw in `.trim()`.
     const formRes = await t2.app.inject({
       method: 'POST',
       url: '/login/2fa',
-      cookies: { pidb_2fa: ch },
+      cookies: { blindkey_2fa: ch },
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       payload: 'code=1&code=2',
     });
@@ -367,7 +367,7 @@ describe('R7: malformed code body on POST /login/2fa', () => {
     expect(getChallenge(t2.db, ch)?.attempts).toBe(1);
 
     // A JSON number for `code` — historically threw the same way.
-    const jsonRes = await t2.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: ch }, payload: { code: 123456 } });
+    const jsonRes = await t2.app.inject({ method: 'POST', url: '/login/2fa', cookies: { blindkey_2fa: ch }, payload: { code: 123456 } });
     expect(jsonRes.statusCode).toBe(401);
     expect(main(jsonRes.body)).toContain('Invalid code.');
     expect(getChallenge(t2.db, ch)?.attempts).toBe(2);
@@ -392,21 +392,21 @@ describe('F1: per-admin second-factor lockout in the UI', () => {
       expect(listAudit(t3.db, { action: 'auth.totp_locked' })).toHaveLength(1);
 
       const loginRes = await t3.app.inject({ method: 'POST', url: '/login', payload: { username: 'dave', password: 'pw' } });
-      const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
-      const locked = await t3.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: ch }, payload: { code: hotp(secret(), stepAt(Date.now()) + 1) } });
+      const ch = loginRes.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
+      const locked = await t3.app.inject({ method: 'POST', url: '/login/2fa', cookies: { blindkey_2fa: ch }, payload: { code: hotp(secret(), stepAt(Date.now()) + 1) } });
       expect(locked.statusCode).toBe(429);
       expect(main(locked.body)).toContain('Too many wrong codes — try again in 15 minutes.');
-      expect(locked.cookies.find((c) => c.name === 'pidb_session')).toBeUndefined();
+      expect(locked.cookies.find((c) => c.name === 'blindkey_session')).toBeUndefined();
       expect(getChallenge(t3.db, ch)?.attempts).toBe(0);
 
       // Settings reauth: the right password and the right code are still refused while locked.
       const session3 = createSession(t3.db, admin.id, SESSION_TTL_MS, '', '');
-      const home = await t3.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session3 } });
+      const home = await t3.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session3 } });
       const csrf3 = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
       const reauth = await t3.app.inject({
         method: 'POST',
         url: '/settings/2fa/recovery',
-        cookies: { pidb_session: session3 },
+        cookies: { blindkey_session: session3 },
         payload: { csrf: csrf3, password: 'pw', code: hotp(secret(), stepAt(Date.now()) + 1) },
       });
       expect(reauth.statusCode).toBe(429);
@@ -414,7 +414,7 @@ describe('F1: per-admin second-factor lockout in the UI', () => {
 
       // The lock has passed: the same challenge now accepts the right code.
       t3.db.prepare(`UPDATE admin_totp SET locked_until = ? WHERE admin_id = ?`).run(Date.now() - 1, admin.id);
-      const ok = await t3.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: ch }, payload: { code: hotp(secret(), stepAt(Date.now()) + 1) } });
+      const ok = await t3.app.inject({ method: 'POST', url: '/login/2fa', cookies: { blindkey_2fa: ch }, payload: { code: hotp(secret(), stepAt(Date.now()) + 1) } });
       expect(ok.statusCode).toBe(302);
       expect(ok.headers.location).toBe('/');
       const state = t3.db.prepare(`SELECT failed_count FROM admin_totp WHERE admin_id = ?`).get(admin.id) as { failed_count: number };
@@ -433,18 +433,18 @@ describe('F2: enrolling revokes the other sessions', () => {
       const admin = createAdmin(t4.db, 'erin', await hashPassword('pw'));
       const a = createSession(t4.db, admin.id, SESSION_TTL_MS, '', '');
       const b = createSession(t4.db, admin.id, SESSION_TTL_MS, '', '');
-      expect((await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: b } })).statusCode).toBe(200);
-      const home = await t4.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: a } });
+      expect((await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: b } })).statusCode).toBe(200);
+      const home = await t4.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: a } });
       const csrfA = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
-      await t4.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { pidb_session: a }, payload: { csrf: csrfA } });
+      await t4.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { blindkey_session: a }, payload: { csrf: csrfA } });
       const code = hotp(openTotpSecret(t4.ring, getTotp(t4.db, admin.id)!), stepAt(Date.now()));
-      const confirm = await t4.app.inject({ method: 'POST', url: '/settings/2fa/confirm', cookies: { pidb_session: a }, payload: { csrf: csrfA, code } });
+      const confirm = await t4.app.inject({ method: 'POST', url: '/settings/2fa/confirm', cookies: { blindkey_session: a }, payload: { csrf: csrfA, code } });
       expect(confirm.statusCode).toBe(200);
 
-      const resB = await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: b } });
+      const resB = await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: b } });
       expect(resB.statusCode).toBe(302);
       expect(resB.headers.location).toBe('/login');
-      const resA = await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: a } });
+      const resA = await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: a } });
       expect(resA.statusCode).toBe(200);
 
       const enrolled = listAudit(t4.db, { action: 'auth.totp_enrolled' });
@@ -468,10 +468,10 @@ describe('F4: parallel guesses on one challenge', () => {
       await confirmEnrollment(t5.ctx, actor, hotp(openTotpSecret(t5.ring, getTotp(t5.db, admin.id)!), stepAt(Date.now())));
 
       const loginRes = await t5.app.inject({ method: 'POST', url: '/login', payload: { username: 'fran', password: 'pw' } });
-      const ch = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+      const ch = loginRes.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
       const results = await Promise.all(
         Array.from({ length: 9 }, () =>
-          t5.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: ch }, payload: { code: 'zzzzz-zzzzz' } })),
+          t5.app.inject({ method: 'POST', url: '/login/2fa', cookies: { blindkey_2fa: ch }, payload: { code: 'zzzzz-zzzzz' } })),
       );
       // Exactly 5 attempts get claimed and checked (each writes auth.totp_failed).
       expect(listAudit(t5.db, { action: 'auth.totp_failed' }).length).toBe(5);
@@ -501,12 +501,12 @@ describe('F5d: settings POSTs are rate limited', () => {
     try {
       const admin = createAdmin(t6.db, 'gail', await hashPassword('pw'));
       const s6 = createSession(t6.db, admin.id, SESSION_TTL_MS, '', '');
-      const home = await t6.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: s6 } });
+      const home = await t6.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: s6 } });
       const csrf6 = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
       for (const route of ['start', 'confirm', 'recovery', 'disable']) {
         const statuses: number[] = [];
         for (let i = 0; i < 11; i++) {
-          const r = await t6.app.inject({ method: 'POST', url: `/settings/2fa/${route}`, cookies: { pidb_session: s6 }, payload: { csrf: csrf6, code: '000000', password: 'x' } });
+          const r = await t6.app.inject({ method: 'POST', url: `/settings/2fa/${route}`, cookies: { blindkey_session: s6 }, payload: { csrf: csrf6, code: '000000', password: 'x' } });
           statuses.push(r.statusCode);
         }
         expect(statuses.slice(0, 10), route).not.toContain(429);

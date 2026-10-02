@@ -1,7 +1,7 @@
 import { chmodSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { scopedPath, seg, type PidbClient } from '../client.js';
+import { scopedPath, seg, type BlindkeyClient } from '../client.js';
 import type { RevealedFields } from '../api-types.js';
 import { CliError, EXIT_REFUSED } from '../errors.js';
 import type { CommandResult } from '../output.js';
@@ -31,7 +31,7 @@ export function writeSecretFile(path: string, content: string, mode: number, for
   // Instead write to a fresh, exclusively-created temp file at the target mode in the same
   // directory (so the rename below is atomic and same-filesystem), then rename it over the
   // destination.
-  const tmp = join(dirname(path), `.${basename(path)}.pidb-${process.pid}-${randomBytes(6).toString('hex')}`);
+  const tmp = join(dirname(path), `.${basename(path)}.blindkey-${process.pid}-${randomBytes(6).toString('hex')}`);
   try {
     writeFileSync(tmp, content, { mode, flag: 'wx' });
     chmodSync(tmp, mode); // umask safety
@@ -62,7 +62,7 @@ function guardAgentOut(out: string, opts: FileCommandAgentOptions): string {
 }
 
 export async function runSecretWrite(
-  client: PidbClient,
+  client: BlindkeyClient,
   target: string,
   name: string,
   field: string,
@@ -92,7 +92,7 @@ export async function runSecretWrite(
 }
 
 export async function runSecretEnv(
-  client: PidbClient,
+  client: BlindkeyClient,
   target: string,
   name: string,
   opts: { out: string; mode?: string; force?: boolean } & FileCommandAgentOptions,
@@ -106,7 +106,7 @@ export async function runSecretEnv(
   for (const [key, value] of Object.entries(revealed.fields)) {
     if (value.includes('\n')) {
       throw new CliError(
-        `field "${key}" spans multiple lines and cannot go into a key=value file — use: pidb secret write ${target} "${name}" ${key} --out <path>`,
+        `field "${key}" spans multiple lines and cannot go into a key=value file — use: blindkey secret write ${target} "${name}" ${key} --out <path>`,
       );
     }
     lines.push(`${key}=${value}`);

@@ -14,8 +14,8 @@ let store: TokenStore;
 
 const env = (): NodeJS.ProcessEnv => ({
   // Present to prove agent mode ignores them (spec §2.3).
-  PIDB_URL: 'https://should-be-ignored.example.com',
-  PIDB_TOKEN: 'pidb_should_be_ignored',
+  BLINDKEY_URL: 'https://should-be-ignored.example.com',
+  BLINDKEY_TOKEN: 'bk_should_be_ignored',
 });
 
 function program(overrides: Partial<{ store: TokenStore; cwd: string }> = {}) {
@@ -23,8 +23,8 @@ function program(overrides: Partial<{ store: TokenStore; cwd: string }> = {}) {
 }
 
 beforeEach(() => {
-  dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-cli-data-'));
-  repoDir = mkdtempSync(join(tmpdir(), 'pidb-agent-cli-repo-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-cli-data-'));
+  repoDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-cli-repo-'));
   store = memoryStore();
 });
 
@@ -37,7 +37,7 @@ async function run(p: ReturnType<typeof program>, args: string[]): Promise<strin
     return true;
   }) as typeof process.stdout.write;
   try {
-    await p.parseAsync(['node', 'pidb', ...args]);
+    await p.parseAsync(['node', 'blindkey', ...args]);
   } finally {
     process.stdout.write = original;
   }
@@ -56,8 +56,8 @@ async function expectCliError(p: Promise<unknown>): Promise<CliError> {
 
 describe('agent mode: profile', () => {
   it('add creates a profile and makes it the default the first time', async () => {
-    await run(program(), ['profile', 'add', 'work', 'https://pidb.example.com/']);
-    expect(loadProfiles(dataDir)).toEqual({ default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } });
+    await run(program(), ['profile', 'add', 'work', 'https://blindkey.example.com/']);
+    expect(loadProfiles(dataDir)).toEqual({ default: 'work', profiles: { work: { url: 'https://blindkey.example.com' } } });
   });
 
   it('add does not change the default when one is already set', async () => {
@@ -74,58 +74,58 @@ describe('agent mode: profile', () => {
   });
 
   it('use rejects an unknown profile', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'profile', 'use', 'nope']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'profile', 'use', 'nope']));
     expect(err.exitCode).toBe(4);
     expect(err.message).toMatch(/unknown profile "nope"/);
   });
 
   it('remove deletes the profile, clears the default if it was the default, and deletes its stored token', async () => {
     await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
-    await store.set('work', 'pidb_work_token');
+    await store.set('work', 'bk_work_token');
     await run(program(), ['profile', 'remove', 'work']);
     expect(loadProfiles(dataDir)).toEqual({ default: null, profiles: {} });
     expect(await store.get('work')).toBeNull();
   });
 
   it('remove rejects an unknown profile', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'profile', 'remove', 'nope']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'profile', 'remove', 'nope']));
     expect(err.exitCode).toBe(4);
   });
 
   it('list output includes the url but the JSON never includes a token', async () => {
     await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
-    await store.set('work', 'pidb_super_secret_token');
+    await store.set('work', 'bk_super_secret_token');
     const captured = await run(program(), ['profile', 'list', '--json']);
     expect(captured).toContain('work.example.com');
-    expect(captured).not.toContain('pidb_super_secret_token');
+    expect(captured).not.toContain('bk_super_secret_token');
   });
 
   it('add refuses an existing profile name rather than silently overwriting its url', async () => {
     await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'profile', 'add', 'work', 'https://other.example.com']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'profile', 'add', 'work', 'https://other.example.com']));
     expect(err.exitCode).toBe(2);
-    expect(err.message).toBe('profile work exists — use `pidb profile set-url work <url>`');
+    expect(err.message).toBe('profile work exists — use `blindkey profile set-url work <url>`');
     // Untouched: the refused add did not change the stored url.
     expect(loadProfiles(dataDir).profiles.work).toEqual({ url: 'https://work.example.com' });
   });
 
   it('set-url changes the url and clears the stored token', async () => {
     await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
-    await store.set('work', 'pidb_old_token');
+    await store.set('work', 'bk_old_token');
     const captured = await run(program(), ['profile', 'set-url', 'work', 'https://work2.example.com/']);
     expect(loadProfiles(dataDir).profiles.work).toEqual({ url: 'https://work2.example.com' });
     expect(await store.get('work')).toBeNull();
-    expect(captured).toContain('token cleared — run `pidb connect --profile work`');
+    expect(captured).toContain('token cleared — run `blindkey connect --profile work`');
   });
 
   it('set-url rejects an unknown profile', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'profile', 'set-url', 'nope', 'https://x.example.com']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'profile', 'set-url', 'nope', 'https://x.example.com']));
     expect(err.exitCode).toBe(4);
   });
 
   it('set-url deletes the token before saving the new url (crash-safety: never a new url with a stale token)', async () => {
     await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
-    await store.set('work', 'pidb_old_token');
+    await store.set('work', 'bk_old_token');
     let urlOnDiskWhenTokenWasDeleted: string | undefined;
     const spyingStore: TokenStore = {
       get: (p) => store.get(p),
@@ -142,7 +142,7 @@ describe('agent mode: profile', () => {
 
 describe('agent mode: bind / unbind / status', () => {
   it('bind fails when no profile is configured', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'bind', 'acme']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'bind', 'acme']));
     expect(err.exitCode).toBe(3);
     expect(err.message).toMatch(/no server configured/);
   });
@@ -166,7 +166,7 @@ describe('agent mode: bind / unbind / status', () => {
   it('status reports profile, url, bound project and connection state, and never the token', async () => {
     await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
     await run(program(), ['bind', 'acme']);
-    await store.set('work', 'pidb_super_secret_token');
+    await store.set('work', 'bk_super_secret_token');
 
     const captured = await run(program(), ['status']);
 
@@ -174,7 +174,7 @@ describe('agent mode: bind / unbind / status', () => {
     expect(captured).toContain('url: https://work.example.com');
     expect(captured).toContain('project: acme');
     expect(captured).toContain('connected: yes');
-    expect(captured).not.toContain('pidb_super_secret_token');
+    expect(captured).not.toContain('bk_super_secret_token');
   });
 
   it('status reports "connected: no" and no url/project when nothing is configured', async () => {
@@ -185,42 +185,42 @@ describe('agent mode: bind / unbind / status', () => {
 
   it('status --json never includes a token field', async () => {
     await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
-    await store.set('work', 'pidb_super_secret_token');
+    await store.set('work', 'bk_super_secret_token');
 
     const captured = await run(program(), ['status', '--json']);
     const parsed = JSON.parse(captured) as Record<string, unknown>;
     expect(parsed).toEqual({ profile: 'work', url: 'https://work.example.com', project: null, connected: true });
-    expect(captured).not.toContain('pidb_super_secret_token');
+    expect(captured).not.toContain('bk_super_secret_token');
   });
 });
 
 describe('agent mode: disabled commands', () => {
   it('login exits 2 with the spec message', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'login', 'https://x.example.com']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'login', 'https://x.example.com']));
     expect(err.exitCode).toBe(2);
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });
 
   it('login with no <url> still exits 2 with the agent message, not commander\'s "missing required argument"', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'login']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'login']));
     expect(err.exitCode).toBe(2);
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });
 
   it('secret get exits 2 with the spec message', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'secret', 'get', 'global', 'X', 'k']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'secret', 'get', 'global', 'X', 'k']));
     expect(err.exitCode).toBe(2);
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });
 
   it('secret get with no arguments at all still exits 2 with the agent message', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'secret', 'get']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'secret', 'get']));
     expect(err.exitCode).toBe(2);
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });
 
   it('secret set exits 2 with the spec message', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'secret', 'set', 'global', 'X', 'k']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'secret', 'set', 'global', 'X', 'k']));
     expect(err.exitCode).toBe(2);
   });
 
@@ -230,20 +230,20 @@ describe('agent mode: disabled commands', () => {
       ['token', 'list'],
       ['token', 'revoke', 'abc'],
     ]) {
-      const err = await expectCliError(program().parseAsync(['node', 'pidb', ...args]));
+      const err = await expectCliError(program().parseAsync(['node', 'blindkey', ...args]));
       expect(err.exitCode).toBe(2);
       expect(err.message).toBe('not available to the Claude agent — ask the user');
     }
   });
 
   it('token create with no options at all still exits 2 with the agent message, not a missing-option error', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'token', 'create']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'token', 'create']));
     expect(err.exitCode).toBe(2);
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });
 
   it('bare `token` (no subcommand) refuses instead of showing the group\'s help', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'token']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'token']));
     expect(err.exitCode).toBe(2);
     expect(err.message).toBe('not available to the Claude agent — ask the user');
   });
@@ -265,16 +265,16 @@ describe('agent mode: disabled commands', () => {
 
 describe('agent mode: search is available (spec ruling)', () => {
   it('is registered — fails on config resolution (no profile configured), not on an unknown command', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'search', 'anything']));
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'search', 'anything']));
     expect(err.exitCode).toBe(3);
     expect(err.message).toMatch(/no server configured/);
   });
 });
 
-describe('agent mode: PIDB_URL / PIDB_TOKEN are ignored', () => {
-  it('a configured profile wins over PIDB_URL, and the keyring token wins over PIDB_TOKEN', async () => {
+describe('agent mode: BLINDKEY_URL / BLINDKEY_TOKEN are ignored', () => {
+  it('a configured profile wins over BLINDKEY_URL, and the keyring token wins over BLINDKEY_TOKEN', async () => {
     await run(program(), ['profile', 'add', 'work', 'https://work.example.com']);
-    await store.set('work', 'pidb_real_token');
+    await store.set('work', 'bk_real_token');
 
     const captured = await run(program(), ['status', '--json']);
     const parsed = JSON.parse(captured) as { url: string };
@@ -282,8 +282,8 @@ describe('agent mode: PIDB_URL / PIDB_TOKEN are ignored', () => {
     expect(parsed.url).not.toContain('should-be-ignored');
   });
 
-  it('with no profile configured, resolveAgentConfig errors instead of falling back to PIDB_URL/TOKEN', async () => {
-    const err = await expectCliError(program().parseAsync(['node', 'pidb', 'bind', 'acme']));
+  it('with no profile configured, resolveAgentConfig errors instead of falling back to BLINDKEY_URL/TOKEN', async () => {
+    const err = await expectCliError(program().parseAsync(['node', 'blindkey', 'bind', 'acme']));
     expect(err.message).toMatch(/no server configured/);
   });
 });
@@ -291,7 +291,7 @@ describe('agent mode: PIDB_URL / PIDB_TOKEN are ignored', () => {
 describe('normal mode is unaffected', () => {
   it('does not register agent-only commands (profile/bind/unbind/status)', async () => {
     const normal = buildProgram();
-    await expect(normal.parseAsync(['node', 'pidb', 'profile', 'list'])).rejects.toThrow();
+    await expect(normal.parseAsync(['node', 'blindkey', 'profile', 'list'])).rejects.toThrow();
   });
 });
 

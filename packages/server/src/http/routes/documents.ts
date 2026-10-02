@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { documentInputSchema } from '@pidb/shared';
+import { documentInputSchema } from '@blindkey/shared';
 import type { AppContext } from '../context.js';
 import { actorOf, parseBody, principalOf } from '../helpers.js';
 import { deleteDocumentFor, listDocumentsFor, readDocumentFor, writeDocumentFor } from '../../services/documents.js';

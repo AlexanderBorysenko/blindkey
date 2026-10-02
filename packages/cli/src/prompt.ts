@@ -23,7 +23,7 @@ const BACKSPACE = '\u007f';
  * Between prompts (no waiter registered), the reader is paused and `stdin` is
  * unref'd: a caller that keeps its end of the pipe open (a `spawn` with the
  * default `stdio: 'pipe'`, `docker exec -i`, a CI harness) must not force
- * `pidb login` to keep running until that pipe closes once it already has
+ * `blindkey login` to keep running until that pipe closes once it already has
  * every answer it asked for. `nextNonTtyLine` re-arms both when a waiter
  * needs a line. Pausing the reader can still let an already-received chunk
  * finish emitting any further `line` events it contains (Node parses a

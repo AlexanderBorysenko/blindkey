@@ -7,7 +7,7 @@ import { getProjectBySlug } from '../src/repos/projects.js';
 
 let t: TestCtx;
 let session: string;
-const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
 const acmeId = () => getProjectBySlug(t.db, 'acme')!.id;
 const rowsSection = (body: string) => body.slice(body.indexOf('id="rows"'), body.indexOf('row-actions'));
 
@@ -15,7 +15,7 @@ beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
 });
 afterAll(async () => {

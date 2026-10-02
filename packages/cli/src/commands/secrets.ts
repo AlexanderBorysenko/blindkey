@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { ApiError, scopedPath, seg, type PidbClient } from '../client.js';
+import { ApiError, scopedPath, seg, type BlindkeyClient } from '../client.js';
 import type { PublicSecret } from '../api-types.js';
 import { CliError, EXIT_REFUSED } from '../errors.js';
 import { table, type CommandResult } from '../output.js';
@@ -11,7 +11,7 @@ export interface SecretSetOptions {
   create?: boolean;
 }
 
-export async function runSecretsList(client: PidbClient, target: string): Promise<CommandResult> {
+export async function runSecretsList(client: BlindkeyClient, target: string): Promise<CommandResult> {
   const secrets = await client.json<PublicSecret[]>('GET', scopedPath(target, 'secrets'));
   return {
     json: secrets,
@@ -26,13 +26,13 @@ export async function runSecretsList(client: PidbClient, target: string): Promis
         ]),
       ),
       '',
-      '* = sensitive; consume values with `pidb secret exec|write|env`',
+      '* = sensitive; consume values with `blindkey secret exec|write|env`',
     ].join('\n'),
   };
 }
 
 export async function runSecretGet(
-  client: PidbClient,
+  client: BlindkeyClient,
   target: string,
   name: string,
   field: string,
@@ -43,9 +43,9 @@ export async function runSecretGet(
       [
         'refusing to print a secret value without --print.',
         'Prefer a command that never puts the value on screen:',
-        `  pidb secret exec ${target} "${name}" -- <command>     # value as $PIDB_${field.toUpperCase()}`,
-        `  pidb secret write ${target} "${name}" ${field} --out <path>`,
-        `  pidb secret env ${target} "${name}" --out <path>`,
+        `  blindkey secret exec ${target} "${name}" -- <command>     # value as $BLINDKEY_${field.toUpperCase()}`,
+        `  blindkey secret write ${target} "${name}" ${field} --out <path>`,
+        `  blindkey secret env ${target} "${name}" --out <path>`,
         'Re-run with --print if you really want it on stdout.',
       ].join('\n'),
       EXIT_REFUSED,
@@ -70,11 +70,11 @@ export async function readSecretValue(opts: SecretSetOptions, stdin: NodeJS.Read
     }
   }
   const raw = await readStdin(stdin);
-  return raw.replace(/\n$/, ''); // one trailing newline, so `echo v | pidb secret set` does the obvious thing
+  return raw.replace(/\n$/, ''); // one trailing newline, so `echo v | blindkey secret set` does the obvious thing
 }
 
 export async function runSecretSet(
-  client: PidbClient,
+  client: BlindkeyClient,
   target: string,
   name: string,
   field: string,

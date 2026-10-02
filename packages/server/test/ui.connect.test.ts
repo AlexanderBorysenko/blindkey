@@ -41,8 +41,8 @@ describe('ui connect: GET /connect requires an admin session and preserves next 
     const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw', next } });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe(next);
-    const session = res.cookies.find((c) => c.name === 'pidb_session')!.value;
-    const page = await t.app.inject({ method: 'GET', url: next, cookies: { pidb_session: session } });
+    const session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const page = await t.app.inject({ method: 'GET', url: next, cookies: { blindkey_session: session } });
     expect(page.statusCode).toBe(200);
     expect(main(page.body)).toContain('Connect an agent');
   });
@@ -81,13 +81,13 @@ describe('ui connect: GET /connect requires an admin session and preserves next 
     const loginRes = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw', next } });
     expect(loginRes.statusCode).toBe(302);
     expect(loginRes.headers.location).toBe(`/login/2fa?next=${encodeURIComponent(next)}`);
-    const challengeCookie = loginRes.cookies.find((c) => c.name === 'pidb_2fa')!.value;
+    const challengeCookie = loginRes.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
 
-    const getChallenge = await t.app.inject({ method: 'GET', url: `/login/2fa?next=${encodeURIComponent(next)}`, cookies: { pidb_2fa: challengeCookie } });
+    const getChallenge = await t.app.inject({ method: 'GET', url: `/login/2fa?next=${encodeURIComponent(next)}`, cookies: { blindkey_2fa: challengeCookie } });
     expect(getChallenge.body).toContain(`name="next" value="${next}"`);
 
     const code = hotp(secret(), stepAt(Date.now()) + 1);
-    const finish = await t.app.inject({ method: 'POST', url: '/login/2fa', cookies: { pidb_2fa: challengeCookie }, payload: { code, next } });
+    const finish = await t.app.inject({ method: 'POST', url: '/login/2fa', cookies: { blindkey_2fa: challengeCookie }, payload: { code, next } });
     expect(finish.statusCode).toBe(302);
     expect(finish.headers.location).toBe(next);
   });
@@ -98,9 +98,9 @@ describe('ui connect: the approve page', () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
 
-    const res = await t.app.inject({ method: 'GET', url: '/connect?code=ZZZZ-ZZZZ', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/connect?code=ZZZZ-ZZZZ', cookies: { blindkey_session: session } });
     expect(res.statusCode).toBe(200);
     expect(main(res.body)).toContain('invalid, expired, or already used');
   });
@@ -111,10 +111,10 @@ describe('ui connect: the approve page', () => {
     t.project('alpha');
     t.project('beta');
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
 
     const { user_code: userCode } = await startConnect(t, { name: 'claude', scopes: ['projects:read', 'docs:read'], projects: ['alpha', 'ghost'] });
-    const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { blindkey_session: session } });
     const body = main(res.body);
 
     for (const scope of ['admin', 'secrets:reveal', 'secrets:write']) {
@@ -138,10 +138,10 @@ describe('ui connect: the approve page', () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
     const { user_code: userCode } = await startConnect(t);
 
-    const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { blindkey_session: session } });
     const body = main(res.body);
     expect(body).toContain(userCode);
     expect(body).toContain('confirm it matches the code in your terminal');
@@ -152,10 +152,10 @@ describe('ui connect: the approve page', () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
+    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
     const { user_code: userCode } = await startConnect(t, { name: 'x', scopes: ['projects:read'], projects: [] });
 
-    const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { blindkey_session: session } });
     const body = main(res.body);
     expect(body).toContain('none requested — pick at least one');
     expect(body).not.toContain('all-project scope');
@@ -167,8 +167,8 @@ describe('ui connect: approve/deny outcomes', () => {
     createAdmin(t.db, 'alex', await hashPassword('pw'));
     t.project('alpha');
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
-    const page = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const page = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
     const { user_code: userCode } = await startConnect(t, { name: 'claude', scopes: ['projects:read'], projects: ['alpha'] });
     return { session, csrf, userCode };
@@ -180,12 +180,12 @@ describe('ui connect: approve/deny outcomes', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/connect/approve',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, code: userCode, scopes: ['projects:read'], projects: ['alpha'], expires_days: '90' },
     });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/tokens?done=approved');
-    const tokens = await t.app.inject({ method: 'GET', url: res.headers.location as string, cookies: { pidb_session: session } });
+    const tokens = await t.app.inject({ method: 'GET', url: res.headers.location as string, cookies: { blindkey_session: session } });
     // The flash toast is rendered by the layout outside <main> (spec: same mechanism as
     // done=saved/revoked elsewhere), so it's checked against the full body, not the main() slice.
     expect(tokens.body).toContain('class="toast"');
@@ -198,12 +198,12 @@ describe('ui connect: approve/deny outcomes', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/connect/deny',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, code: userCode },
     });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/tokens?done=denied');
-    const tokens = await t.app.inject({ method: 'GET', url: res.headers.location as string, cookies: { pidb_session: session } });
+    const tokens = await t.app.inject({ method: 'GET', url: res.headers.location as string, cookies: { blindkey_session: session } });
     expect(tokens.body).toContain('class="toast"');
     expect(tokens.body).toContain('Denied');
   });
@@ -214,8 +214,8 @@ describe('ui connect: approve/deny outcomes', () => {
     t.project('alpha');
     t.project('beta');
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
-    const page = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const page = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
     // Requested only projects:read/alpha, but the approver ticks docs:read/beta and drops all
     // projects (triggering the "at least one project" validation error).
@@ -224,7 +224,7 @@ describe('ui connect: approve/deny outcomes', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/connect/approve',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf, code: userCode, scopes: ['docs:read'], projects: [], expires_days: '30' },
     });
     expect(res.statusCode).toBe(400);

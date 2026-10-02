@@ -14,7 +14,7 @@ const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
  * `agent.bridge.test.ts` suite covers `createBridge`'s own logic via the SDK's `InMemoryTransport`,
  * but never spawns the real entry or exercises `StdioServerTransport`'s line-based read buffer.
  *
- * No profile is configured (`PIDB_PLUGIN_DATA` points at a fresh, empty data dir), so
+ * No profile is configured (`BLINDKEY_PLUGIN_DATA` points at a fresh, empty data dir), so
  * `resolveAgentConfig` fails fast on "no server configured" before ever touching a token store —
  * this is what makes the test runnable without a real OS keychain (`keyringStore` only loads
  * `@napi-rs/keyring` lazily, on a `get`/`set`/`delete` call that never happens here).
@@ -63,10 +63,10 @@ function waitForResponse(c: ChildProcessWithoutNullStreams, id: number, timeoutM
 }
 
 describe('MCP bridge executable entry (packages/cli/src/agent/bridge-main.ts), real stdio', () => {
-  it('answers initialize and tools/list with the static upstream tools + local pidb_* tools when not connected (F2)', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-bridge-main-'));
+  it('answers initialize and tools/list with the static upstream tools + local blindkey_* tools when not connected (F2)', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-bridge-main-'));
     child = spawn(join(repoRoot, 'node_modules/.bin/tsx'), [join(repoRoot, 'packages/cli/src/agent/bridge-main.ts')], {
-      env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_PLUGIN_DATA: dataDir },
+      env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', BLINDKEY_PLUGIN_DATA: dataDir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';
@@ -81,7 +81,7 @@ describe('MCP bridge executable entry (packages/cli/src/agent/bridge-main.ts), r
     });
     const initRes = await waitForResponse(child, 1);
     expect(initRes.error).toBeUndefined();
-    expect((initRes.result as { serverInfo?: { name?: string } }).serverInfo?.name).toBe('pidb-bridge');
+    expect((initRes.result as { serverInfo?: { name?: string } }).serverInfo?.name).toBe('blindkey-bridge');
 
     send(child, { jsonrpc: '2.0', method: 'notifications/initialized' });
     send(child, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
@@ -95,9 +95,9 @@ describe('MCP bridge executable entry (packages/cli/src/agent/bridge-main.ts), r
         'create_project',
         'list_projects',
         'list_secrets',
-        'pidb_bind',
-        'pidb_profiles',
-        'pidb_status',
+        'blindkey_bind',
+        'blindkey_profiles',
+        'blindkey_status',
         'read_document',
         'search',
         'secret_request_link',

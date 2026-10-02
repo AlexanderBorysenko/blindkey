@@ -13,7 +13,7 @@ export interface SecretRequestLinkInput {
 
 /**
  * Path + query of the admin-UI page where the user types a secret's values (spec §1.5), shared by
- * the MCP `secret_request_link` tool and `pidb secrets request`. `sensitive: false` is honoured only
+ * the MCP `secret_request_link` tool and `blindkey secrets request`. `sensitive: false` is honoured only
  * for keys that are non-sensitive by default: an agent must not be able to make e.g. `password` a
  * visible field whose value list_secrets would then return to it. The user can still untick the row.
  */

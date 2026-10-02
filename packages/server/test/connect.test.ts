@@ -8,11 +8,11 @@ import { createToken } from '../src/repos/tokens.js';
 
 async function login(t: Awaited<ReturnType<typeof makeTestApp>>, username = 'alex', password = 'pw') {
   const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username, password } });
-  return res.cookies.find((c) => c.name === 'pidb_session')!.value;
+  return res.cookies.find((c) => c.name === 'blindkey_session')!.value;
 }
 
 async function csrfFor(t: Awaited<ReturnType<typeof makeTestApp>>, session: string): Promise<string> {
-  const res = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+  const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
   return /name="csrf" value="([^"]+)"/.exec(res.body)![1]!;
 }
 
@@ -36,13 +36,13 @@ async function approve(
   return t.app.inject({
     method: 'POST',
     url: '/connect/approve',
-    cookies: { pidb_session: session },
+    cookies: { blindkey_session: session },
     payload: { csrf, code, scopes, projects, expires_days: String(expiresDays) },
   });
 }
 
 async function deny(t: Awaited<ReturnType<typeof makeTestApp>>, session: string, csrf: string, code: string) {
-  return t.app.inject({ method: 'POST', url: '/connect/deny', cookies: { pidb_session: session }, payload: { csrf, code } });
+  return t.app.inject({ method: 'POST', url: '/connect/deny', cookies: { blindkey_session: session }, payload: { csrf, code } });
 }
 
 describe('device flow: start (spec §1.3)', () => {
@@ -188,7 +188,7 @@ describe('device flow: approve then poll issues a token (spec §1.3)', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/connect/approve',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { code: userCode, scopes: ['projects:read'], projects: ['alpha'] },
     });
     expect(res.statusCode).toBe(403);
@@ -284,7 +284,7 @@ describe('device flow: approve then poll issues a token (spec §1.3)', () => {
     const pollRes = await poll(t, deviceCode);
     expect(pollRes.statusCode).toBe(200);
     const b = pollRes.json();
-    expect(b.token).toMatch(/^pidb_/);
+    expect(b.token).toMatch(/^bk_/);
     expect(b.name).toBe('claude-prod@laptop');
     expect(b.scopes.sort()).toEqual(['docs:read', 'projects:read']);
     expect(b.projects.sort()).toEqual(['alpha', 'beta']);

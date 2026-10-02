@@ -30,7 +30,7 @@ describe('POST /api/v1/auth/token — 2FA', () => {
 
     const r = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse' } });
     expect(r.statusCode).toBe(201);
-    expect(r.json().token).toMatch(/^pidb_/);
+    expect(r.json().token).toMatch(/^bk_/);
   });
 
   it('enabled, no totp: 401 totp_required, no auth.login_failed or auth.totp_failed audit row, but auth.password_ok is written', async () => {

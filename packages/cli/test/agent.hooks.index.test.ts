@@ -9,7 +9,7 @@ import { memoryStore } from '../src/agent/tokenstore.js';
 let dataDir: string;
 
 beforeEach(() => {
-  dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-hooks-dispatcher-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-hooks-dispatcher-'));
 });
 
 function hookJson(overrides: Record<string, unknown>): string {
@@ -23,7 +23,7 @@ describe('runHook — guard', () => {
   });
 
   it('prints the documented PreToolUse deny JSON for a denied command', async () => {
-    const result = await runHook('guard', hookJson({ tool_name: 'Bash', tool_input: { command: 'pidb login https://x' } }), {
+    const result = await runHook('guard', hookJson({ tool_name: 'Bash', tool_input: { command: 'blindkey login https://x' } }), {
       CLAUDE_PLUGIN_DATA: dataDir,
     });
     expect(result.exitCode).toBe(0);
@@ -36,8 +36,8 @@ describe('runHook — guard', () => {
   });
 
   it('reads written.json and protects a file recorded there', async () => {
-    recordWritten(dataDir, '/repo/.pidb/db.env');
-    const result = await runHook('guard', hookJson({ tool_name: 'Bash', tool_input: { command: 'cat /repo/.pidb/db.env' } }), {
+    recordWritten(dataDir, '/repo/.blindkey/db.env');
+    const result = await runHook('guard', hookJson({ tool_name: 'Bash', tool_input: { command: 'cat /repo/.blindkey/db.env' } }), {
       CLAUDE_PLUGIN_DATA: dataDir,
     });
     const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { permissionDecision: string } };
@@ -45,8 +45,8 @@ describe('runHook — guard', () => {
   });
 
   it('reads profiles.json for the curl-target rule', async () => {
-    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } });
-    const result = await runHook('guard', hookJson({ tool_name: 'Bash', tool_input: { command: 'curl https://pidb.example.com/api/v1/projects' } }), {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://blindkey.example.com' } } });
+    const result = await runHook('guard', hookJson({ tool_name: 'Bash', tool_input: { command: 'curl https://blindkey.example.com/api/v1/projects' } }), {
       CLAUDE_PLUGIN_DATA: dataDir,
     });
     const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { permissionDecision: string } };
@@ -62,17 +62,17 @@ describe('runHook — guard', () => {
     const result = await runHook('guard', 'not json', { CLAUDE_PLUGIN_DATA: dataDir });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toMatch(/pidb hook \(guard\)/);
+    expect(result.stderr).toMatch(/blindkey hook \(guard\)/);
   });
 
   it('a corrupt written.json degrades to an empty written-paths list — it does NOT fail the whole guard open', async () => {
     writeFileSync(join(dataDir, 'written.json'), '{not valid json', 'utf8');
     // profiles.json is fine, so the curl-target rule (unrelated to written.json) must still fire —
     // this is what proves the corruption didn't bubble out and silently allow *everything*.
-    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } });
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://blindkey.example.com' } } });
     const result = await runHook(
       'guard',
-      hookJson({ tool_name: 'Bash', tool_input: { command: 'curl https://pidb.example.com/api/v1/projects' } }),
+      hookJson({ tool_name: 'Bash', tool_input: { command: 'curl https://blindkey.example.com/api/v1/projects' } }),
       { CLAUDE_PLUGIN_DATA: dataDir },
     );
     const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { permissionDecision: string } };
@@ -80,13 +80,13 @@ describe('runHook — guard', () => {
     expect(result.stderr).toMatch(/written\.json unreadable/);
   });
 
-  it('passes env.APPDATA through to the guard context for the %APPDATA%\\pidb rule', async () => {
+  it('passes env.APPDATA through to the guard context for the %APPDATA%\\blindkey rule', async () => {
     // A literal Windows-style path — deliberately not derived from the real (POSIX) tmp dir, so the
     // win32 path module resolves it exactly the way it would on a real Windows session.
     const appData = 'C:\\Users\\alex\\Custom\\AppData';
     const result = await runHook(
       'guard',
-      hookJson({ tool_name: 'Bash', tool_input: { command: 'type %APPDATA%\\pidb\\config.json' } }),
+      hookJson({ tool_name: 'Bash', tool_input: { command: 'type %APPDATA%\\blindkey\\config.json' } }),
       { CLAUDE_PLUGIN_DATA: dataDir, APPDATA: appData },
       { platform: 'win32' },
     );
@@ -113,7 +113,7 @@ describe('runHook — redact', () => {
   });
 
   it('prints the documented PostToolUse updatedToolOutput JSON when something was redacted', async () => {
-    const token = `pidb_${'a'.repeat(24)}`;
+    const token = `bk_Prefix01_${'a'.repeat(43)}`;
     const result = await runHook(
       'redact',
       JSON.stringify({ hook_event_name: 'PostToolUse', cwd: '/repo', tool_name: 'Bash', tool_response: { stdout: `token: ${token}`, stderr: '' } }),
@@ -121,24 +121,24 @@ describe('runHook — redact', () => {
     );
     const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { hookEventName: string; updatedToolOutput: { stdout: string; stderr: string } } };
     expect(parsed.hookSpecificOutput.hookEventName).toBe('PostToolUse');
-    expect(parsed.hookSpecificOutput.updatedToolOutput.stdout).toContain('[pidb:redacted]');
+    expect(parsed.hookSpecificOutput.updatedToolOutput.stdout).toContain('[blindkey:redacted]');
     expect(parsed.hookSpecificOutput.updatedToolOutput.stdout).not.toContain(token);
   });
 
   it('handles a plain-string tool_response', async () => {
-    const token = `pidb_${'b'.repeat(24)}`;
+    const token = `bk_Prefix01_${'b'.repeat(43)}`;
     const result = await runHook('redact', JSON.stringify({ hook_event_name: 'PostToolUse', cwd: '/repo', tool_response: `x=${token}` }), {
       CLAUDE_PLUGIN_DATA: dataDir,
     });
     const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { updatedToolOutput: string } };
-    expect(parsed.hookSpecificOutput.updatedToolOutput).toBe('x=[pidb:redacted]');
+    expect(parsed.hookSpecificOutput.updatedToolOutput).toBe('x=[blindkey:redacted]');
   });
 
   it('never throws on malformed stdin — no redaction and a stderr note', async () => {
     const result = await runHook('redact', '{not valid json', { CLAUDE_PLUGIN_DATA: dataDir });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toMatch(/pidb hook \(redact\)/);
+    expect(result.stderr).toMatch(/blindkey hook \(redact\)/);
   });
 });
 
@@ -153,7 +153,7 @@ describe('runHook — session-start', () => {
   });
 
   it('uses the injected store/fetchImpl deps instead of a real keyring', async () => {
-    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } });
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://blindkey.example.com' } } });
     const store = memoryStore({ work: 'a-token' });
     const result = await runHook('session-start', JSON.stringify({ hook_event_name: 'SessionStart', cwd: '/repo' }), { CLAUDE_PLUGIN_DATA: dataDir }, {
       store,
@@ -175,9 +175,9 @@ describe('runHook — session-start', () => {
 
 describe('runHook — CLAUDE_PLUGIN_DATA vs resolveDataDir precedence', () => {
   it('prefers CLAUDE_PLUGIN_DATA over a derivable plugin-cache self path', async () => {
-    const other = mkdtempSync(join(tmpdir(), 'pidb-agent-hooks-other-'));
+    const other = mkdtempSync(join(tmpdir(), 'blindkey-agent-hooks-other-'));
     saveProfiles(other, { default: 'other-profile', profiles: { 'other-profile': { url: 'https://other.example.com' } } });
-    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } });
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://blindkey.example.com' } } });
     // Inject a store explicitly here (rather than falling through to the real `keyringStore`) — this
     // test is only about data-dir precedence, not the OS credential store, which the "no profile"
     // cases above never touch since `resolveAgentConfig`-style resolution short-circuits before it.
@@ -189,12 +189,12 @@ describe('runHook — CLAUDE_PLUGIN_DATA vs resolveDataDir precedence', () => {
     expect(parsed.hookSpecificOutput.additionalContext).not.toContain('other-profile');
   });
 
-  it('treats an empty CLAUDE_PLUGIN_DATA as unset (falls back to PIDB_PLUGIN_DATA via resolveDataDir), same as main.ts', async () => {
-    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } });
+  it('treats an empty CLAUDE_PLUGIN_DATA as unset (falls back to BLINDKEY_PLUGIN_DATA via resolveDataDir), same as main.ts', async () => {
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://blindkey.example.com' } } });
     const result = await runHook(
       'session-start',
       JSON.stringify({ hook_event_name: 'SessionStart', cwd: '/repo' }),
-      { CLAUDE_PLUGIN_DATA: '', PIDB_PLUGIN_DATA: dataDir },
+      { CLAUDE_PLUGIN_DATA: '', BLINDKEY_PLUGIN_DATA: dataDir },
       { store: memoryStore() },
     );
     const parsed = JSON.parse(result.stdout) as { hookSpecificOutput: { additionalContext: string } };
@@ -203,7 +203,7 @@ describe('runHook — CLAUDE_PLUGIN_DATA vs resolveDataDir precedence', () => {
 });
 
 describe('exportDataDir — CLAUDE_ENV_FILE', () => {
-  it('exports PIDB_PLUGIN_DATA, shell-quoted, so the bin shim uses the hooks’ data dir', async () => {
+  it('exports BLINDKEY_PLUGIN_DATA, shell-quoted, so the bin shim uses the hooks’ data dir', async () => {
     const { exportDataDir } = await import('../src/agent/hooks/index.js');
     const { readFileSync } = await import('node:fs');
     const { execFileSync } = await import('node:child_process');
@@ -211,9 +211,9 @@ describe('exportDataDir — CLAUDE_ENV_FILE', () => {
     writeFileSync(envFile, '');
     const tricky = join(dataDir, "it's a dir");
     exportDataDir({ CLAUDE_ENV_FILE: envFile }, tricky);
-    expect(readFileSync(envFile, 'utf8')).toContain('export PIDB_PLUGIN_DATA=');
+    expect(readFileSync(envFile, 'utf8')).toContain('export BLINDKEY_PLUGIN_DATA=');
     if (process.platform !== 'win32') {
-      const out = execFileSync('sh', ['-c', `. "${envFile}"; printf %s "$PIDB_PLUGIN_DATA"`], { encoding: 'utf8' });
+      const out = execFileSync('sh', ['-c', `. "${envFile}"; printf %s "$BLINDKEY_PLUGIN_DATA"`], { encoding: 'utf8' });
       expect(out).toBe(tricky);
     }
   });

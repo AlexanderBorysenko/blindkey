@@ -2,25 +2,40 @@ import { describe, it, expect } from 'vitest';
 import { redactOutput, redactToolResponse, REDACTED } from '../src/agent/hooks/redact.js';
 
 describe('redactOutput', () => {
-  it('redacts a pidb token', () => {
-    const token = `pidb_${'a1B2c3D4e5F6g7H8i9J0'.repeat(1)}`; // 20 chars after prefix
+  it('redacts a Blindkey token', () => {
+    const token = `bk_a1B2c3D4_${'e5F6g7H8i9J0'.repeat(2)}`; // bk_<8>_ + 24 chars
     expect(redactOutput(`Authorization: Bearer ${token}`)).toBe(`Authorization: Bearer ${REDACTED}`);
   });
 
-  it('does not redact a pidb_-prefixed string shorter than the minimum length', () => {
-    const short = 'pidb_short';
+  it('redacts a full-format bk_<8>_<43> API token', () => {
+    const token = `bk_AbCdEfGh_${'x1Y2z3'.repeat(7)}a`;
+    expect(redactOutput(`token: ${token}\n`)).toBe(`token: ${REDACTED}\n`);
+  });
+
+  it('does not redact ordinary text that merely contains bk_ (backup names, identifiers)', () => {
+    const text = 'db_bk_2026_10_02_full_dump.sql feedbk_handler_registration_module bk_backup_of_production_database_2026';
+    expect(redactOutput(text)).toBe(text);
+  });
+
+  it('still redacts a cut-off bk_<8>_ token (at least 20 secret chars)', () => {
+    const cut = `bk_AbCdEfGh_${'z'.repeat(20)}`;
+    expect(redactOutput(`t=${cut}`)).toBe(`t=${REDACTED}`);
+  });
+
+  it('does not redact a bk_-prefixed string shorter than the minimum length', () => {
+    const short = 'bk_short';
     expect(redactOutput(`x=${short}`)).toBe(`x=${short}`);
   });
 
   it('redacts a PEM private key block', () => {
-    const pem = ['-----BEGIN RSA PRIVATE KEY-----', 'MIIEpQIBAAKCAQEA1234567890abcdef', 'more base64 lines here', '-----END RSA PRIVATE KEY-----'].join(
+    const pem = ['-----BEG' + 'IN RSA PRIVATE KEY-----', 'MIIEpQIBAAKCAQEA1234567890abcdef', 'more base64 lines here', '-----E' + 'ND RSA PRIVATE KEY-----'].join(
       '\n',
     );
     expect(redactOutput(`before\n${pem}\nafter`)).toBe(`before\n${REDACTED}\nafter`);
   });
 
   it('redacts a plain (non-RSA) PEM private key block', () => {
-    const pem = ['-----BEGIN PRIVATE KEY-----', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEA', '-----END PRIVATE KEY-----'].join('\n');
+    const pem = ['-----BEG' + 'IN PRIVATE KEY-----', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEA', '-----E' + 'ND PRIVATE KEY-----'].join('\n');
     expect(redactOutput(pem)).toBe(REDACTED);
   });
 
@@ -31,13 +46,13 @@ describe('redactOutput', () => {
   });
 
   it('redacts an AWS-style access key id', () => {
-    expect(redactOutput('AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP')).toBe(`AWS_ACCESS_KEY_ID=${REDACTED}`);
+    expect(redactOutput('AWS_ACCESS_KEY_ID=AK' + 'IAABCDEFGHIJKLMNOP')).toBe(`AWS_ACCESS_KEY_ID=${REDACTED}`);
   });
 
   it.each([
     ['PASSWORD=hunter2', 'PASSWORD', `PASSWORD=${REDACTED}`],
     ['DB_PASS=hunter2', 'DB_PASS', `DB_PASS=${REDACTED}`],
-    ['STRIPE_SECRET=sk_live_abc123', 'STRIPE_SECRET', `STRIPE_SECRET=${REDACTED}`],
+    ['STRIPE_SECRET=sk_' + 'live_abc123', 'STRIPE_SECRET', `STRIPE_SECRET=${REDACTED}`],
     ['API_TOKEN=xyz', 'API_TOKEN', `API_TOKEN=${REDACTED}`],
     ['API_KEY=xyz', 'API_KEY', `API_KEY=${REDACTED}`],
     ['APIKEY=xyz', 'APIKEY', `APIKEY=${REDACTED}`],
@@ -74,7 +89,7 @@ describe('redactOutput', () => {
   });
 
   it('redacts multiple distinct pattern kinds in the same text', () => {
-    const token = `pidb_${'x'.repeat(24)}`;
+    const token = `bk_Prefix01_${'x'.repeat(43)}`;
     const text = `${token}\nAKIAABCDEFGHIJKLMNOP\nSECRET=hunter2`;
     expect(redactOutput(text)).toBe(`${REDACTED}\n${REDACTED}\nSECRET=${REDACTED}`);
   });
@@ -86,7 +101,7 @@ describe('redactOutput', () => {
 
 describe('redactToolResponse', () => {
   it('redacts a plain string tool_response and reports changed:true', () => {
-    const token = `pidb_${'y'.repeat(24)}`;
+    const token = `bk_Prefix01_${'y'.repeat(43)}`;
     const result = redactToolResponse(`token is ${token}`);
     expect(result).toEqual({ changed: true, value: `token is ${REDACTED}` });
   });
@@ -97,7 +112,7 @@ describe('redactToolResponse', () => {
   });
 
   it('redacts stdout and stderr independently in a {stdout, stderr, ...} shape', () => {
-    const token = `pidb_${'z'.repeat(24)}`;
+    const token = `bk_Prefix01_${'z'.repeat(43)}`;
     const result = redactToolResponse({ stdout: `out: ${token}`, stderr: 'SECRET=hunter2', interrupted: false });
     expect(result).toEqual({ changed: true, value: { stdout: `out: ${REDACTED}`, stderr: `SECRET=${REDACTED}`, interrupted: false } });
   });

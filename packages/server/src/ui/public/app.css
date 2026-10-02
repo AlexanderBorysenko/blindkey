@@ -1,4 +1,4 @@
-/* pidb "Keyring" design system — hand-written, no build step, no CDN. */
+/* Blindkey "Keyring" design system — hand-written, no build step, no CDN. */
 
 /* ---------- Fonts ---------- */
 @font-face {
@@ -55,9 +55,9 @@ img { max-width: 100%; }
   --ink: #1b2230;
   --muted: #5b6474;
   --line: #dfe2e8;
-  --accent: #3355cc;
+  --accent: #4f46e5;
   --accent-ink: #ffffff;
-  --accent-soft: #e8edfb;
+  --accent-soft: #eceafd;
   --lock: #a8650f;
   --lock-soft: #fbf1e1;
   --ok: #2f8a57;
@@ -82,9 +82,9 @@ img { max-width: 100%; }
     --ink: #e4e7ed;
     --muted: #99a1ae;
     --line: #2a303a;
-    --accent: #7d98ff;
-    --accent-ink: #0d1330;
-    --accent-soft: #1f2a4a;
+    --accent: #8b85ff;
+    --accent-ink: #14123a;
+    --accent-soft: #242150;
     --lock: #e0a44f;
     --lock-soft: #33260f;
     --ok: #5cc28a;
@@ -729,11 +729,15 @@ tr.act-auth td:nth-child(4) { color: var(--muted); }
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 5px;
-  background: var(--ink);
-  color: var(--surface);
-  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  color: var(--accent);
+}
+.brand .mark svg { width: 100%; height: 100%; }
+.brand-lg { font-size: 18px; }
+.brand-lg .mark { width: 30px; height: 30px; }
+.auth-card .tagline {
+  text-align: center;
+  color: var(--muted);
+  margin: -8px 0 0;
 }
 
 .side-search {

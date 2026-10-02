@@ -1,4 +1,4 @@
-import type { DocCategory } from '@pidb/shared';
+import type { DocCategory } from '@blindkey/shared';
 import type { Db } from '../db/connection.js';
 import { inList, now } from './util.js';
 

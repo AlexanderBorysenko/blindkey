@@ -1,4 +1,4 @@
-import type { Scope } from '@pidb/shared';
+import type { Scope } from '@blindkey/shared';
 import type { Db } from '../db/connection.js';
 import { generateToken, hashToken, hashesEqual, parseTokenPrefix } from '../crypto/tokens.js';
 import { now, parseJsonArray } from './util.js';
@@ -16,7 +16,7 @@ export interface TokenRow {
   revoked_at: number | null;
   created_at: number;
   kind: TokenKind;
-  /** Admin-chosen display name (e.g. "Easy Renovation · home PC"); `name` stays the machine identity. */
+  /** Admin-chosen display name (e.g. "Acme Shop · home PC"); `name` stays the machine identity. */
   label: string | null;
 }
 
@@ -100,7 +100,7 @@ export function revokeToken(db: Db, id: number, ts: number = now()): boolean {
 /**
  * Revokes every still-active `kind='agent'` token with this exact name (spec §1.3): a device-flow
  * approval for a name that already has a live agent token supersedes it, rather than piling up
- * agent tokens under the same name every time `pidb connect` is re-run.
+ * agent tokens under the same name every time `blindkey connect` is re-run.
  */
 export function revokeAgentTokensByName(db: Db, name: string, ts: number = now()): number {
   return db

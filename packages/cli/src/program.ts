@@ -1,11 +1,11 @@
 // Side-effect-free: builds the commander program for both the normal and agent entries, and is the
 // only module either entry's bundle should share. Neither `cli.ts` nor `agent/cli.ts` import each
 // other — each is a thin, self-executing wrapper around this module — so that esbuild bundling one
-// entry (spec §2.1, `dist/pidb.mjs`) never drags in the other entry's `if (isEntryPoint()) void main()`
+// entry (spec §2.1, `dist/blindkey.mjs`) never drags in the other entry's `if (isEntryPoint()) void main()`
 // top-level side effect (which would otherwise run twice: once for the real entry point, once because
 // the bundle also contains the other file's module body sharing the same `import.meta.url`).
 import { Command, CommanderError } from 'commander';
-import { PidbClient } from './client.js';
+import { BlindkeyClient } from './client.js';
 import { loadConfig, normalizeUrl } from './config.js';
 import { CliError, EXIT_NOT_FOUND, EXIT_REFUSED } from './errors.js';
 import { emit, table } from './output.js';
@@ -23,15 +23,15 @@ import { runConnect } from './agent/connect.js';
 import { loadBindings, loadProfiles, performBind, repoKey, saveBindings, saveProfiles } from './agent/state.js';
 import { keyringStore, type TokenStore } from './agent/tokenstore.js';
 
-export function clientFrom(env: NodeJS.ProcessEnv = process.env): PidbClient {
-  return new PidbClient(loadConfig(env));
+export function clientFrom(env: NodeJS.ProcessEnv = process.env): BlindkeyClient {
+  return new BlindkeyClient(loadConfig(env));
 }
 
 /** Not available to the Claude agent (spec §2.3): `login`, `secret get`, `secret set`, `token *`. */
 const AGENT_REFUSED_MESSAGE = 'not available to the Claude agent — ask the user';
 
 export interface ProgramOptions {
-  /** Agent mode (spec §2.3) — also entered when `PIDB_AGENT=1` is set in `env`, see `main()`. */
+  /** Agent mode (spec §2.3) — also entered when `BLINDKEY_AGENT=1` is set in `env`, see `main()`. */
   agent?: boolean;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
@@ -48,10 +48,10 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   const dataDir = opts.dataDir ?? resolveDataDir(env);
   const store = opts.store ?? keyringStore(dataDir);
 
-  const client = async (): Promise<PidbClient> => {
+  const client = async (): Promise<BlindkeyClient> => {
     if (!agent) return clientFrom(env);
     const cfg = await resolveAgentConfig({ cwd, env, store, dataDir });
-    return new PidbClient({ url: cfg.url, token: cfg.token });
+    return new BlindkeyClient({ url: cfg.url, token: cfg.token });
   };
 
   const refuseInAgentMode = (): void => {
@@ -59,8 +59,8 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   };
 
   const program = new Command()
-    .name('pidb')
-    .description('Projects Info DB client')
+    .name('blindkey')
+    .description('Blindkey client')
     .showHelpAfterError()
     // Throw a CommanderError instead of calling process.exit() — required so tests (and any other
     // in-process caller) never risk killing their own process on a commander-level error (missing
@@ -70,7 +70,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
 
   program
     .command('login', { hidden: agent })
-    .argument('<url>', 'server base url, e.g. https://pidb.example.com')
+    .argument('<url>', 'server base url, e.g. https://blindkey.example.com')
     .option('--username <username>', 'admin username (prompts when omitted)')
     .option('--name <name>', 'token name (default: cli-<hostname>)')
     .option('--expires <days>', 'token lifetime in days, 1-365 (default: 30)')
@@ -80,7 +80,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
       emit(await runLogin(url, opts), false);
     });
   // Refuse before commander validates `login`'s own arguments/options (spec §2.3): a preSubcommand
-  // hook fires before the target subcommand parses anything, so `pidb login` (missing <url>) is
+  // hook fires before the target subcommand parses anything, so `blindkey login` (missing <url>) is
   // refused with the agent message instead of commander's "missing required argument" error.
   program.hook('preSubcommand', (_program, subcommand) => {
     if (subcommand.name() === 'login') refuseInAgentMode();
@@ -271,7 +271,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     .argument('<target>', 'project slug or "global"')
     .argument('<name>', 'secret name')
     .argument('<command...>', 'command to run after --')
-    .description('Run a command with the secret fields injected as PIDB_<KEY> environment variables')
+    .description('Run a command with the secret fields injected as BLINDKEY_<KEY> environment variables')
     .action(async (target: string, name: string, command: string[]) => {
       process.exitCode = await runSecretExec(await client(), target, name, command, { agent });
     });
@@ -314,7 +314,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   token.hook('preSubcommand', () => {
     refuseInAgentMode();
   });
-  // Bare `pidb token` (no subcommand) doesn't dispatch into a child, so the preSubcommand hook above
+  // Bare `blindkey token` (no subcommand) doesn't dispatch into a child, so the preSubcommand hook above
   // never fires for it — without an action of its own, commander's default for a childless invocation
   // of a command that has subcommands is to display that group's help and exit, which would leak
   // token subcommand names/options into agent-mode output instead of refusing. Only register this in
@@ -370,7 +370,7 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
     .action((name: string, url: string) => {
       const profiles = loadProfiles(dataDir);
       if (profiles.profiles[name]) {
-        throw new CliError(`profile ${name} exists — use \`pidb profile set-url ${name} <url>\``, EXIT_REFUSED);
+        throw new CliError(`profile ${name} exists — use \`blindkey profile set-url ${name} <url>\``, EXIT_REFUSED);
       }
       const normalized = normalizeUrl(url);
       profiles.profiles[name] = { url: normalized };
@@ -396,7 +396,7 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
       emit(
         {
           json: { name, url: normalized, tokenCleared: true },
-          text: `updated profile "${name}" (${normalized})\ntoken cleared — run \`pidb connect --profile ${name}\``,
+          text: `updated profile "${name}" (${normalized})\ntoken cleared — run \`blindkey connect --profile ${name}\``,
         },
         false,
       );
@@ -426,7 +426,7 @@ function buildAgentOnlyCommands(program: Command, { cwd, store, dataDir }: Agent
 
   program
     .command('bind')
-    .description('Bind this repo (git top level) to a pidb project')
+    .description('Bind this repo (git top level) to a Blindkey project')
     .argument('<project>', 'project slug to bind this repo to')
     .option('--profile <name>', 'profile to bind (default: the repo\'s current binding, else the default profile)')
     .action((project: string, opts: { profile?: string }) => {

@@ -1,24 +1,24 @@
-name: pidb
+name: blindkey
 
 services:
   server:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: pidb-server:local
+    image: blindkey-server:local
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      PIDB_MASTER_KEY_FILE: /run/secrets/master_key
-      PIDB_DATA_DIR: /data
-      PIDB_PORT: "8080"
-      PIDB_TRUST_PROXY: "true"
+      BLINDKEY_MASTER_KEY_FILE: /run/secrets/master_key
+      BLINDKEY_DATA_DIR: /data
+      BLINDKEY_PORT: "8080"
+      BLINDKEY_TRUST_PROXY: "true"
     secrets:
       - master_key
     volumes:
-      - pidb-data:/data
-    # Never publish ports for this service: PIDB_TRUST_PROXY=true above is only
+      - blindkey-data:/data
+    # Never publish ports for this service: BLINDKEY_TRUST_PROXY=true above is only
     # safe because Caddy is the sole way in.
     expose:
       - "8080"
@@ -30,8 +30,8 @@ services:
       server:
         condition: service_healthy
     environment:
-      PIDB_DOMAIN: ${PIDB_DOMAIN}
-      PIDB_ACME_EMAIL: ${PIDB_ACME_EMAIL}
+      BLINDKEY_DOMAIN: ${BLINDKEY_DOMAIN}
+      BLINDKEY_ACME_EMAIL: ${BLINDKEY_ACME_EMAIL}
     ports:
       - "80:80"
       - "443:443"
@@ -42,7 +42,7 @@ services:
       - caddy-config:/config
 
   backup:
-    image: pidb-server:local
+    image: blindkey-server:local
     pull_policy: never
     restart: unless-stopped
     depends_on:
@@ -51,18 +51,18 @@ services:
     env_file:
       - .env
     environment:
-      PIDB_MASTER_KEY_FILE: /run/secrets/master_key
-      PIDB_DATA_DIR: /data
+      BLINDKEY_MASTER_KEY_FILE: /run/secrets/master_key
+      BLINDKEY_DATA_DIR: /data
     secrets:
       - master_key
     volumes:
-      - pidb-data:/data
+      - blindkey-data:/data
     entrypoint: ["/bin/sh", "/app/docker/backup-loop.sh"]
     healthcheck:
       disable: true
 
 volumes:
-  pidb-data:
+  blindkey-data:
   caddy-data:
   caddy-config:
 

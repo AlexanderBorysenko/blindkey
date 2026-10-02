@@ -17,7 +17,7 @@ import { CliError } from '../src/errors.js';
 
 let dataDir: string;
 beforeEach(() => {
-  dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-state-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-state-'));
 });
 
 describe('profiles.json', () => {
@@ -26,7 +26,7 @@ describe('profiles.json', () => {
   });
 
   it('round-trips through save/load', () => {
-    const data: ProfilesFile = { default: 'work', profiles: { work: { url: 'https://pidb.example.com' } } };
+    const data: ProfilesFile = { default: 'work', profiles: { work: { url: 'https://blindkey.example.com' } } };
     saveProfiles(dataDir, data);
     expect(loadProfiles(dataDir)).toEqual(data);
   });
@@ -138,7 +138,7 @@ describe('isPathInside (fix round 1, Minor 7)', () => {
   it.skipIf(process.platform === 'win32')(
     'a symlinked directory inside the data dir that actually points outside it is not inside (realpath escape)',
     () => {
-      const outsideDir = mkdtempSync(join(tmpdir(), 'pidb-agent-state-outside-'));
+      const outsideDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-state-outside-'));
       const linkPath = join(dataDir, 'looks-safe');
       symlinkSync(outsideDir, linkPath, 'dir');
       expect(isPathInside(dataDir, join(linkPath, 'secret.txt'))).toBe(false);
@@ -146,8 +146,8 @@ describe('isPathInside (fix round 1, Minor 7)', () => {
   );
 
   it.skipIf(process.platform === 'win32')('a symlinked data dir itself is still matched via realpath', () => {
-    const realDir = mkdtempSync(join(tmpdir(), 'pidb-agent-state-real-'));
-    const linkedDataDir = join(tmpdir(), `pidb-agent-state-link-${process.pid}-${Date.now()}`);
+    const realDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-state-real-'));
+    const linkedDataDir = join(tmpdir(), `blindkey-agent-state-link-${process.pid}-${Date.now()}`);
     symlinkSync(realDir, linkedDataDir, 'dir');
     expect(isPathInside(linkedDataDir, join(realDir, 'secret.txt'))).toBe(true);
   });
@@ -155,8 +155,8 @@ describe('isPathInside (fix round 1, Minor 7)', () => {
   it.skipIf(process.platform === 'win32')(
     'fix round 2, Minor 3: a data dir that does not exist yet, reached through a symlinked ancestor, still matches its own descendants',
     () => {
-      const realBase = mkdtempSync(join(tmpdir(), 'pidb-agent-state-realbase-'));
-      const symlinkedBase = join(tmpdir(), `pidb-agent-state-symlinkbase-${process.pid}-${Date.now()}`);
+      const realBase = mkdtempSync(join(tmpdir(), 'blindkey-agent-state-realbase-'));
+      const symlinkedBase = join(tmpdir(), `blindkey-agent-state-symlinkbase-${process.pid}-${Date.now()}`);
       symlinkSync(realBase, symlinkedBase, 'dir');
       // Neither the data dir itself nor the candidate file exist yet — only `symlinkedBase` (a
       // symlink to `realBase`) does.

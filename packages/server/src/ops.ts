@@ -38,7 +38,7 @@ export function runRotateKey(db: Db, ring: KeyRing): { secrets: number; totp: nu
   return db.transaction(() => ({ secrets: rewrapAllSecrets(db, ring), totp: rewrapTotpSecrets(db, ring) }))();
 }
 
-/** `pidb-server key-versions` (spec §4): how many rows sit on each key version, and whether they decrypt. */
+/** `blindkey-server key-versions` (spec §4): how many rows sit on each key version, and whether they decrypt. */
 export function runKeyVersions(db: Db, ring: KeyRing): { lines: string[]; ok: boolean } {
   const secrets = secretKeyVersionReport(db, ring);
   const totp = totpKeyVersionReport(db, ring);
@@ -65,7 +65,7 @@ export function runTotpReset(db: Db): string {
 }
 
 /**
- * Shell password reset (`pidb-server passwd`, spec §1.3). Unlike the UI's `changePassword`,
+ * Shell password reset (`blindkey-server passwd`, spec §1.3). Unlike the UI's `changePassword`,
  * this cannot know the current password — it is the emergency-recovery path — so it signs out
  * EVERY session (not "every other one"), drops pending login challenges, and clears any 2FA
  * lock. 2FA itself is left as is (use `2fa reset` separately).
@@ -89,8 +89,8 @@ export async function runPasswordReset(db: Db, password: string): Promise<{ user
   })();
 }
 
-const BACKUP_RE = /^pidb-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/;
-const STALE_TMP_RE = /^pidb-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite\.tmp$/;
+const BACKUP_RE = /^blindkey-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite$/;
+const STALE_TMP_RE = /^blindkey-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.sqlite\.tmp$/;
 
 /** Real integrity check for a just-written backup (spec §4). Overridable in tests via `runBackup`'s `verify` parameter. */
 function verifyBackup(file: string): void {
@@ -114,8 +114,8 @@ export function runBackup(db: Db, dir: string, keep = 14, now: Date = new Date()
     if (STALE_TMP_RE.test(f)) unlinkSync(join(dir, f));
   }
   const stamp = now.toISOString().replace(/\.\d{3}Z$/, '').replace(/:/g, '-');
-  const tmp = join(dir, `pidb-${stamp}.sqlite.tmp`);
-  const file = join(dir, `pidb-${stamp}.sqlite`);
+  const tmp = join(dir, `blindkey-${stamp}.sqlite.tmp`);
+  const file = join(dir, `blindkey-${stamp}.sqlite`);
   try {
     db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
     verify(tmp);

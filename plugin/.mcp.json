@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "pidb": {
+    "blindkey": {
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp.mjs"],
       "env": {
-        "PIDB_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}",
-        "PIDB_AGENT": "1"
+        "BLINDKEY_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}",
+        "BLINDKEY_AGENT": "1"
       }
     }
   }

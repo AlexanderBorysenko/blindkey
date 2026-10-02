@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Bundles the Claude Code plugin's three executables (spec §2.1) from packages/cli/src/agent into
-// plugin/dist: pidb.mjs (agent CLI), mcp.mjs (stdio MCP bridge), hook.mjs (hook dispatcher).
+// plugin/dist: blindkey.mjs (agent CLI), mcp.mjs (stdio MCP bridge), hook.mjs (hook dispatcher).
 // Everything is bundled except the native `@napi-rs/keyring`, which the SessionStart hook installs
 // into the plugin data dir on first run and the bundles load via createRequire(<data>/package.json).
 // Only these three entry modules self-execute (each guards on isEntryPoint()); never add a bundle
@@ -17,7 +17,7 @@ export const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const agentSrc = join(repoRoot, 'packages', 'cli', 'src', 'agent');
 
 export const ENTRIES = {
-  pidb: join(agentSrc, 'cli.ts'),
+  blindkey: join(agentSrc, 'cli.ts'),
   mcp: join(agentSrc, 'bridge-main.ts'),
   hook: join(agentSrc, 'hooks', 'main.ts'),
 };
@@ -39,7 +39,7 @@ export async function buildPlugin(outDir = join(repoRoot, 'plugin', 'dist')) {
     target: 'node20',
     external: ['@napi-rs/keyring'],
     // Bundle shared from source (no dependency on packages/shared/dist being built first).
-    alias: { '@pidb/shared': join(repoRoot, 'packages', 'shared', 'src', 'index.ts') },
+    alias: { '@blindkey/shared': join(repoRoot, 'packages', 'shared', 'src', 'index.ts') },
     banner: { js: BANNER },
     legalComments: 'none',
     charset: 'utf8',

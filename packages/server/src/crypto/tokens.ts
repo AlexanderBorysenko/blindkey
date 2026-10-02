@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
-const TOKEN_RE = /^pidb_([A-Za-z0-9_-]{8})_[A-Za-z0-9_-]{43}$/;
+const TOKEN_RE = /^bk_([A-Za-z0-9_-]{8})_[A-Za-z0-9_-]{43}$/;
 
 export function hashToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex');
@@ -9,7 +9,7 @@ export function hashToken(token: string): string {
 export function generateToken(): { token: string; prefix: string; hash: string } {
   const prefix = randomBytes(6).toString('base64url');
   const secret = randomBytes(32).toString('base64url');
-  const token = `pidb_${prefix}_${secret}`;
+  const token = `bk_${prefix}_${secret}`;
   return { token, prefix, hash: hashToken(token) };
 }
 

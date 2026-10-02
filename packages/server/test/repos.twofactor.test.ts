@@ -112,7 +112,7 @@ describe('twofactor repo', () => {
     const keyB = randomBytes(32);
     const wrongRing: KeyRing = { current: 2, keys: new Map([[2, keyB]]) };
     expect(() => rewrapTotpSecrets(db, wrongRing)).toThrow(
-      `key version 2 does not decrypt 2FA secret of admin ${admin.id} — PIDB_MASTER_KEY is not the version 2 key`,
+      `key version 2 does not decrypt 2FA secret of admin ${admin.id} — BLINDKEY_MASTER_KEY is not the version 2 key`,
     );
     const row = getTotp(db, admin.id)!;
     expect(row.key_version).toBe(2);

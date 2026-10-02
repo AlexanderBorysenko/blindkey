@@ -9,7 +9,7 @@ describe('tokens repo', () => {
   it('creates, finds by value, and hides hash', () => {
     const db = openDb(':memory:');
     const { token, row } = createToken(db, { name: 'cc', scopes: ['docs:read'], projectIds: [1, 2], expiresAt: null });
-    expect(token).toMatch(/^pidb_/);
+    expect(token).toMatch(/^bk_/);
     expect(row).not.toHaveProperty('token_hash');
     expect(row.project_ids).toEqual([1, 2]);
     const found = findActiveTokenByValue(db, token);

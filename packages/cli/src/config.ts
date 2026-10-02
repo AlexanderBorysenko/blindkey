@@ -9,13 +9,13 @@ export interface CliConfig {
 }
 
 /**
- * PIDB_CONFIG_HOME is the config directory itself (used by tests and by anyone
- * keeping several profiles); XDG_CONFIG_HOME and HOME get the `pidb` suffix.
+ * BLINDKEY_CONFIG_HOME is the config directory itself (used by tests and by anyone
+ * keeping several profiles); XDG_CONFIG_HOME and HOME get the `blindkey` suffix.
  */
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.PIDB_CONFIG_HOME) return env.PIDB_CONFIG_HOME;
-  if (env.XDG_CONFIG_HOME) return join(env.XDG_CONFIG_HOME, 'pidb');
-  return join(env.HOME ?? homedir(), '.config', 'pidb');
+  if (env.BLINDKEY_CONFIG_HOME) return env.BLINDKEY_CONFIG_HOME;
+  if (env.XDG_CONFIG_HOME) return join(env.XDG_CONFIG_HOME, 'blindkey');
+  return join(env.HOME ?? homedir(), '.config', 'blindkey');
 }
 
 export function configPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -61,10 +61,10 @@ function readConfigFile(env: NodeJS.ProcessEnv): Partial<CliConfig> {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CliConfig {
   const file = readConfigFile(env);
-  const url = env.PIDB_URL ?? file.url;
-  const token = env.PIDB_TOKEN ?? file.token;
+  const url = env.BLINDKEY_URL ?? file.url;
+  const token = env.BLINDKEY_TOKEN ?? file.token;
   if (!url || !token) {
-    throw new CliError('not configured — run `pidb login <url>`, or set PIDB_URL and PIDB_TOKEN', EXIT_AUTH);
+    throw new CliError('not configured — run `blindkey login <url>`, or set BLINDKEY_URL and BLINDKEY_TOKEN', EXIT_AUTH);
   }
   return { url: normalizeUrl(url), token };
 }

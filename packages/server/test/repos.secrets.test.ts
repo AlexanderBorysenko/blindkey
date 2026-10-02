@@ -109,7 +109,7 @@ describe('secrets repo', () => {
     const keyB = randomBytes(32);
     const wrongRing: KeyRing = { current: 2, keys: new Map([[2, keyB]]) };
     expect(() => rewrapAllSecrets(db, wrongRing)).toThrow(
-      `key version 2 does not decrypt secret ${s.id} — PIDB_MASTER_KEY is not the version 2 key`,
+      `key version 2 does not decrypt secret ${s.id} — BLINDKEY_MASTER_KEY is not the version 2 key`,
     );
     // Nothing was written: the row is untouched and still decrypts with the real key.
     const raw = db.prepare(`SELECT key_version FROM secrets WHERE id = ?`).get(s.id) as { key_version: number };

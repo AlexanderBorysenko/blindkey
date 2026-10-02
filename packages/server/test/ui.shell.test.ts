@@ -10,7 +10,7 @@ import { pageContext } from '../src/ui/forms.js';
 let t: TestCtx;
 let session: string;
 
-const page = (url: string, cookies: Record<string, string> = { pidb_session: session }) => t.app.inject({ method: 'GET', url, cookies });
+const page = (url: string, cookies: Record<string, string> = { blindkey_session: session }) => t.app.inject({ method: 'GET', url, cookies });
 
 function sidebar(body: string): string {
   return body.slice(body.indexOf('<aside class="sidebar">'), body.indexOf('</aside>'));
@@ -20,7 +20,7 @@ beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-  session = res.cookies.find((c) => c.name === 'pidb_session')!.value;
+  session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
   const acme = getProjectBySlug(t.db, 'acme')!;
   createSecret(t.db, t.ring, { projectId: acme.id, name: 'DB', description: '', tags: [], fields: [{ key: 'password', value: 'hunter2hunter2' }] });

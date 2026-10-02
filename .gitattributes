@@ -1,5 +1,5 @@
 # Claude Code plugin: shims must keep their native line endings on every checkout.
-plugin/bin/pidb text eol=lf
+plugin/bin/blindkey text eol=lf
 plugin/bin/*.cmd text eol=crlf
 # Generated esbuild bundles (npm run build:plugin) — committed, not diffed.
 plugin/dist/*.mjs text eol=lf -diff linguist-generated

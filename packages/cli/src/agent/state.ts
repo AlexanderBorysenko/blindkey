@@ -8,7 +8,7 @@ import { CliError, EXIT_AUTH } from '../errors.js';
 export interface Profile {
   url: string;
   /** Projects the current (or most recently issued) token for this profile was approved for, per
-   * the connect poll response (spec §2.3) — used to widen a later `pidb connect`'s request. */
+   * the connect poll response (spec §2.3) — used to widen a later `blindkey connect`'s request. */
   projects?: string[];
   /** Expiry of the current token for this profile, from the connect poll response. */
   expires_at?: number | null;
@@ -78,7 +78,7 @@ export function saveBindings(dataDir: string, data: BindingsFile): void {
   writeJsonAtomic(bindingsPath(dataDir), data);
 }
 
-/** `written.json` (spec §2.2): absolute paths produced by `pidb secret write|env` in agent mode. */
+/** `written.json` (spec §2.2): absolute paths produced by `blindkey secret write|env` in agent mode. */
 export interface WrittenFile {
   paths: string[];
 }
@@ -153,7 +153,7 @@ export interface BindResult {
  * Shared binding logic (spec §2.3/§2.4): binds `cwd`'s repo (keyed by `repoKey(cwd)`) to `project` on
  * the resolved profile — `profileOverride` if given, else the repo's existing binding, else the
  * default profile. Used by both the CLI `bind` command (`program.ts`) and the MCP bridge's
- * `pidb_bind` tool (`bridge.ts`) so the two can never disagree about how a repo gets bound.
+ * `blindkey_bind` tool (`bridge.ts`) so the two can never disagree about how a repo gets bound.
  */
 export function performBind(dataDir: string, cwd: string, project: string, profileOverride?: string): BindResult {
   const profiles = loadProfiles(dataDir);
@@ -161,7 +161,7 @@ export function performBind(dataDir: string, cwd: string, project: string, profi
   const key = repoKey(cwd);
   const profileName = profileOverride ?? bindings[key]?.profile ?? profiles.default;
   if (!profileName || !profiles.profiles[profileName]) {
-    throw new CliError('no server configured — run `pidb profile add <name> <url>`', EXIT_AUTH);
+    throw new CliError('no server configured — run `blindkey profile add <name> <url>`', EXIT_AUTH);
   }
   bindings[key] = { profile: profileName, project };
   saveBindings(dataDir, bindings);

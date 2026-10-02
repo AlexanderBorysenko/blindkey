@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { SCOPES, tokenInputSchema } from '@pidb/shared';
+import { SCOPES, tokenInputSchema } from '@blindkey/shared';
 import type { AppContext } from '../../http/context.js';
 import { createTokenFor, listAuditFor, listPendingAgentTokensFor, listTokensFor, renameTokenFor, revokeTokenFor, updateTokenProjectsFor } from '../../services/admin.js';
 import { AppError } from '../../errors.js';

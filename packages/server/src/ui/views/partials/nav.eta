@@ -1,6 +1,5 @@
 <a class="brand" href="/">
-  <span class="mark">pi</span>
-  <span>pidb</span>
+  <%~ include('./brand', it) %>
 </a>
 <form class="side-search" method="get" action="/search">
   <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>

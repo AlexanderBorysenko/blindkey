@@ -21,8 +21,8 @@ export interface ResolveAgentConfigInput {
 /**
  * Resolves the effective server + token for agent-mode commands (spec §2.3):
  * the bound profile for `cwd`'s repo if one exists, else the default
- * profile; the token always comes from the OS credential store. `PIDB_URL`/
- * `PIDB_TOKEN` are never consulted here — agent mode ignores them entirely.
+ * profile; the token always comes from the OS credential store. `BLINDKEY_URL`/
+ * `BLINDKEY_TOKEN` are never consulted here — agent mode ignores them entirely.
  */
 export async function resolveAgentConfig(input: ResolveAgentConfigInput): Promise<AgentConfig> {
   const env = input.env ?? process.env;
@@ -33,11 +33,11 @@ export async function resolveAgentConfig(input: ResolveAgentConfigInput): Promis
   const profileName = binding?.profile ?? profiles.default;
   const profile = profileName ? profiles.profiles[profileName] : undefined;
   if (!profileName || !profile) {
-    throw new CliError('no server configured — run `pidb profile add <name> <url>`', EXIT_AUTH);
+    throw new CliError('no server configured — run `blindkey profile add <name> <url>`', EXIT_AUTH);
   }
   const token = await input.store.get(profileName);
   if (!token) {
-    throw new CliError('not connected — run `pidb connect`', EXIT_AUTH);
+    throw new CliError('not connected — run `blindkey connect`', EXIT_AUTH);
   }
   return { profile: profileName, url: profile.url, token, project: binding?.project ?? null };
 }

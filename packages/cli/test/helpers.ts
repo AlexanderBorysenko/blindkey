@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import type { Scope } from '@pidb/shared';
+import type { Scope } from '@blindkey/shared';
 import { openDb, type Db } from '../../server/src/db/connection.js';
 import { buildApp } from '../../server/src/http/app.js';
 import type { KeyRing } from '../../server/src/config.js';
@@ -74,7 +74,7 @@ export interface CliRun {
  * event loop that has to answer the child's HTTP request.
  *
  * `stdinInput`, when given, is written to the child's stdin and the stream is
- * then ended (simulating `printf '...' | pidb ...`) instead of leaving stdin
+ * then ended (simulating `printf '...' | blindkey ...`) instead of leaving stdin
  * unset (`ignore`), which is what non-interactive prompts (login) read from.
  */
 export function runCliAsync(args: string[], env: Record<string, string>, repoRoot: string, stdinInput?: string): Promise<CliRun> {
@@ -149,7 +149,7 @@ export function runCliKeepStdinOpen(
 
 /**
  * Run the CLI with stdin redirected from a file (or `/dev/null`), like
- * `pidb login <url> < answers.txt` or a cron/CI job with no controlling
+ * `blindkey login <url> < answers.txt` or a cron/CI job with no controlling
  * terminal. This exercises `process.stdin` as an `fs.ReadStream` — a
  * different runtime shape than the pipe `net.Socket` `runCliAsync` and
  * `runCliKeepStdinOpen` exercise, and the one on which `stdin.ref`/`.unref`

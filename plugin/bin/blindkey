@@ -1,5 +1,5 @@
 #!/bin/sh
-# pidb agent CLI (Claude Code plugin bin/, on the Bash tool's PATH). Resolves the plugin root from
+# blindkey agent CLI (Claude Code plugin bin/, on the Bash tool's PATH). Resolves the plugin root from
 # this script's own location — following symlinks — and runs the bundled agent-mode CLI.
 self=$0
 while [ -h "$self" ]; do
@@ -11,6 +11,6 @@ while [ -h "$self" ]; do
   esac
 done
 root=$(cd -P "$(dirname "$self")/.." && pwd)
-PIDB_AGENT=1
-export PIDB_AGENT
-exec node "$root/dist/pidb.mjs" "$@"
+BLINDKEY_AGENT=1
+export BLINDKEY_AGENT
+exec node "$root/dist/blindkey.mjs" "$@"

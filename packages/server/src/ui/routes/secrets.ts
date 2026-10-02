@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../http/context.js';
-import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretKeySchema, secretPatchSchema } from '@pidb/shared';
+import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretKeySchema, secretPatchSchema } from '@blindkey/shared';
 import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, recentSecretAccessFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
 import { ConflictError } from '../../errors.js';
 import { adminActor, requireAdmin } from '../session.js';
@@ -200,7 +200,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
           scopeLabel: scope.projectSlug ?? 'global',
           secret,
           access: recentSecretAccessFor(ctx, principal, scope.projectSlug, secret.name),
-          // A runnable `pidb secret env <target> <name> --out .env`: `target` is the project slug
+          // A runnable `blindkey secret env <target> <name> --out .env`: `target` is the project slug
           // or the literal `global` (see packages/cli/src/client.ts `scopedPath`), and `name` is
           // POSIX single-quoted so a name containing spaces or quotes still pastes as one argument.
           cliRef: `${scope.projectSlug ?? 'global'} ${shQuote(secret.name)} --out .env`,

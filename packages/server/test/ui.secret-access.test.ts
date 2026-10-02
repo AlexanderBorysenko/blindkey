@@ -12,16 +12,16 @@ import type { Principal } from '../src/auth/principal.js';
 let t: TestCtx;
 let session: string;
 let csrf: string;
-const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
 const post = (url: string, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url, cookies: { pidb_session: session }, payload });
+  t.app.inject({ method: 'POST', url, cookies: { blindkey_session: session }, payload });
 const csrfOf = (b: string) => /name="csrf" value="([^"]+)"/.exec(b)?.[1] ?? '';
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
   createSecret(t.db, t.ring, {
     projectId: getProjectBySlug(t.db, 'acme')!.id,
@@ -116,12 +116,12 @@ describe('secret page: recent access panel', () => {
     expect(appJs.body).toContain("querySelector('.field-value')");
   });
 
-  it('(i) cliRef is a runnable, POSIX single-quoted pidb secret env command', async () => {
+  it('(i) cliRef is a runnable, POSIX single-quoted blindkey secret env command', async () => {
     const projectPage = await page('/p/acme/secrets/DB');
-    expect(projectPage.body).toContain('pidb secret env acme &#39;DB&#39; --out .env');
+    expect(projectPage.body).toContain('blindkey secret env acme &#39;DB&#39; --out .env');
 
     const globalPage = await page('/global/secrets/CliRefTest');
-    expect(globalPage.body).toContain('pidb secret env global &#39;CliRefTest&#39; --out .env');
+    expect(globalPage.body).toContain('blindkey secret env global &#39;CliRefTest&#39; --out .env');
   });
 
   it('(j) recent access is bound by the secret\'s created_at, so a reused row id does not show a deleted secret\'s history', () => {

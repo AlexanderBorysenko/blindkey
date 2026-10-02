@@ -9,16 +9,16 @@ import { getProjectBySlug } from '../src/repos/projects.js';
 let t: TestCtx;
 let session: string;
 let csrf: string;
-const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
 const post = (url: string, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url, cookies: { pidb_session: session }, payload });
+  t.app.inject({ method: 'POST', url, cookies: { blindkey_session: session }, payload });
 const csrfOf = (b: string) => /name="csrf" value="([^"]+)"/.exec(b)?.[1] ?? '';
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
   createSecret(t.db, t.ring, {
     projectId: getProjectBySlug(t.db, 'acme')!.id,

@@ -1,4 +1,4 @@
-import type { DocCategory, ProjectStatus, Scope } from '@pidb/shared';
+import type { DocCategory, ProjectStatus, Scope } from '@blindkey/shared';
 
 export interface PublicProject {
   slug: string;

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { DOC_CATEGORIES, PROJECT_STATUSES, projectInputSchema, secretRequestPath, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@pidb/shared';
+import { DOC_CATEGORIES, PROJECT_STATUSES, projectInputSchema, secretRequestPath, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@blindkey/shared';
 import type { AppContext } from './context.js';
 import { actorOf, originOf, parseBody } from './helpers.js';
 import { hasScope, type Actor, type Principal } from '../auth/principal.js';
@@ -14,12 +14,12 @@ import { loadProjectFor } from '../services/common.js';
 import { getSecretMeta } from '../repos/secrets.js';
 import { searchFor } from '../services/search.js';
 
-const INSTRUCTIONS = `pidb stores project documentation and named secrets.
+const INSTRUCTIONS = `blindkey stores project documentation and named secrets.
 Secret VALUES are never returned through MCP: only names, descriptions, tags and field keys (with a "sensitive" flag).
-Values are consumed ONLY via the pidb CLI — never any other way:
-  pidb secret exec <project|global> "<name>" -- <command>   # fields injected as PIDB_<KEY> env vars
-  pidb secret write <project|global> "<name>" <field> --out <path> --mode 600
-  pidb secret env <project|global> "<name>" --out .env
+Values are consumed ONLY via the Blindkey CLI — never any other way:
+  blindkey secret exec <project|global> "<name>" -- <command>   # fields injected as BLINDKEY_<KEY> env vars
+  blindkey secret write <project|global> "<name>" <field> --out <path> --mode 600
+  blindkey secret env <project|global> "<name>" --out .env
 Documents reference secrets with {{secret:Name}}, {{secret:global/Name}} or {{secret:<project-slug>/Name}}. Never paste secret values into documents.
 create_project creates a project (needs projects:create); it is added to your own token's projects at once.
 update_project changes name/status/tags/summary (needs projects:write). upsert_secret_meta creates or patches a
@@ -58,7 +58,7 @@ function run(fn: () => unknown): ToolResult {
 }
 
 export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): McpServer {
-  const server = new McpServer({ name: 'pidb', version: '0.1.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'blindkey', version: '0.1.0' }, { instructions: INSTRUCTIONS });
   const p = actor.principal;
 
   server.registerTool(

@@ -11,13 +11,13 @@ describe('admin routes', () => {
     const admin = auth(t.token(['admin']));
     const c = await t.app.inject({ method: 'POST', url: '/api/v1/tokens', headers: admin, payload: { name: 'cc', scopes: ['docs:read', 'secrets:reveal'], projects: ['alpha'] } });
     expect(c.statusCode).toBe(201);
-    expect(c.json().token).toMatch(/^pidb_/);
+    expect(c.json().token).toMatch(/^bk_/);
     expect(c.json().projects).toEqual(['alpha']);
     const bad = await t.app.inject({ method: 'POST', url: '/api/v1/tokens', headers: admin, payload: { name: 'cc', scopes: ['docs:read'], projects: ['nope'] } });
     expect(bad.statusCode).toBe(400);
     const l = await t.app.inject({ method: 'GET', url: '/api/v1/tokens', headers: admin });
     expect(l.json().map((x: { name: string }) => x.name)).toEqual(['test', 'cc']);
-    expect(JSON.stringify(l.json())).not.toContain('pidb_');
+    expect(JSON.stringify(l.json())).not.toContain('bk_');
     const useNew = await t.app.inject({ method: 'GET', url: '/api/v1/projects/alpha/docs', headers: auth(c.json().token) });
     expect(useNew.statusCode).toBe(200);
     const d = await t.app.inject({ method: 'DELETE', url: `/api/v1/tokens/${c.json().id}`, headers: admin });

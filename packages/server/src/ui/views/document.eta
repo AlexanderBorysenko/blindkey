@@ -46,7 +46,7 @@
       </div>
     </div>
     <% }) %>
-    <p class="note">Values are never shown here. Consume them with <code>pidb secret exec</code>, <code>write</code> or <code>env</code>.</p>
+    <p class="note">Values are never shown here. Consume them with <code>blindkey secret exec</code>, <code>write</code> or <code>env</code>.</p>
   </div>
   <% } %>
 </div>

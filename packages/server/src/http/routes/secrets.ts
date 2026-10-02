@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { secretInputSchema, secretPatchSchema, secretUseSchema } from '@pidb/shared';
+import { secretInputSchema, secretPatchSchema, secretUseSchema } from '@blindkey/shared';
 import type { AppContext } from '../context.js';
 import { actorOf, parseBody, principalOf } from '../helpers.js';
 import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, revealAllFor, revealFieldFor, updateSecretFor, useSecretFor } from '../../services/secrets.js';

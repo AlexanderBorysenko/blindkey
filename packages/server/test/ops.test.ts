@@ -68,7 +68,7 @@ describe('ops', () => {
     const keyB = randomBytes(32);
     const wrongRing: KeyRing = { current: 2, keys: new Map([[2, keyB]]) };
     expect(() => runRotateKey(db, wrongRing)).toThrow(
-      `key version 2 does not decrypt secret ${s.id} — PIDB_MASTER_KEY is not the version 2 key`,
+      `key version 2 does not decrypt secret ${s.id} — BLINDKEY_MASTER_KEY is not the version 2 key`,
     );
 
     const raw = db.prepare(`SELECT key_version FROM secrets WHERE id = ?`).get(s.id) as { key_version: number };
@@ -165,23 +165,23 @@ describe('ops', () => {
     await expect(runPasswordReset(db, 'short')).rejects.toThrow('Password must be at least 12 characters.');
   });
   it('backup writes a consistent copy and prunes old ones', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));
-    const db = openDb(join(dir, 'pidb.sqlite'));
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-backup-'));
+    const db = openDb(join(dir, 'blindkey.sqlite'));
     db.prepare(`INSERT INTO projects (slug, name, created_at, updated_at) VALUES ('p', 'P', 0, 0)`).run();
     const out = join(dir, 'backups');
     for (let i = 0; i < 3; i++) {
       runBackup(db, out, 2, new Date(Date.UTC(2001, 0, i + 1)));
     }
     const files = readdirSync(out).sort();
-    expect(files).toEqual(['pidb-2001-01-02T00-00-00.sqlite', 'pidb-2001-01-03T00-00-00.sqlite']);
+    expect(files).toEqual(['blindkey-2001-01-02T00-00-00.sqlite', 'blindkey-2001-01-03T00-00-00.sqlite']);
     const copy = new Database(join(out, files[1]!), { readonly: true });
     expect(copy.prepare(`SELECT COUNT(*) AS c FROM projects`).get()).toEqual({ c: 1 });
     copy.close();
     db.close();
   });
   it('backup passes integrity_check, and leaves no .tmp file behind', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));
-    const db = openDb(join(dir, 'pidb.sqlite'));
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-backup-'));
+    const db = openDb(join(dir, 'blindkey.sqlite'));
     const out = join(dir, 'backups');
     const file = runBackup(db, out, 14, new Date(Date.UTC(2001, 0, 1)));
     const copy = new Database(file, { readonly: true, fileMustExist: true });
@@ -191,17 +191,17 @@ describe('ops', () => {
     db.close();
   });
   it('backup removes a stale .tmp from a crashed run, prunes to `keep`, and keeps the newest ones (Review Focus 5)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));
-    const db = openDb(join(dir, 'pidb.sqlite'));
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-backup-'));
+    const db = openDb(join(dir, 'blindkey.sqlite'));
     const out = join(dir, 'backups');
     mkdirSync(out, { recursive: true });
     const keep = 2;
     // Pre-seed `keep` real backups with older stamps, so pruning has something to do, plus a
     // stale .tmp from a crashed run that must never count toward `keep` or survive.
     for (let i = 0; i < keep; i++) {
-      writeFileSync(join(out, `pidb-2000-01-0${i + 1}T00-00-00.sqlite`), 'old backup');
+      writeFileSync(join(out, `blindkey-2000-01-0${i + 1}T00-00-00.sqlite`), 'old backup');
     }
-    const stale = join(out, 'pidb-2020-01-01T00-00-00.sqlite.tmp');
+    const stale = join(out, 'blindkey-2020-01-01T00-00-00.sqlite.tmp');
     writeFileSync(stale, 'garbage from a crashed run');
 
     const file = runBackup(db, out, keep, new Date(Date.UTC(2001, 0, 1)));
@@ -210,14 +210,14 @@ describe('ops', () => {
     const files = readdirSync(out).filter((f) => f.endsWith('.sqlite')).sort();
     // Exactly `keep` remain: the oldest pre-seeded backup (2000-01-01) is pruned; its
     // successor (2000-01-02) and the just-written one (2001-01-01) are the newest `keep` and survive.
-    expect(files).toEqual(['pidb-2000-01-02T00-00-00.sqlite', 'pidb-2001-01-01T00-00-00.sqlite']);
+    expect(files).toEqual(['blindkey-2000-01-02T00-00-00.sqlite', 'blindkey-2001-01-01T00-00-00.sqlite']);
     expect(files).toHaveLength(keep);
-    expect(file).toBe(join(out, 'pidb-2001-01-01T00-00-00.sqlite'));
+    expect(file).toBe(join(out, 'blindkey-2001-01-01T00-00-00.sqlite'));
     db.close();
   });
   it('backup deletes the temp file and throws when the integrity check fails, leaving no final file', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pidb-backup-'));
-    const db = openDb(join(dir, 'pidb.sqlite'));
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-backup-'));
+    const db = openDb(join(dir, 'blindkey.sqlite'));
     const out = join(dir, 'backups');
     const failingVerify = () => {
       throw new Error('backup integrity check failed: corrupt');
@@ -228,7 +228,7 @@ describe('ops', () => {
   });
 });
 
-describe('pidb-server cli', () => {
+describe('blindkey-server cli', () => {
   it('exits 1 with a clear message when the master key is missing', () => {
     const root = fileURLToPath(new URL('../../..', import.meta.url));
     const r = spawnSync(
@@ -237,12 +237,12 @@ describe('pidb-server cli', () => {
       { env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' }, encoding: 'utf8' },
     );
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('PIDB_MASTER_KEY');
+    expect(r.stderr).toContain('BLINDKEY_MASTER_KEY');
   });
   it('key-versions (spawned): exits 0 when the current key decrypts everything, 1 when it does not', () => {
     const root = fileURLToPath(new URL('../../..', import.meta.url));
-    const dir = mkdtempSync(join(tmpdir(), 'pidb-key-versions-'));
-    const dbPath = join(dir, 'pidb.sqlite');
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-key-versions-'));
+    const dbPath = join(dir, 'blindkey.sqlite');
     const keyBuf = randomBytes(32);
 
     const db = openDb(dbPath);
@@ -252,33 +252,33 @@ describe('pidb-server cli', () => {
 
     const tsx = join(root, 'node_modules/.bin/tsx');
     const cli = join(root, 'packages/server/src/cli.ts');
-    const baseEnv = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', PIDB_DB_PATH: dbPath, PIDB_DATA_DIR: dir };
+    const baseEnv = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', BLINDKEY_DB_PATH: dbPath, BLINDKEY_DATA_DIR: dir };
 
-    const ok = spawnSync(tsx, [cli, 'key-versions'], { env: { ...baseEnv, PIDB_MASTER_KEY: keyBuf.toString('base64') }, encoding: 'utf8' });
+    const ok = spawnSync(tsx, [cli, 'key-versions'], { env: { ...baseEnv, BLINDKEY_MASTER_KEY: keyBuf.toString('base64') }, encoding: 'utf8' });
     expect(ok.status).toBe(0);
     expect(ok.stdout).toContain('secrets v1: 1 rows, ok');
 
-    const bad = spawnSync(tsx, [cli, 'key-versions'], { env: { ...baseEnv, PIDB_MASTER_KEY: randomBytes(32).toString('base64') }, encoding: 'utf8' });
+    const bad = spawnSync(tsx, [cli, 'key-versions'], { env: { ...baseEnv, BLINDKEY_MASTER_KEY: randomBytes(32).toString('base64') }, encoding: 'utf8' });
     expect(bad.status).toBe(1);
     expect(bad.stdout).toContain('WRONG KEY');
   });
   it('key-versions (spawned): exits 1 with "no database" and creates no file when the db is missing (F2)', () => {
     const root = fileURLToPath(new URL('../../..', import.meta.url));
-    const dir = mkdtempSync(join(tmpdir(), 'pidb-no-db-'));
-    const dbPath = join(dir, 'pidb.sqlite');
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-no-db-'));
+    const dbPath = join(dir, 'blindkey.sqlite');
     const tsx = join(root, 'node_modules/.bin/tsx');
     const cli = join(root, 'packages/server/src/cli.ts');
     const env = {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
-      PIDB_DATA_DIR: dir,
-      PIDB_DB_PATH: dbPath,
-      PIDB_MASTER_KEY: randomBytes(32).toString('base64'),
+      BLINDKEY_DATA_DIR: dir,
+      BLINDKEY_DB_PATH: dbPath,
+      BLINDKEY_MASTER_KEY: randomBytes(32).toString('base64'),
     };
 
     const r = spawnSync(tsx, [cli, 'key-versions'], { env, encoding: 'utf8' });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain(`error: no database at ${dbPath} — run init first (or check PIDB_DATA_DIR / the restore)`);
+    expect(r.stderr).toContain(`error: no database at ${dbPath} — run init first (or check BLINDKEY_DATA_DIR / the restore)`);
     expect(existsSync(dbPath)).toBe(false);
   });
 });

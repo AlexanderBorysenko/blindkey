@@ -1,4 +1,4 @@
-// Static descriptors for the pidb server's own `/mcp` tools (spec §2.4) — the bridge always lists
+// Static descriptors for the Blindkey server's own `/mcp` tools (spec §2.4) — the bridge always lists
 // these, even before the agent is connected (first session: no token yet, or the keyring dependency
 // still installing), so Claude sees the full tool surface from the start. Copied verbatim (name,
 // description, JSON inputSchema) from what packages/server/src/http/mcp.ts produces over `tools/list`;
