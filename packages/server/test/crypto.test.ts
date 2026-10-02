@@ -58,7 +58,7 @@ describe('tokens', () => {
   it('rejects malformed tokens', () => {
     expect(parseTokenPrefix('nope')).toBeNull();
     expect(parseTokenPrefix('bk_short_x')).toBeNull();
-    // pre-rebrand pidb_ tokens are not accepted (clean break, spec D2)
+    // tokens from before the rename (pidb_ prefix) are not accepted: clean break, no legacy format
     expect(parseTokenPrefix('pidb_abcdefgh_' + 'a'.repeat(43))).toBeNull();
   });
   it('compares hashes in constant time helper', () => {
