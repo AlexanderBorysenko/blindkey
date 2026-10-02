@@ -47,6 +47,15 @@ describe('guardDecision — allowed look-alikes (must never deny)', () => {
   });
 });
 
+describe('guardDecision — the pre-rebrand pidb name is not the CLI', () => {
+  it('does not apply the user-only rule to `pidb login`', () => {
+    expectAllow(bash('pidb login https://x'));
+  });
+  it('still denies the same command under the blindkey name', () => {
+    expectDeny(bash('blindkey login https://x'));
+  });
+});
+
 describe('guardDecision — rule 1: blindkey + disabled subcommand', () => {
   it.each([
     ['blindkey secret get acme DB'],

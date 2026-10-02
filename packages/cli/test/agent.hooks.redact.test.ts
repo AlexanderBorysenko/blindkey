@@ -7,6 +7,11 @@ describe('redactOutput', () => {
     expect(redactOutput(`Authorization: Bearer ${token}`)).toBe(`Authorization: Bearer ${REDACTED}`);
   });
 
+  it('redacts a full-format bk_<8>_<43> API token', () => {
+    const token = `bk_AbCdEfGh_${'x1Y2z3'.repeat(7)}a`;
+    expect(redactOutput(`token: ${token}\n`)).toBe(`token: ${REDACTED}\n`);
+  });
+
   it('does not redact a bk_-prefixed string shorter than the minimum length', () => {
     const short = 'bk_short';
     expect(redactOutput(`x=${short}`)).toBe(`x=${short}`);

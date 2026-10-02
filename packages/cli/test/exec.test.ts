@@ -61,6 +61,11 @@ describe('buildEnv', () => {
     expect(env.BLINDKEY_TOKEN).toBeUndefined();
   });
 
+  it('agent mode still rejects fields colliding with always-reserved BLINDKEY_* names', () => {
+    expect(() => buildEnv({ agent: '1' }, { PATH: '/bin' }, true)).toThrow(/BLINDKEY_AGENT/);
+    expect(() => buildEnv({ config_home: '/x' }, { PATH: '/bin' }, true)).toThrow(/BLINDKEY_CONFIG_HOME/);
+  });
+
   it('rejects a field that would overwrite a reserved variable', () => {
     expect(() => buildEnv({ token: 'sekret-value' }, { PATH: '/bin' })).toThrow(CliError);
     try {
