@@ -1,8 +1,8 @@
 <div class="auth-card">
-  <div class="brand">
-    <span class="mark">pi</span>
-    <span>blindkey</span>
+  <div class="brand brand-lg">
+    <%~ include('partials/brand', it) %>
   </div>
+  <p class="tagline">Secrets your AI agents can use but never see.</p>
   <p class="lede">Admin sign in</p>
   <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
   <form method="post" action="/login">

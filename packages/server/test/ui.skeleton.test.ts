@@ -17,7 +17,7 @@ describe('ui skeleton', () => {
     const app = await t.app.inject({ method: 'GET', url: '/assets/app.css' });
     expect(app.statusCode).toBe(200);
     expect(app.headers['content-type']).toContain('text/css');
-    expect(app.body).toContain('--accent: #3355cc');
+    expect(app.body).toContain('--accent: #4f46e5');
     expect(app.body).toContain('prefers-color-scheme: dark');
 
     const js = await t.app.inject({ method: 'GET', url: '/assets/htmx.min.js' });

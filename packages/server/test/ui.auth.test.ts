@@ -32,6 +32,15 @@ describe('ui auth', () => {
     expect(res.body).toContain('name="password"');
   });
 
+  it('brands the login page: favicon, logo, name and tagline', async () => {
+    const res = await t.app.inject({ method: 'GET', url: '/login' });
+    expect(res.body).toContain('<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"');
+    expect(res.body).toContain('href="#i-blindkey"');
+    expect(res.body).toContain('Blindkey');
+    expect(res.body).toContain('Secrets your AI agents can use but never see.');
+    expect(res.body).toMatch(/<title>[^<]*· Blindkey<\/title>/);
+  });
+
   it('renders the login page without a sidebar', async () => {
     const res = await t.app.inject({ method: 'GET', url: '/login' });
     expect(res.body).not.toContain('class="sidebar"');

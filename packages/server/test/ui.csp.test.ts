@@ -55,6 +55,15 @@ describe('strict CSP', () => {
     expect(res.headers['content-security-policy']).toBe(CSP);
   });
 
+  it('serves the favicon as a same-origin SVG with no script or inline style', async () => {
+    const res = await t.app.inject({ method: 'GET', url: '/assets/favicon.svg' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('image/svg+xml');
+    expect(res.body).not.toMatch(/<script/i);
+    expect(res.body).not.toMatch(/\sstyle\s*=/i);
+    expect(res.body).not.toMatch(/\son[a-z]+\s*=/i);
+  });
+
   it('serves app.js with the delegated handlers', async () => {
     const res = await t.app.inject({ method: 'GET', url: '/assets/app.js' });
     expect(res.statusCode).toBe(200);
