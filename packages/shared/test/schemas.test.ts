@@ -14,10 +14,10 @@ import {
 
 describe('slugSchema', () => {
   it('accepts lowercase slugs', () => {
-    expect(slugSchema.safeParse('critter-hero').success).toBe(true);
+    expect(slugSchema.safeParse('acme-shop').success).toBe(true);
   });
   it('rejects uppercase, spaces, leading dash', () => {
-    for (const bad of ['Critter', 'a b', '-abc', 'abc-', '']) {
+    for (const bad of ['Acme', 'a b', '-abc', 'abc-', '']) {
       expect(slugSchema.safeParse(bad).success).toBe(false);
     }
   });

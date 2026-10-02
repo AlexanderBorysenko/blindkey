@@ -10,3 +10,12 @@ coverage/
 docker/.env
 docker/secrets/
 !plugin/dist/
+
+# agent working materials (never published)
+docs/superpowers/
+.superpowers/
+.claude/
+.claude-memory/
+CLAUDE.md
+graphify-out/
+.serena/
