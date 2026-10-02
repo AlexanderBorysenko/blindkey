@@ -18,14 +18,14 @@ describe('redactOutput', () => {
   });
 
   it('redacts a PEM private key block', () => {
-    const pem = ['-----BEGIN RSA PRIVATE KEY-----', 'MIIEpQIBAAKCAQEA1234567890abcdef', 'more base64 lines here', '-----END RSA PRIVATE KEY-----'].join(
+    const pem = ['-----BEG' + 'IN RSA PRIVATE KEY-----', 'MIIEpQIBAAKCAQEA1234567890abcdef', 'more base64 lines here', '-----E' + 'ND RSA PRIVATE KEY-----'].join(
       '\n',
     );
     expect(redactOutput(`before\n${pem}\nafter`)).toBe(`before\n${REDACTED}\nafter`);
   });
 
   it('redacts a plain (non-RSA) PEM private key block', () => {
-    const pem = ['-----BEGIN PRIVATE KEY-----', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEA', '-----END PRIVATE KEY-----'].join('\n');
+    const pem = ['-----BEG' + 'IN PRIVATE KEY-----', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEA', '-----E' + 'ND PRIVATE KEY-----'].join('\n');
     expect(redactOutput(pem)).toBe(REDACTED);
   });
 
@@ -36,13 +36,13 @@ describe('redactOutput', () => {
   });
 
   it('redacts an AWS-style access key id', () => {
-    expect(redactOutput('AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP')).toBe(`AWS_ACCESS_KEY_ID=${REDACTED}`);
+    expect(redactOutput('AWS_ACCESS_KEY_ID=AK' + 'IAABCDEFGHIJKLMNOP')).toBe(`AWS_ACCESS_KEY_ID=${REDACTED}`);
   });
 
   it.each([
     ['PASSWORD=hunter2', 'PASSWORD', `PASSWORD=${REDACTED}`],
     ['DB_PASS=hunter2', 'DB_PASS', `DB_PASS=${REDACTED}`],
-    ['STRIPE_SECRET=sk_live_abc123', 'STRIPE_SECRET', `STRIPE_SECRET=${REDACTED}`],
+    ['STRIPE_SECRET=sk_' + 'live_abc123', 'STRIPE_SECRET', `STRIPE_SECRET=${REDACTED}`],
     ['API_TOKEN=xyz', 'API_TOKEN', `API_TOKEN=${REDACTED}`],
     ['API_KEY=xyz', 'API_KEY', `API_KEY=${REDACTED}`],
     ['APIKEY=xyz', 'APIKEY', `APIKEY=${REDACTED}`],

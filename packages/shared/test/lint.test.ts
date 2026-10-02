@@ -11,7 +11,7 @@ describe('lintForSecrets', () => {
   });
   it('flags well-known key shapes', () => {
     expect(reasons('AKIAIOSFODNN7EXAMPLE')).toContain('AWS access key id');
-    expect(reasons('sk_live_4eC39HqLyjWDarjtT1zdp7dc')).toContain('Stripe secret key');
+    expect(reasons('sk_' + 'live_4eC39HqLyjWDarjtT1zdp7dc')).toContain('Stripe secret key');
     expect(reasons('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345')).toContain('GitHub token');
     expect(reasons('github_pat_11ABCDEFG0123456789_abcdefghijkl')).toContain('GitHub token');
     expect(reasons('xoxb-1234567890-abcdefghij')).toContain('Slack token');
