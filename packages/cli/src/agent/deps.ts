@@ -168,10 +168,10 @@ export function ensureDeps(opts: EnsureDepsOptions): string | undefined {
       const age = now() - since;
       if (age >= 0 && age < RETRY_MS) {
         if (running) {
-          return `pidb: plugin dependencies are still installing (started ${Math.round(age / 1000)}s ago) — \`pidb connect\` and token access work once npm finishes.`;
+          return `blindkey: plugin dependencies are still installing (started ${Math.round(age / 1000)}s ago) — \`blindkey connect\` and token access work once npm finishes.`;
         }
         const retryMin = Math.max(1, Math.ceil((RETRY_MS - age) / 60_000));
-        return `pidb: plugin dependency install failed (npm exit ${marker.exitCode}) — see ${logPath}; it is retried on a session start in ~${retryMin} min, or the user can run \`npm install --omit=dev\` in ${dataDir}.`;
+        return `blindkey: plugin dependency install failed (npm exit ${marker.exitCode}) — see ${logPath}; it is retried on a session start in ~${retryMin} min, or the user can run \`npm install --omit=dev\` in ${dataDir}.`;
       }
     }
     // No marker, a corrupt one, a dead install, or a failure old enough to retry: start over.
@@ -180,7 +180,7 @@ export function ensureDeps(opts: EnsureDepsOptions): string | undefined {
     mkdirSync(dataDir, { recursive: true });
     const startedAt = now();
     if (!claimMarker(markerPath, startedAt)) {
-      return 'pidb: plugin dependencies are being installed by another session — `pidb connect` and token access work once npm finishes.';
+      return 'blindkey: plugin dependencies are being installed by another session — `blindkey connect` and token access work once npm finishes.';
     }
     try {
       copyFileSync(pkg, join(dataDir, 'package.json'));
@@ -208,9 +208,9 @@ export function ensureDeps(opts: EnsureDepsOptions): string | undefined {
       }
       throw err;
     }
-    return 'pidb: installing plugin dependencies (@napi-rs/keyring) in the background — `pidb connect` and token access work once it finishes (usually under a minute; otherwise next session).';
+    return 'blindkey: installing plugin dependencies (@napi-rs/keyring) in the background — `blindkey connect` and token access work once it finishes (usually under a minute; otherwise next session).';
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return `pidb: could not start the plugin dependency install (${message}) — ask the user to run \`npm install --omit=dev\` in the plugin data dir (${dataDir}).`;
+    return `blindkey: could not start the plugin dependency install (${message}) — ask the user to run \`npm install --omit=dev\` in the plugin data dir (${dataDir}).`;
   }
 }

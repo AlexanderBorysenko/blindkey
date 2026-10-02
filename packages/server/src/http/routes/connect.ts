@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { connectPollSchema, connectStartSchema } from '@pidb/shared';
+import { connectPollSchema, connectStartSchema } from '@blindkey/shared';
 import type { AppContext } from '../context.js';
 import { originOf, parseBody } from '../helpers.js';
 import { pollConnect, startConnect } from '../../services/connect.js';

@@ -6,15 +6,15 @@ import { configPath, loadConfig, normalizeUrl, saveConfig } from '../src/config.
 import { CliError } from '../src/errors.js';
 
 let home: string;
-const envWith = (extra: Record<string, string> = {}) => ({ PIDB_CONFIG_HOME: home, ...extra }) as NodeJS.ProcessEnv;
+const envWith = (extra: Record<string, string> = {}) => ({ BLINDKEY_CONFIG_HOME: home, ...extra }) as NodeJS.ProcessEnv;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), 'pidb-cfg-'));
+  home = mkdtempSync(join(tmpdir(), 'blindkey-cfg-'));
 });
 
 describe('normalizeUrl', () => {
   it('strips trailing slashes and whitespace', () => {
-    expect(normalizeUrl('  https://pidb.example.com/  ')).toBe('https://pidb.example.com');
+    expect(normalizeUrl('  https://blindkey.example.com/  ')).toBe('https://blindkey.example.com');
   });
   it('rejects non-http(s) urls', () => {
     expect(() => normalizeUrl('ftp://x/')).toThrow(/invalid server url|must be http/i);
@@ -24,14 +24,14 @@ describe('normalizeUrl', () => {
 
 describe('loadConfig', () => {
   it('reads the config file', () => {
-    writeFileSync(configPath(envWith()), JSON.stringify({ url: 'http://localhost:8080/', token: 'pidb_file' }));
-    expect(loadConfig(envWith())).toEqual({ url: 'http://localhost:8080', token: 'pidb_file' });
+    writeFileSync(configPath(envWith()), JSON.stringify({ url: 'http://localhost:8080/', token: 'bk_file' }));
+    expect(loadConfig(envWith())).toEqual({ url: 'http://localhost:8080', token: 'bk_file' });
   });
 
   it('prefers env vars over the file, per field', () => {
-    writeFileSync(configPath(envWith()), JSON.stringify({ url: 'http://file', token: 'pidb_file' }));
-    expect(loadConfig(envWith({ PIDB_TOKEN: 'pidb_env' }))).toEqual({ url: 'http://file', token: 'pidb_env' });
-    expect(loadConfig(envWith({ PIDB_URL: 'http://env' }))).toEqual({ url: 'http://env', token: 'pidb_file' });
+    writeFileSync(configPath(envWith()), JSON.stringify({ url: 'http://file', token: 'bk_file' }));
+    expect(loadConfig(envWith({ BLINDKEY_TOKEN: 'bk_env' }))).toEqual({ url: 'http://file', token: 'bk_env' });
+    expect(loadConfig(envWith({ BLINDKEY_URL: 'http://env' }))).toEqual({ url: 'http://env', token: 'bk_file' });
   });
 
   it('exits 3 when nothing is configured', () => {
@@ -41,7 +41,7 @@ describe('loadConfig', () => {
     } catch (err) {
       expect(err).toBeInstanceOf(CliError);
       expect((err as CliError).exitCode).toBe(3);
-      expect((err as CliError).message).toMatch(/pidb login/);
+      expect((err as CliError).message).toMatch(/blindkey login/);
     }
   });
 
@@ -63,7 +63,7 @@ describe('loadConfig', () => {
         thrown = err;
       }
       expect(thrown).toBeInstanceOf(CliError);
-      expect((thrown as CliError).message).not.toMatch(/pidb login/);
+      expect((thrown as CliError).message).not.toMatch(/blindkey login/);
       expect((thrown as CliError).message).toContain(path);
     } finally {
       chmodSync(path, 0o600);
@@ -74,17 +74,17 @@ describe('loadConfig', () => {
 describe('saveConfig', () => {
   it('writes config.json with mode 0600 inside a 0700 directory', () => {
     const dir = join(home, 'nested');
-    const env = { PIDB_CONFIG_HOME: dir } as NodeJS.ProcessEnv;
-    const path = saveConfig({ url: 'https://pidb.example.com', token: 'pidb_abc' }, env);
+    const env = { BLINDKEY_CONFIG_HOME: dir } as NodeJS.ProcessEnv;
+    const path = saveConfig({ url: 'https://blindkey.example.com', token: 'bk_abc' }, env);
     expect(path).toBe(join(dir, 'config.json'));
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
-    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ url: 'https://pidb.example.com', token: 'pidb_abc' });
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ url: 'https://blindkey.example.com', token: 'bk_abc' });
   });
 
   it('tightens the mode of a pre-existing world-readable file', () => {
     mkdirSync(join(home, 'd'), { recursive: true });
-    const env = { PIDB_CONFIG_HOME: join(home, 'd') } as NodeJS.ProcessEnv;
+    const env = { BLINDKEY_CONFIG_HOME: join(home, 'd') } as NodeJS.ProcessEnv;
     writeFileSync(join(home, 'd', 'config.json'), '{}', { mode: 0o644 });
     const path = saveConfig({ url: 'http://x', token: 't' }, env);
     expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -94,8 +94,8 @@ describe('saveConfig', () => {
     const dir = join(home, 'existing');
     mkdirSync(dir, { mode: 0o755 });
     chmodSync(dir, 0o755); // Ensure it's 0o755 regardless of umask
-    const env = { PIDB_CONFIG_HOME: dir } as NodeJS.ProcessEnv;
-    const path = saveConfig({ url: 'https://pidb.example.com', token: 'pidb_abc' }, env);
+    const env = { BLINDKEY_CONFIG_HOME: dir } as NodeJS.ProcessEnv;
+    const path = saveConfig({ url: 'https://blindkey.example.com', token: 'bk_abc' }, env);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
@@ -103,7 +103,7 @@ describe('saveConfig', () => {
 
 describe('configPath', () => {
   it('falls back to XDG_CONFIG_HOME then HOME', () => {
-    expect(configPath({ XDG_CONFIG_HOME: '/xdg' } as NodeJS.ProcessEnv)).toBe('/xdg/pidb/config.json');
-    expect(configPath({ HOME: '/home/alex' } as NodeJS.ProcessEnv)).toBe('/home/alex/.config/pidb/config.json');
+    expect(configPath({ XDG_CONFIG_HOME: '/xdg' } as NodeJS.ProcessEnv)).toBe('/xdg/blindkey/config.json');
+    expect(configPath({ HOME: '/home/alex' } as NodeJS.ProcessEnv)).toBe('/home/alex/.config/blindkey/config.json');
   });
 });

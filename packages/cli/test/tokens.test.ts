@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApiError, PidbClient } from '../src/client.js';
+import { ApiError, BlindkeyClient } from '../src/client.js';
 import { parseExpires, parseScopes, runTokenCreate, runTokenList, runTokenRevoke } from '../src/commands/tokens.js';
 import type { PublicToken } from '../src/api-types.js';
 import { CliError } from '../src/errors.js';
 import { makeServer, type ServerFixture } from './helpers.js';
 
 let s: ServerFixture;
-const admin = () => new PidbClient({ url: s.url, token: s.token(['admin']) });
+const admin = () => new BlindkeyClient({ url: s.url, token: s.token(['admin']) });
 
 beforeAll(async () => {
   s = await makeServer();

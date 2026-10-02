@@ -37,7 +37,7 @@ function runHookMain(kind: string, stdin: string, env: Record<string, string>): 
  */
 describe('hooks main.ts — real subprocess', () => {
   it('guard: allowed command prints nothing to stdout, exits 0', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-hooks-main-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-hooks-main-'));
     const input = JSON.stringify({ hook_event_name: 'PreToolUse', cwd: '/repo', tool_name: 'Bash', tool_input: { command: 'echo hello' } });
     const r = await runHookMain('guard', input, { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } as Record<string, string>);
     expect(r.status).toBe(0);
@@ -45,8 +45,8 @@ describe('hooks main.ts — real subprocess', () => {
   });
 
   it('guard: denied command prints the PreToolUse deny JSON, exits 0', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-hooks-main-'));
-    const input = JSON.stringify({ hook_event_name: 'PreToolUse', cwd: '/repo', tool_name: 'Bash', tool_input: { command: 'pidb login https://x' } });
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-hooks-main-'));
+    const input = JSON.stringify({ hook_event_name: 'PreToolUse', cwd: '/repo', tool_name: 'Bash', tool_input: { command: 'blindkey login https://x' } });
     const r = await runHookMain('guard', input, { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } as Record<string, string>);
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout.trim()) as { hookSpecificOutput: { permissionDecision: string } };
@@ -54,7 +54,7 @@ describe('hooks main.ts — real subprocess', () => {
   });
 
   it('session-start: prints additionalContext including the golden rules, exits 0', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-hooks-main-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-hooks-main-'));
     const input = JSON.stringify({ hook_event_name: 'SessionStart', cwd: '/repo' });
     const r = await runHookMain('session-start', input, { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } as Record<string, string>);
     expect(r.status).toBe(0);
@@ -63,7 +63,7 @@ describe('hooks main.ts — real subprocess', () => {
   });
 
   it('an unknown kind exits 0 with an empty stdout and a stderr note', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-hooks-main-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-hooks-main-'));
     const r = await runHookMain('bogus-kind', '{}', { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } as Record<string, string>);
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
@@ -71,7 +71,7 @@ describe('hooks main.ts — real subprocess', () => {
   });
 
   it('redact: a >1 MB result piped through the real process arrives complete and valid JSON', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-hooks-main-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-hooks-main-'));
     const stdout = `PASSWORD=hunter2\n${'lorem ipsum dolor\n'.repeat(70_000)}END-MARKER`;
     const input = JSON.stringify({ hook_event_name: 'PostToolUse', cwd: '/repo', tool_name: 'Bash', tool_input: { command: 'x' }, tool_response: { stdout } });
     const r = await runHookMain('redact', input, { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } as Record<string, string>);
@@ -79,12 +79,12 @@ describe('hooks main.ts — real subprocess', () => {
     expect(r.stdout.length).toBeGreaterThan(1_000_000);
     const parsed = JSON.parse(r.stdout) as { hookSpecificOutput: { updatedToolOutput: { stdout: string } } };
     const out = parsed.hookSpecificOutput.updatedToolOutput.stdout;
-    expect(out.startsWith('PASSWORD=[pidb:redacted]\n')).toBe(true);
+    expect(out.startsWith('PASSWORD=[blindkey:redacted]\n')).toBe(true);
     expect(out.endsWith('END-MARKER')).toBe(true);
   });
 
   it('malformed stdin still exits 0 (never crashes the process)', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-hooks-main-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-hooks-main-'));
     const r = await runHookMain('redact', 'not json', { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } as Record<string, string>);
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');

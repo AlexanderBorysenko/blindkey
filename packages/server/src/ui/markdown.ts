@@ -1,6 +1,6 @@
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
-import { SECRET_REF_RE, parseSecretRefs } from '@pidb/shared';
+import { SECRET_REF_RE, parseSecretRefs } from '@blindkey/shared';
 
 const ALLOWED_TAGS = [
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'blockquote', 'pre', 'code', 'em', 'strong', 'del',

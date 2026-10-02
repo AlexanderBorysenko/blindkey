@@ -1,27 +1,27 @@
 import { spawn, type ChildProcess, type StdioOptions } from 'node:child_process';
-import { scopedPath, seg, type PidbClient } from '../client.js';
+import { scopedPath, seg, type BlindkeyClient } from '../client.js';
 import type { RevealedFields } from '../api-types.js';
 import { CliError } from '../errors.js';
 import { createRedactor } from '../agent/redact.js';
 
 /** Field keys allow [A-Za-z0-9_.-]; env vars do not, so `.` and `-` become `_`. */
 export function envKeyFor(key: string): string {
-  return `PIDB_${key.toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`;
+  return `BLINDKEY_${key.toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`;
 }
 
 /**
  * Variables the CLI itself reads for its own configuration — never let a secret field overwrite one
- * of these. Mode and data-dir switches are reserved everywhere; `PIDB_URL`/`PIDB_TOKEN` only in user
+ * of these. Mode and data-dir switches are reserved everywhere; `BLINDKEY_URL`/`BLINDKEY_TOKEN` only in user
  * mode, since agent mode ignores them (so a secret's `url`/`token` field still works for the agent).
  */
-const ALWAYS_RESERVED_ENV_VARS = ['PIDB_CONFIG_HOME', 'PIDB_AGENT', 'PIDB_PLUGIN_DATA', 'PIDB_ALLOW_USER_MODE'];
-const USER_MODE_RESERVED_ENV_VARS = ['PIDB_TOKEN', 'PIDB_URL'];
+const ALWAYS_RESERVED_ENV_VARS = ['BLINDKEY_CONFIG_HOME', 'BLINDKEY_AGENT', 'BLINDKEY_PLUGIN_DATA', 'BLINDKEY_ALLOW_USER_MODE'];
+const USER_MODE_RESERVED_ENV_VARS = ['BLINDKEY_TOKEN', 'BLINDKEY_URL'];
 
 export function buildEnv(fields: Record<string, string>, base: NodeJS.ProcessEnv, agent = false): NodeJS.ProcessEnv {
   const reserved = agent ? ALWAYS_RESERVED_ENV_VARS : [...ALWAYS_RESERVED_ENV_VARS, ...USER_MODE_RESERVED_ENV_VARS];
   const env: NodeJS.ProcessEnv = { ...base };
   // The child gets only the one secret it opted into, never the caller's own API token.
-  delete env.PIDB_TOKEN;
+  delete env.BLINDKEY_TOKEN;
   const seen = new Map<string, string>();
   for (const [key, value] of Object.entries(fields)) {
     const name = envKeyFor(key);
@@ -75,14 +75,14 @@ function spawnAndAwaitExit(
 }
 
 export async function runSecretExec(
-  client: PidbClient,
+  client: BlindkeyClient,
   target: string,
   name: string,
   command: string[],
   opts: RunSecretExecOptions = {},
 ): Promise<number> {
   const [bin, ...args] = command;
-  if (!bin) throw new CliError('no command given — usage: pidb secret exec <target> "<name>" -- <command...>');
+  if (!bin) throw new CliError('no command given — usage: blindkey secret exec <target> "<name>" -- <command...>');
 
   const revealed = opts.agent
     ? await client.json<RevealedFields>('POST', scopedPath(target, 'secrets', `/${seg(name)}/use`), {

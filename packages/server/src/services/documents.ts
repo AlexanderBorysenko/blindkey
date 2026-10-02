@@ -1,4 +1,4 @@
-import { docSlugSchema, lintForSecrets, parseSecretRefs, type DocumentInput } from '@pidb/shared';
+import { docSlugSchema, lintForSecrets, parseSecretRefs, type DocumentInput } from '@blindkey/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, canAccessProject, hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { NotFoundError, UnprocessableError, ValidationError } from '../errors.js';

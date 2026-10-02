@@ -1,7 +1,7 @@
 <div class="auth-card">
   <div class="brand">
     <span class="mark">pi</span>
-    <span>pidb</span>
+    <span>blindkey</span>
   </div>
   <p class="lede">Admin sign in</p>
   <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>

@@ -29,7 +29,7 @@ const UPSTREAM_TOOL_NAMES = [
   'upsert_secret_meta',
   'write_document',
 ];
-const LOCAL_TOOL_NAMES = ['pidb_status', 'pidb_bind', 'pidb_profiles'];
+const LOCAL_TOOL_NAMES = ['blindkey_status', 'blindkey_bind', 'blindkey_profiles'];
 
 let s: ServerFixture;
 let dataDir: string;
@@ -39,7 +39,7 @@ const cwd = '/repo/acme';
 beforeEach(async () => {
   s = await makeServer();
   s.project('acme');
-  dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-bridge-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-bridge-'));
   store = memoryStore();
 });
 afterEach(async () => {
@@ -66,7 +66,7 @@ const textOf = (r: CallToolResult): string => {
 };
 
 /**
- * A minimal, unauthenticated fake MCP-over-HTTP upstream (plain `node:http`, not the real pidb
+ * A minimal, unauthenticated fake MCP-over-HTTP upstream (plain `node:http`, not the real blindkey
  * server) that lists exactly `toolNames` — every registered tool's handler just echoes its own name,
  * so a call reaching one is unambiguous. Used to prove the bridge's own allowlist (spec §2.4 fix
  * round 1 #1) actually filters/refuses names the *upstream* offers, independent of what the real
@@ -99,7 +99,7 @@ async function startFakeUpstream(toolNames: string[]): Promise<{ url: string; cl
 }
 
 describe('MCP bridge (spec §2.4)', () => {
-  it('tools/list merges the upstream server tools with the local pidb_* tools', async () => {
+  it('tools/list merges the upstream server tools with the local blindkey_* tools', async () => {
     connectedProfile();
     const client = await connectBridge();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
@@ -164,7 +164,7 @@ describe('MCP bridge (spec §2.4)', () => {
     expect(notified).toBe(1);
   });
 
-  it('watchIntervalMs: notices a connection made elsewhere (pidb connect) without any request (F2)', async () => {
+  it('watchIntervalMs: notices a connection made elsewhere (blindkey connect) without any request (F2)', async () => {
     const server = createBridge({ cwd, store, dataDir, watchIntervalMs: 10 });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: 'test', version: '0.0.0' });
@@ -192,7 +192,7 @@ describe('MCP bridge (spec §2.4)', () => {
     const client = await connectBridge();
     const res = (await client.callTool({ name: 'list_projects', arguments: {} })) as CallToolResult;
     expect(res.isError).toBe(true);
-    expect(textOf(res)).toMatch(/pidb connect/);
+    expect(textOf(res)).toMatch(/blindkey connect/);
   });
 
   it('401 token_expired: tools/call returns a tool error with a connect hint, and the token never appears in the output', async () => {
@@ -209,7 +209,7 @@ describe('MCP bridge (spec §2.4)', () => {
     const res = (await client.callTool({ name: 'list_projects', arguments: {} })) as CallToolResult;
     expect(res.isError).toBe(true);
     const text = textOf(res);
-    expect(text).toMatch(/pidb connect/);
+    expect(text).toMatch(/blindkey connect/);
     expect(text).not.toContain(expired);
   });
 
@@ -221,7 +221,7 @@ describe('MCP bridge (spec §2.4)', () => {
     expect(res.isError).toBe(true);
     const text = textOf(res);
     expect(text).toMatch(/missing_scope|projects:write/);
-    expect(text).toMatch(/pidb connect.*widen/);
+    expect(text).toMatch(/blindkey connect.*widen/);
   });
 
   it('upsert_secret_meta on a sensitive field gets the secret_request_link hint, not the widen hint (F3)', async () => {
@@ -246,7 +246,7 @@ describe('MCP bridge (spec §2.4)', () => {
     const text = textOf(res);
     expect(text).toMatch(/not_found/);
     expect(text).toMatch(/does not exist or the token was not approved for it/);
-    expect(text).toMatch(/pidb connect/);
+    expect(text).toMatch(/blindkey connect/);
     expect(text).toMatch(/list_projects/);
   });
 
@@ -264,18 +264,18 @@ describe('MCP bridge (spec §2.4)', () => {
     const first = (await client.callTool({ name: 'list_projects', arguments: {} })) as CallToolResult;
     expect(first.isError).toBe(true);
 
-    // Simulate `pidb connect` having issued a fresh token for the same profile mid-session.
+    // Simulate `blindkey connect` having issued a fresh token for the same profile mid-session.
     await store.set('work', s.token(['projects:read']));
     const second = (await client.callTool({ name: 'list_projects', arguments: {} })) as CallToolResult;
     expect(second.isError).toBeFalsy();
   });
 
-  it('pidb_status reports profile/url/project/connected and never the token', async () => {
+  it('blindkey_status reports profile/url/project/connected and never the token', async () => {
     connectedProfile();
     saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });
     const token = (await store.get('work'))!;
     const client = await connectBridge();
-    const res = (await client.callTool({ name: 'pidb_status', arguments: {} })) as CallToolResult;
+    const res = (await client.callTool({ name: 'blindkey_status', arguments: {} })) as CallToolResult;
     expect(res.isError).toBeFalsy();
     const text = textOf(res);
     const status = JSON.parse(text) as { profile: string; url: string; project: string; connected: boolean };
@@ -283,34 +283,34 @@ describe('MCP bridge (spec §2.4)', () => {
     expect(text).not.toContain(token);
   });
 
-  it('pidb_status reports not connected when no profile is configured', async () => {
+  it('blindkey_status reports not connected when no profile is configured', async () => {
     const client = await connectBridge();
-    const res = (await client.callTool({ name: 'pidb_status', arguments: {} })) as CallToolResult;
+    const res = (await client.callTool({ name: 'blindkey_status', arguments: {} })) as CallToolResult;
     const status = JSON.parse(textOf(res)) as { connected: boolean; profile: string | null };
     expect(status.connected).toBe(false);
     expect(status.profile).toBeNull();
   });
 
-  it('pidb_bind uses the same binding logic as the CLI `bind` command and persists to bindings.json', async () => {
+  it('blindkey_bind uses the same binding logic as the CLI `bind` command and persists to bindings.json', async () => {
     connectedProfile();
     const client = await connectBridge();
-    const res = (await client.callTool({ name: 'pidb_bind', arguments: { project: 'acme' } })) as CallToolResult;
+    const res = (await client.callTool({ name: 'blindkey_bind', arguments: { project: 'acme' } })) as CallToolResult;
     expect(res.isError).toBeFalsy();
     expect(JSON.parse(textOf(res))).toEqual({ profile: 'work', project: 'acme' });
     expect(loadBindings(dataDir)[cwd]).toEqual({ profile: 'work', project: 'acme' });
   });
 
-  it('pidb_bind refuses with a helpful error when no server is configured', async () => {
+  it('blindkey_bind refuses with a helpful error when no server is configured', async () => {
     const client = await connectBridge();
-    const res = (await client.callTool({ name: 'pidb_bind', arguments: { project: 'acme' } })) as CallToolResult;
+    const res = (await client.callTool({ name: 'blindkey_bind', arguments: { project: 'acme' } })) as CallToolResult;
     expect(res.isError).toBe(true);
     expect(textOf(res)).toMatch(/no server configured/);
   });
 
-  it('pidb_profiles lists configured profiles and the default', async () => {
+  it('blindkey_profiles lists configured profiles and the default', async () => {
     connectedProfile();
     const client = await connectBridge();
-    const res = (await client.callTool({ name: 'pidb_profiles', arguments: {} })) as CallToolResult;
+    const res = (await client.callTool({ name: 'blindkey_profiles', arguments: {} })) as CallToolResult;
     const body = JSON.parse(textOf(res)) as { default: string; profiles: { name: string; url: string; default: boolean }[] };
     expect(body).toEqual({ default: 'work', profiles: [{ name: 'work', url: s.url, default: true }] });
   });
@@ -321,23 +321,23 @@ describe('MCP bridge (spec §2.4)', () => {
     saveBindings(dataDir, { [boundCwd]: { profile: 'work', project: 'other-project' } });
     // deps.cwd points at an unbound repo; env.CLAUDE_PROJECT_DIR should win.
     const client = await connectBridge({ cwd: '/repo/unbound', env: { CLAUDE_PROJECT_DIR: boundCwd } });
-    const res = (await client.callTool({ name: 'pidb_status', arguments: {} })) as CallToolResult;
+    const res = (await client.callTool({ name: 'blindkey_status', arguments: {} })) as CallToolResult;
     const status = JSON.parse(textOf(res)) as { project: string | null };
     expect(status.project).toBe('other-project');
   });
 
   it('allowlist: tools/list drops a disallowed upstream tool and never lists it under a local name either (fix round 1 #1)', async () => {
-    const fake = await startFakeUpstream([...UPSTREAM_TOOL_NAMES, 'reveal_secret', 'pidb_status']);
+    const fake = await startFakeUpstream([...UPSTREAM_TOOL_NAMES, 'reveal_secret', 'blindkey_status']);
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: fake.url } } });
     await store.set('work', 'irrelevant-fake-upstream-does-not-check-auth');
     try {
       const client = await connectBridge();
       const names = (await client.listTools()).tools.map((t) => t.name).sort();
       // Exactly the 10 allowed upstream tools + the 3 local tools — `reveal_secret` is dropped, and
-      // the upstream's own (trivial) `pidb_status` never shadows the real local one.
+      // the upstream's own (trivial) `blindkey_status` never shadows the real local one.
       expect(names).toEqual([...UPSTREAM_TOOL_NAMES, ...LOCAL_TOOL_NAMES].sort());
-      const status = (await client.callTool({ name: 'pidb_status', arguments: {} })) as CallToolResult;
-      // The real local handler answered, not the fake upstream's trivial echo ("pidb_status").
+      const status = (await client.callTool({ name: 'blindkey_status', arguments: {} })) as CallToolResult;
+      // The real local handler answered, not the fake upstream's trivial echo ("blindkey_status").
       expect(JSON.parse(textOf(status))).toHaveProperty('connected');
     } finally {
       await fake.close();
@@ -352,7 +352,7 @@ describe('MCP bridge (spec §2.4)', () => {
       const client = await connectBridge();
       const res = (await client.callTool({ name: 'reveal_secret', arguments: {} })) as CallToolResult;
       expect(res.isError).toBe(true);
-      expect(textOf(res)).toBe('tool not allowed by the pidb plugin');
+      expect(textOf(res)).toBe('tool not allowed by the Blindkey plugin');
     } finally {
       await fake.close();
     }
@@ -368,7 +368,7 @@ describe('MCP bridge (spec §2.4)', () => {
       kind: 'agent',
     }).token;
     const good = s.token(['projects:read']);
-    // Simulates a concurrent `pidb connect` finishing between the bridge's *first* resolveConfig()
+    // Simulates a concurrent `blindkey connect` finishing between the bridge's *first* resolveConfig()
     // (before the upstream call attempt) and its retry's resolveConfig() (after the 401): the first
     // read still sees the old, expired token; every read from then on sees the freshly-issued one.
     let calls = 0;

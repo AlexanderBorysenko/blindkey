@@ -12,7 +12,7 @@ export interface KeyVersionStatus {
  * Groups `rows` by key version and, for each group, tries `tryDecrypt` against every row with
  * that version's key. `tryDecrypt` should throw `CryptoError` on a bad key and do nothing
  * otherwise. Shared by `secretKeyVersionReport` and `totpKeyVersionReport` for
- * `pidb-server key-versions` (spec §4).
+ * `blindkey-server key-versions` (spec §4).
  */
 export function keyVersionReport<T>(
   rows: T[],
@@ -59,7 +59,7 @@ export function probeCurrentVersion<T>(rows: T[], ring: KeyRing, tryDecrypt: (ro
       tryDecrypt(row);
     } catch (e) {
       if (!(e instanceof CryptoError)) throw e;
-      throw new Error(`key version ${ring.current} does not decrypt ${describe(row)} — PIDB_MASTER_KEY is not the version ${ring.current} key`);
+      throw new Error(`key version ${ring.current} does not decrypt ${describe(row)} — BLINDKEY_MASTER_KEY is not the version ${ring.current} key`);
     }
   }
 }

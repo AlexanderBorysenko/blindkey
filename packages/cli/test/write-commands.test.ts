@@ -2,14 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PidbClient } from '../src/client.js';
+import { BlindkeyClient } from '../src/client.js';
 import { runDocsPut } from '../src/commands/docs.js';
 import { parseFieldArg, runDocsDelete, runProjectsCreate, runSecretsMeta, runSecretsRequest } from '../src/commands/write.js';
 import { makeServer, type ServerFixture } from './helpers.js';
 
 let s: ServerFixture;
 const client = (scopes: Parameters<ServerFixture['token']>[0], projects: string[] | null = null) =>
-  new PidbClient({ url: s.url, token: s.token(scopes, projects) });
+  new BlindkeyClient({ url: s.url, token: s.token(scopes, projects) });
 
 beforeAll(async () => {
   s = await makeServer();
@@ -19,7 +19,7 @@ afterAll(async () => {
   await s.close();
 });
 
-describe('pidb projects create', () => {
+describe('blindkey projects create', () => {
   it('creates a project the same token can then read', async () => {
     const c = client(['projects:read', 'projects:create'], ['acme']);
     const r = await runProjectsCreate(c, 'newco', { name: 'New Co', tags: 'wp, staging' });
@@ -30,10 +30,10 @@ describe('pidb projects create', () => {
   });
 });
 
-describe('pidb docs delete', () => {
+describe('blindkey docs delete', () => {
   it('deletes a global document', async () => {
     const c = client(['docs:read', 'docs:write']);
-    const dir = mkdtempSync(join(tmpdir(), 'pidb-docs-del-'));
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-docs-del-'));
     writeFileSync(join(dir, 'x.md'), '# X\n\nhello');
     await runDocsPut(c, 'global', 'temp-note', { file: join(dir, 'x.md'), title: 'X', category: 'notes' });
     expect((await runDocsDelete(c, 'global', 'temp-note')).text).toBe('deleted temp-note');
@@ -41,7 +41,7 @@ describe('pidb docs delete', () => {
   });
 });
 
-describe('pidb secrets meta', () => {
+describe('blindkey secrets meta', () => {
   it('parses key=value (value may contain =) as a non-sensitive field', () => {
     expect(parseFieldArg('a=b=c')).toEqual({ key: 'a', value: 'b=c', sensitive: false });
     expect(() => parseFieldArg('novalue')).toThrow(/key=value/);
@@ -65,7 +65,7 @@ describe('pidb secrets meta', () => {
   });
 });
 
-describe('pidb secrets request', () => {
+describe('blindkey secrets request', () => {
   it('links to the new-secret form for an unknown name, marking only default-non-sensitive plain keys', async () => {
     const c = client(['secrets:meta'], ['acme']);
     const r = await runSecretsRequest(c, 'acme', 'Fresh one', { key: ['password'], plainKey: ['host', 'notes'] });

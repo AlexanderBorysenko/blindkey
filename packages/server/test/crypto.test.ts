@@ -48,16 +48,16 @@ describe('envelope', () => {
 });
 
 describe('tokens', () => {
-  it('generates pidb_<prefix>_<secret> tokens', () => {
+  it('generates bk_<prefix>_<secret> tokens', () => {
     const t = generateToken();
-    expect(t.token).toMatch(/^pidb_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{43}$/);
+    expect(t.token).toMatch(/^bk_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{43}$/);
     expect(parseTokenPrefix(t.token)).toBe(t.prefix);
     expect(hashToken(t.token)).toBe(t.hash);
     expect(t.hash).toMatch(/^[0-9a-f]{64}$/);
   });
   it('rejects malformed tokens', () => {
     expect(parseTokenPrefix('nope')).toBeNull();
-    expect(parseTokenPrefix('pidb_short_x')).toBeNull();
+    expect(parseTokenPrefix('bk_short_x')).toBeNull();
   });
   it('compares hashes in constant time helper', () => {
     const t = generateToken();

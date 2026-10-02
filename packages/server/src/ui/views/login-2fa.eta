@@ -1,7 +1,7 @@
 <div class="auth-card">
   <div class="brand">
     <span class="mark">pi</span>
-    <span>pidb</span>
+    <span>blindkey</span>
   </div>
   <p class="lede">Two-factor code</p>
   <p class="note">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>

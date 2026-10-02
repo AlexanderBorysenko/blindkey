@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { redactOutput, redactToolResponse, REDACTED } from '../src/agent/hooks/redact.js';
 
 describe('redactOutput', () => {
-  it('redacts a pidb token', () => {
-    const token = `pidb_${'a1B2c3D4e5F6g7H8i9J0'.repeat(1)}`; // 20 chars after prefix
+  it('redacts a Blindkey token', () => {
+    const token = `bk_${'a1B2c3D4e5F6g7H8i9J0'.repeat(1)}`; // 20 chars after prefix
     expect(redactOutput(`Authorization: Bearer ${token}`)).toBe(`Authorization: Bearer ${REDACTED}`);
   });
 
-  it('does not redact a pidb_-prefixed string shorter than the minimum length', () => {
-    const short = 'pidb_short';
+  it('does not redact a bk_-prefixed string shorter than the minimum length', () => {
+    const short = 'bk_short';
     expect(redactOutput(`x=${short}`)).toBe(`x=${short}`);
   });
 
@@ -74,7 +74,7 @@ describe('redactOutput', () => {
   });
 
   it('redacts multiple distinct pattern kinds in the same text', () => {
-    const token = `pidb_${'x'.repeat(24)}`;
+    const token = `bk_${'x'.repeat(24)}`;
     const text = `${token}\nAKIAABCDEFGHIJKLMNOP\nSECRET=hunter2`;
     expect(redactOutput(text)).toBe(`${REDACTED}\n${REDACTED}\nSECRET=${REDACTED}`);
   });
@@ -86,7 +86,7 @@ describe('redactOutput', () => {
 
 describe('redactToolResponse', () => {
   it('redacts a plain string tool_response and reports changed:true', () => {
-    const token = `pidb_${'y'.repeat(24)}`;
+    const token = `bk_${'y'.repeat(24)}`;
     const result = redactToolResponse(`token is ${token}`);
     expect(result).toEqual({ changed: true, value: `token is ${REDACTED}` });
   });
@@ -97,7 +97,7 @@ describe('redactToolResponse', () => {
   });
 
   it('redacts stdout and stderr independently in a {stdout, stderr, ...} shape', () => {
-    const token = `pidb_${'z'.repeat(24)}`;
+    const token = `bk_${'z'.repeat(24)}`;
     const result = redactToolResponse({ stdout: `out: ${token}`, stderr: 'SECRET=hunter2', interrupted: false });
     expect(result).toEqual({ changed: true, value: { stdout: `out: ${REDACTED}`, stderr: `SECRET=${REDACTED}`, interrupted: false } });
   });

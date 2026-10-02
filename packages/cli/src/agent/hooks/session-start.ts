@@ -2,7 +2,7 @@
 // Code session gets: which profile/server is configured, whether it's connected, which project this
 // repo is bound to (and that project's summary/docs/secrets from the server), and the spec §3.4
 // golden rules — always, verbatim, and never truncated away (see `finalize` below).
-import { ApiError, PidbClient } from '../../client.js';
+import { ApiError, BlindkeyClient } from '../../client.js';
 import { loadBindings, loadProfiles, repoKey } from '../state.js';
 import type { TokenStore } from '../tokenstore.js';
 
@@ -29,11 +29,11 @@ const MAX_LIST_ITEMS = 20;
 
 const GOLDEN_RULES = [
   'Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.',
-  'Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env PIDB_<KEY>), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.',
+  'Use values only via `blindkey secret exec <target> "<name>" -- <cmd>` (env BLINDKEY_<KEY>), or `blindkey secret write|env --out <file>` for tools that need files; never read those files back.',
   'Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.',
   'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret facts go into non-sensitive fields via `upsert_secret_meta` (host, port, url, username, database, public_key, or any non-credential key with `sensitive: false`); credentials → `secret_request_link`; a new project → `create_project`.',
-  '401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.',
-  'Never use curl against the pidb server; use MCP tools / the CLI.',
+  '401/expired → run `blindkey connect` (the user approves in the browser); 403 on a project → `blindkey connect` to widen.',
+  'Never use curl against the Blindkey server; use MCP tools / the CLI.',
 ] as const;
 
 const GOLDEN_RULES_BLOCK = ['', 'Golden rules:', ...GOLDEN_RULES.map((r, i) => `${i + 1}. ${r}`)].join('\n');
@@ -78,7 +78,7 @@ async function fetchProjectDetail(
 ): Promise<RemoteProjectDetail | 401 | 403 | 404 | 'down'> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   try {
-    const client = new PidbClient({ url, token }, fetchImpl);
+    const client = new BlindkeyClient({ url, token }, fetchImpl);
     return await withDeadline(client.json<RemoteProjectDetail>('GET', `/api/v1/projects/${encodeURIComponent(project)}`), deadline);
   } catch (err) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 404)) return err.status;
@@ -93,7 +93,7 @@ interface GlobalListing {
 
 /** Global docs + secrets (shared across projects); a list that can't be fetched in time (or lacks scope) is empty. */
 async function fetchGlobals(url: string, token: string, deps: SessionStartDeps, deadline: number): Promise<GlobalListing> {
-  const client = new PidbClient({ url, token }, deps.fetchImpl ?? fetch);
+  const client = new BlindkeyClient({ url, token }, deps.fetchImpl ?? fetch);
   // Each list on its own: a token without secrets:meta still gets the global documents.
   const list = async <T>(path: string): Promise<T[]> => {
     try {
@@ -152,16 +152,16 @@ async function buildBody(deps: SessionStartDeps, deadline: number): Promise<stri
 
   if (!profileName || !profile) {
     return [
-      'pidb: no server configured for this agent.',
-      'Ask the user to run `/pidb:server <name> <url>` and then `/pidb:connect` (or `pidb profile add <name> <url>` / `pidb connect` directly).',
+      'blindkey: no server configured for this agent.',
+      'Ask the user to run `/blindkey:server <name> <url>` and then `/blindkey:connect` (or `blindkey profile add <name> <url>` / `blindkey connect` directly).',
     ];
   }
 
-  const lines = [`pidb: profile "${profileName}" — ${profile.url}`];
+  const lines = [`blindkey: profile "${profileName}" — ${profile.url}`];
 
   const token = await withDeadline(Promise.resolve(deps.store.get(profileName)), deadline);
   if (!token) {
-    lines.push('Not connected — run `pidb connect` (browser approval), or ask the user to run `/pidb:connect`.');
+    lines.push('Not connected — run `blindkey connect` (browser approval), or ask the user to run `/blindkey:connect`.');
     return lines;
   }
   lines.push('Connected.');
@@ -182,28 +182,28 @@ async function projectSection(
 ): Promise<string[]> {
   const lines: string[] = [];
   if (!project) {
-    lines.push('This repo is not bound to a pidb project — call `pidb_bind` or ask the user which project this is.');
+    lines.push('This repo is not bound to a Blindkey project — call `blindkey_bind` or ask the user which project this is.');
     return lines;
   }
   lines.push(`Bound project: ${project}`);
 
   const detail = await fetchProjectDetail(url, token, project, deps, deadline);
   if (detail === 'down') {
-    lines.push(`pidb server (${url}) is unreachable right now — project details unavailable this session.`);
+    lines.push(`blindkey server (${url}) is unreachable right now — project details unavailable this session.`);
     return lines;
   }
   if (detail === 401) {
-    lines.push('pidb: token expired or revoked — run `pidb connect`.');
+    lines.push('blindkey: token expired or revoked — run `blindkey connect`.');
     return lines;
   }
   if (detail === 403) {
-    lines.push(`pidb: the token lacks access to project "${project}" — run \`pidb connect\` to widen.`);
+    lines.push(`blindkey: the token lacks access to project "${project}" — run \`blindkey connect\` to widen.`);
     return lines;
   }
   if (detail === 404) {
     // The server answers 404 both for a missing slug and for one this token wasn't approved for.
     lines.push(
-      `Project "${project}" not found or not approved for this token — run \`pidb connect\` to approve it, or \`pidb bind\` another.`,
+      `Project "${project}" not found or not approved for this token — run \`blindkey connect\` to approve it, or \`blindkey bind\` another.`,
     );
     return lines;
   }
@@ -253,7 +253,7 @@ function finalize(bodyLines: string[]): string {
  * safety net can produce the exact same shape rather than a hand-rolled, possibly-incomplete one.
  */
 export function fallbackContext(message: string, notes: readonly string[] = []): string {
-  return finalize([...notes, `pidb: session context unavailable (${message}).`]);
+  return finalize([...notes, `blindkey: session context unavailable (${message}).`]);
 }
 
 /**

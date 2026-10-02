@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PidbClient } from '../src/client.js';
+import { BlindkeyClient } from '../src/client.js';
 import { runSecretEnv, runSecretWrite } from '../src/commands/files.js';
 import { loadWritten } from '../src/agent/state.js';
 import { CliError } from '../src/errors.js';
@@ -11,7 +11,7 @@ import { makeServer, type ServerFixture } from './helpers.js';
 let s: ServerFixture;
 let dir: string;
 let dataDir: string;
-const client = (scopes: Parameters<ServerFixture['token']>[0]) => new PidbClient({ url: s.url, token: s.token(scopes) });
+const client = (scopes: Parameters<ServerFixture['token']>[0]) => new BlindkeyClient({ url: s.url, token: s.token(scopes) });
 
 beforeAll(async () => {
   s = await makeServer();
@@ -25,8 +25,8 @@ afterAll(async () => {
   await s.close();
 });
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'pidb-agent-files-'));
-  dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-files-data-'));
+  dir = mkdtempSync(join(tmpdir(), 'blindkey-agent-files-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-files-data-'));
 });
 
 describe('secret write (agent mode)', () => {
@@ -72,7 +72,7 @@ describe('secret write (agent mode)', () => {
 
   it('raises a CliError (not a TypeError) when the server omits the requested field (fix round 1, Minor 9)', async () => {
     const out = join(dir, 'password.txt');
-    const fakeClient = { json: async () => ({ name: 'DB', fields: {} }) } as unknown as PidbClient;
+    const fakeClient = { json: async () => ({ name: 'DB', fields: {} }) } as unknown as BlindkeyClient;
     const err = await runSecretWrite(fakeClient, 'acme', 'DB', 'password', { out, agent: true, dataDir }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CliError);
     expect((err as CliError).message).toMatch(/did not return field "password"/);

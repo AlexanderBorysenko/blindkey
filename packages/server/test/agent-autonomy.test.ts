@@ -10,12 +10,12 @@ const main = (html: string) => html.split('<main')[1]?.split('</main>')[0] ?? ht
 async function adminSession(t: TestCtx) {
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-  const session = login.cookies.find((c) => c.name === 'pidb_session')!.value;
-  const page = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+  const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+  const page = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
   const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
-  const get = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+  const get = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
   const post = (url: string, payload: Record<string, unknown>) =>
-    t.app.inject({ method: 'POST', url, cookies: { pidb_session: session }, payload: { csrf, ...payload } });
+    t.app.inject({ method: 'POST', url, cookies: { blindkey_session: session }, payload: { csrf, ...payload } });
   return { get, post };
 }
 

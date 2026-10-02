@@ -167,13 +167,13 @@ describe('logging', () => {
     await app.inject({
       method: 'POST',
       url: '/api/v1/__header-probe',
-      headers: { authorization: 'Bearer pidb_super-secret-token', cookie: 'pidb_session=abc123' },
+      headers: { authorization: 'Bearer bk_super-secret-token', cookie: 'blindkey_session=abc123' },
     });
     await app.close();
     const all = lines.join('\n');
     expect(all).toContain('header-probe');
     expect(all).toContain('[Redacted]');
-    expect(all).not.toContain('pidb_super-secret-token');
+    expect(all).not.toContain('bk_super-secret-token');
     expect(all).not.toContain('abc123');
   });
 });

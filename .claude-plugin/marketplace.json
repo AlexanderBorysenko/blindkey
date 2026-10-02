@@ -1,11 +1,13 @@
 {
-  "name": "pidb",
-  "owner": { "name": "Alexander Borysenko" },
+  "name": "blindkey",
+  "owner": {
+    "name": "Alexander Borysenko"
+  },
   "plugins": [
     {
-      "name": "pidb",
+      "name": "blindkey",
       "source": "./plugin",
-      "description": "pidb (Projects Info DB) for Claude Code: project docs and memory, secrets used only by substitution, browser-approved agent tokens"
+      "description": "Blindkey for Claude Code: secrets your agent can use but never see, plus project docs and memory"
     }
   ]
 }

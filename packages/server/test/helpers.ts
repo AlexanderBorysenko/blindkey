@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { Scope } from '@pidb/shared';
+import type { Scope } from '@blindkey/shared';
 import { openDb, type Db } from '../src/db/connection.js';
 import type { KeyRing } from '../src/config.js';
 import type { AppContext } from '../src/http/context.js';

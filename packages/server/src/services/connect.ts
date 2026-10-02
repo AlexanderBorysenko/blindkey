@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { z } from 'zod';
-import { AGENT_SCOPES, agentScopesSchema, type ConnectStartInput, type Scope } from '@pidb/shared';
+import { AGENT_SCOPES, agentScopesSchema, type ConnectStartInput, type Scope } from '@blindkey/shared';
 import type { AppContext } from '../http/context.js';
 import type { Actor } from '../auth/principal.js';
 import { AppError, NotFoundError, ValidationError } from '../errors.js';

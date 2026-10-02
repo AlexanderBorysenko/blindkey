@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { DOC_CATEGORIES, type DocCategory } from '@pidb/shared';
-import { scopedPath, seg, type PidbClient } from '../client.js';
+import { DOC_CATEGORIES, type DocCategory } from '@blindkey/shared';
+import { scopedPath, seg, type BlindkeyClient } from '../client.js';
 import type { PublicDoc, PublicDocSummary } from '../api-types.js';
 import { CliError } from '../errors.js';
 import { fmtTime, table, type CommandResult } from '../output.js';
@@ -12,12 +12,12 @@ export interface DocsPutOptions {
   force?: boolean;
 }
 
-/** `pidb docs get guidelines` is the global doc; `pidb docs get acme deploy` is the project one. */
+/** `blindkey docs get guidelines` is the global doc; `blindkey docs get acme deploy` is the project one. */
 export function resolveDocTarget(a: string, b?: string): { target: string; doc: string } {
   return b === undefined ? { target: 'global', doc: a } : { target: a, doc: b };
 }
 
-export async function runDocsList(client: PidbClient, target: string): Promise<CommandResult> {
+export async function runDocsList(client: BlindkeyClient, target: string): Promise<CommandResult> {
   const docs = await client.json<PublicDocSummary[]>('GET', scopedPath(target, 'docs'));
   return {
     json: docs,
@@ -26,7 +26,7 @@ export async function runDocsList(client: PidbClient, target: string): Promise<C
 }
 
 export async function runDocsGet(
-  client: PidbClient,
+  client: BlindkeyClient,
   target: string,
   doc: string,
   opts: { refs?: boolean },
@@ -49,14 +49,14 @@ export async function runDocsGet(
       '--- secret references ---',
       table(['REF', 'PROJECT', 'SECRET', 'FIELDS'], rows),
       '',
-      'consume values with: pidb secret exec <project|global> "<secret>" -- <command>',
+      'consume values with: blindkey secret exec <project|global> "<secret>" -- <command>',
     ].join('\n');
   }
   return { json: result, text };
 }
 
 export async function runDocsPut(
-  client: PidbClient,
+  client: BlindkeyClient,
   target: string,
   doc: string,
   opts: DocsPutOptions,

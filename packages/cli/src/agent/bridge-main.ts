@@ -14,7 +14,7 @@ import { keyringStore } from './tokenstore.js';
 export async function main(): Promise<void> {
   const env = process.env;
   const dataDir = resolveDataDir(env);
-  // Polls (while unconnected) so Claude is told to re-list tools once `pidb connect` completes.
+  // Polls (while unconnected) so Claude is told to re-list tools once `blindkey connect` completes.
   const server = createBridge({ cwd: process.cwd(), env, store: keyringStore(dataDir), dataDir, watchIntervalMs: 15_000 });
   const transport = new StdioServerTransport();
   await server.connect(transport);

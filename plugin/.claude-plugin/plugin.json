@@ -1,16 +1,16 @@
 {
-  "name": "pidb",
-  "displayName": "pidb",
-  "version": "0.3.0",
-  "description": "Working context from a pidb server: the bound project's docs, non-secret data and secret names; secret values used only through env/file substitution, never shown to Claude. Login is a browser-approved, project-scoped agent token.",
+  "name": "blindkey",
+  "displayName": "Blindkey",
+  "version": "1.0.0",
+  "description": "Working context from a Blindkey server: the bound project's docs, non-secret data and secret names; secret values used only through env/file substitution, never shown to Claude. Login is a browser-approved, project-scoped agent token.",
   "author": {
     "name": "Alexander Borysenko"
   },
   "keywords": [
-    "pidb",
+    "blindkey",
     "secrets",
-    "documentation",
-    "project-memory",
-    "mcp"
+    "ai-agents",
+    "mcp",
+    "claude-code"
   ]
 }

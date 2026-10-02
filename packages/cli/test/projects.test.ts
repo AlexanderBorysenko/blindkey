@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PidbClient } from '../src/client.js';
+import { BlindkeyClient } from '../src/client.js';
 import { runProjectsGet, runProjectsList, runSearch } from '../src/commands/projects.js';
 import type { ProjectDetail, PublicProject } from '../src/api-types.js';
 import { makeServer, type ServerFixture } from './helpers.js';
 
 let s: ServerFixture;
-const client = (scopes: Parameters<ServerFixture['token']>[0]) => new PidbClient({ url: s.url, token: s.token(scopes) });
+const client = (scopes: Parameters<ServerFixture['token']>[0]) => new BlindkeyClient({ url: s.url, token: s.token(scopes) });
 
 beforeAll(async () => {
   s = await makeServer();
@@ -28,7 +28,7 @@ describe('projects list', () => {
   });
 
   it('renders just the header when the token can see no projects', async () => {
-    const scoped = new PidbClient({ url: s.url, token: s.token(['projects:read'], []) });
+    const scoped = new BlindkeyClient({ url: s.url, token: s.token(['projects:read'], []) });
     const result = await runProjectsList(scoped);
     expect(result.text.split('\n')).toEqual([
       'SLUG  NAME  STATUS  TAGS  UPDATED',

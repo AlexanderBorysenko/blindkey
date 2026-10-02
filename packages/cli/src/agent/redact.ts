@@ -8,7 +8,7 @@ export interface Redactor {
   flush(): string;
 }
 
-export const REDACTED = '[pidb:redacted]';
+export const REDACTED = '[blindkey:redacted]';
 
 /** Values shorter than this are never redacted (too likely to cause false positives, spec §2.3). */
 const MIN_VALUE_LEN = 4;

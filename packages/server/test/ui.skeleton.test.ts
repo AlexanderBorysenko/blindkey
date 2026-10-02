@@ -40,11 +40,11 @@ describe('ui skeleton', () => {
 
   it('renders an HTML 404 page for an unknown UI path', async () => {
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'pidb_session')?.value;
+    const session = login.cookies.find((c) => c.name === 'blindkey_session')?.value;
     const res = await t.app.inject({
       method: 'GET',
       url: '/no-such-page',
-      cookies: { pidb_session: session! },
+      cookies: { blindkey_session: session! },
     });
     expect(res.statusCode).toBe(404);
     expect(res.headers['content-type']).toContain('text/html');

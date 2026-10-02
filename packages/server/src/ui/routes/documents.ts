@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { DOC_CATEGORIES, docSlugSchema, documentInputSchema, lintForSecrets } from '@pidb/shared';
+import { DOC_CATEGORIES, docSlugSchema, documentInputSchema, lintForSecrets } from '@blindkey/shared';
 import type { AppContext } from '../../http/context.js';
 import { deleteDocumentFor, listDocumentsFor, readDocumentFor, resolveDocScope, resolveRefs, writeDocumentFor } from '../../services/documents.js';
 import { adminActor, requireAdmin } from '../session.js';
@@ -9,7 +9,7 @@ import { renderMarkdown } from '../markdown.js';
 import { renderPage, renderPartial } from '../render.js';
 import { UnprocessableError } from '../../errors.js';
 
-/** Named UiScope so it cannot be confused with the token `Scope` type from @pidb/shared. */
+/** Named UiScope so it cannot be confused with the token `Scope` type from @blindkey/shared. */
 export interface UiScope {
   projectSlug: string | null;
   prefix: string;

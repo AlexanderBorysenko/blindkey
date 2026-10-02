@@ -25,7 +25,7 @@ describe('lintForSecrets', () => {
   it('does not flag placeholders, refs, env vars, or short words', () => {
     expect(reasons('password: {{secret:Staging server}}')).toEqual([]);
     expect(reasons('password: <your-password>')).toEqual([]);
-    expect(reasons('password: $PIDB_PASSWORD')).toEqual([]);
+    expect(reasons('password: $BLINDKEY_PASSWORD')).toEqual([]);
     expect(reasons('password: stored')).toEqual([]);
     expect(reasons('The token is rotated monthly.')).toEqual([]);
   });

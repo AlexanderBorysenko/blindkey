@@ -15,9 +15,9 @@ async function runCli(args: string[], env: Record<string, string> = {}) {
     {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
-      PIDB_CONFIG_HOME: dir,
-      PIDB_URL: s.url,
-      PIDB_TOKEN: s.token(['secrets:reveal', 'secrets:meta', 'projects:read']),
+      BLINDKEY_CONFIG_HOME: dir,
+      BLINDKEY_URL: s.url,
+      BLINDKEY_TOKEN: s.token(['secrets:reveal', 'secrets:meta', 'projects:read']),
       ...env,
     },
     repoRoot,
@@ -26,7 +26,7 @@ async function runCli(args: string[], env: Record<string, string> = {}) {
 
 beforeAll(async () => {
   s = await makeServer();
-  dir = mkdtempSync(join(tmpdir(), 'pidb-e2e-'));
+  dir = mkdtempSync(join(tmpdir(), 'blindkey-e2e-'));
   s.project('acme');
   s.secret('acme', 'DB', [
     { key: 'host', value: 'db.internal' },
@@ -37,7 +37,7 @@ afterAll(async () => {
   await s.close();
 });
 
-describe('pidb exit codes', () => {
+describe('blindkey exit codes', () => {
   it('exits 2 for `secret get` without --print and prints no value', async () => {
     const r = await runCli(['secret', 'get', 'acme', 'DB', 'password']);
     expect(r.status).toBe(2);
@@ -53,7 +53,7 @@ describe('pidb exit codes', () => {
   });
 
   it('exits 3 with a bad token', async () => {
-    const r = await runCli(['projects', 'list'], { PIDB_TOKEN: 'pidb_not_a_token' });
+    const r = await runCli(['projects', 'list'], { BLINDKEY_TOKEN: 'bk_not_a_token' });
     expect(r.status).toBe(3);
   });
 
@@ -61,10 +61,10 @@ describe('pidb exit codes', () => {
     const r = await runCliAsync(['projects', 'list'], {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
-      PIDB_CONFIG_HOME: mkdtempSync(join(tmpdir(), 'pidb-empty-')),
+      BLINDKEY_CONFIG_HOME: mkdtempSync(join(tmpdir(), 'blindkey-empty-')),
     }, repoRoot);
     expect(r.status).toBe(3);
-    expect(r.stderr).toMatch(/pidb login/);
+    expect(r.stderr).toMatch(/blindkey login/);
   });
 
   it('exits 4 for an unknown project', async () => {

@@ -8,16 +8,16 @@ let t: TestCtx;
 let session: string;
 let csrf: string;
 const near = (value: number, expected: number) => expect(Math.abs(value - expected)).toBeLessThan(60_000);
-const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
 const post = (url: string, payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url, cookies: { pidb_session: session }, payload });
+  t.app.inject({ method: 'POST', url, cookies: { blindkey_session: session }, payload });
 const csrfOf = (b: string) => /name="csrf" value="([^"]+)"/.exec(b)?.[1] ?? '';
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
   csrf = csrfOf((await page('/tokens')).body);
 });
@@ -36,7 +36,7 @@ describe('ui tokens', () => {
   it('creates a token, shows the value once, and never shows it again', async () => {
     const res = await post('/tokens', { csrf, name: 'agent', scopes: ['projects:read', 'docs:read'], projects: 'acme', days: '90' });
     expect(res.statusCode).toBe(200);
-    const value = /pidb_[A-Za-z0-9_-]+/.exec(res.body)?.[0];
+    const value = /bk_[A-Za-z0-9_-]+/.exec(res.body)?.[0];
     expect(value).toBeTruthy();
     expect(res.body).toContain('shown once');
 

@@ -14,7 +14,7 @@ import type { AppContext } from '../../server/src/http/context.js';
 
 let s: ServerFixture;
 let home: string;
-const env = () => ({ PIDB_CONFIG_HOME: home }) as NodeJS.ProcessEnv;
+const env = () => ({ BLINDKEY_CONFIG_HOME: home }) as NodeJS.ProcessEnv;
 const io = (password: string, username = 'alex') => ({
   prompt: async () => username,
   promptHidden: async () => password,
@@ -28,7 +28,7 @@ afterAll(async () => {
   await s.close();
 });
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), 'pidb-login-'));
+  home = mkdtempSync(join(tmpdir(), 'blindkey-login-'));
 });
 
 describe('runLogin', () => {
@@ -36,7 +36,7 @@ describe('runLogin', () => {
     const result = await runLogin(`${s.url}/`, { name: 'cli-test' }, env(), io('correct horse battery'));
     const saved = JSON.parse(readFileSync(configPath(env()), 'utf8')) as { url: string; token: string };
     expect(saved.url).toBe(s.url);
-    expect(saved.token).toMatch(/^pidb_/);
+    expect(saved.token).toMatch(/^bk_/);
     expect(statSync(configPath(env())).mode & 0o777).toBe(0o600);
     expect(result.text).toContain(s.url);
     expect(result.text).toContain('cli-test');
@@ -53,7 +53,7 @@ describe('runLogin', () => {
       expires_at: number;
     }[];
     expect(rows[0]!.name).toMatch(/^cli-/);
-    expect(token).toMatch(/^pidb_/);
+    expect(token).toMatch(/^bk_/);
     expect(Math.abs(rows[0]!.expires_at - (before + 30 * 86_400_000))).toBeLessThan(60_000);
   });
 
@@ -99,7 +99,7 @@ describe('with 2FA', () => {
   // against the 5/min /auth/token rate limit within this test file.
   let s2: ServerFixture;
   let home2: string;
-  const env2 = () => ({ PIDB_CONFIG_HOME: home2 }) as NodeJS.ProcessEnv;
+  const env2 = () => ({ BLINDKEY_CONFIG_HOME: home2 }) as NodeJS.ProcessEnv;
   let adminId: number;
 
   beforeAll(async () => {
@@ -116,7 +116,7 @@ describe('with 2FA', () => {
     await s2.close();
   });
   beforeEach(() => {
-    home2 = mkdtempSync(join(tmpdir(), 'pidb-login-2fa-'));
+    home2 = mkdtempSync(join(tmpdir(), 'blindkey-login-2fa-'));
   });
 
   function codeForNextStep(): string {
@@ -136,7 +136,7 @@ describe('with 2FA', () => {
     };
     const result = await runLogin(s2.url, { name: 'cli-2fa' }, env2(), io2);
     const saved = JSON.parse(readFileSync(configPath(env2()), 'utf8')) as { token: string };
-    expect(saved.token).toMatch(/^pidb_/);
+    expect(saved.token).toMatch(/^bk_/);
     expect(result.text).toContain('cli-2fa');
     expect(promptHiddenCalls).toEqual(['Admin password: ', '2FA code: ']);
   });

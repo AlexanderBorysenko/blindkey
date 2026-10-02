@@ -1,4 +1,4 @@
-import type { Scope } from '@pidb/shared';
+import type { Scope } from '@blindkey/shared';
 import { ForbiddenError } from '../errors.js';
 
 export interface Principal {

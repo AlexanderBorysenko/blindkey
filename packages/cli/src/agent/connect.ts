@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import { AGENT_SCOPES, type Scope } from '@pidb/shared';
+import { AGENT_SCOPES, type Scope } from '@blindkey/shared';
 import { CliError, EXIT_AUTH, EXIT_REFUSED } from '../errors.js';
 import { normalizeUrl } from '../config.js';
 import type { CommandResult } from '../output.js';
@@ -48,7 +48,7 @@ interface ErrorBody {
   message?: string;
 }
 
-/** Hard cap on how long `pidb connect` waits for approval, regardless of the server's `expires_in` (spec §2.3). */
+/** Hard cap on how long `blindkey connect` waits for approval, regardless of the server's `expires_in` (spec §2.3). */
 const MAX_WAIT_MS = 10 * 60_000;
 /** Fallback poll interval (seconds) when the server omits `interval` or sends something unusable. */
 const DEFAULT_INTERVAL_S = 5;
@@ -75,7 +75,7 @@ function sanitizeForTerminal(s: string): string {
 const USER_CODE_RE = /^[A-Z]{4}-[A-Z]{4}$/;
 
 /**
- * The browser url `pidb connect` opens and prints (spec §2.3, F6): built locally as
+ * The browser url `blindkey connect` opens and prints (spec §2.3, F6): built locally as
  * `<profile url>/connect?code=<user_code>` — the server's own `verification_url` is never trusted
  * (not printed, not opened), so a hostile or misconfigured server can't point the user's browser
  * elsewhere. `user_code` must match the server's generation format (`XXXX-XXXX`, uppercase letters)
@@ -108,9 +108,9 @@ function sanitizeExpiresIn(raw: unknown): number {
 }
 
 /**
- * Resolves which profile `pidb connect` targets (spec §2.3): `--profile <name>` selects it (creating
+ * Resolves which profile `blindkey connect` targets (spec §2.3): `--profile <name>` selects it (creating
  * it, and requiring `--url`, if it doesn't exist yet; refusing if `--url` is given but disagrees with
- * an existing profile's stored url — use `pidb profile set-url` for that); with no `--profile`, the
+ * an existing profile's stored url — use `blindkey profile set-url` for that); with no `--profile`, the
  * repo's currently bound profile wins over the default profile, and a bare `--url` with no
  * `--profile` is refused (there is no name to store it under). All of these are configuration
  * refusals (`EXIT_REFUSED`), distinct from "no server configured at all" (`EXIT_AUTH`, matching
@@ -122,7 +122,7 @@ function resolveProfile(opts: ConnectOptions, profiles: ProfilesFile, bindings: 
     if (existing) {
       if (opts.url && normalizeUrl(opts.url) !== existing.url) {
         throw new CliError(
-          `profile "${opts.profile}" is already configured for ${existing.url} — use \`pidb profile set-url ${opts.profile} <url>\` to change it`,
+          `profile "${opts.profile}" is already configured for ${existing.url} — use \`blindkey profile set-url ${opts.profile} <url>\` to change it`,
           EXIT_REFUSED,
         );
       }
@@ -142,13 +142,13 @@ function resolveProfile(opts: ConnectOptions, profiles: ProfilesFile, bindings: 
   const bound = bindings[repoKey(cwd)]?.profile;
   const profileName = bound && profiles.profiles[bound] ? bound : profiles.default;
   if (!profileName) {
-    throw new CliError('no server configured — run `pidb profile add <name> <url>`', EXIT_AUTH);
+    throw new CliError('no server configured — run `blindkey profile add <name> <url>`', EXIT_AUTH);
   }
   return profileName;
 }
 
 /**
- * `pidb connect` (spec §1.3, §2.3): browser device flow. Starts a request, prints the verification
+ * `blindkey connect` (spec §1.3, §2.3): browser device flow. Starts a request, prints the verification
  * url + user code, best-effort opens the browser (only once the url passes strict validation), then
  * polls until approved/denied/expired or a ~10 minute timeout, storing the issued token in the OS
  * credential store — the token itself is never printed or included in the returned `CommandResult`.
@@ -230,11 +230,11 @@ export async function runConnect(opts: ConnectOptions, deps: ConnectDeps): Promi
       continue;
     }
     if (pollRes.status === 403) throw new CliError('the connect request was denied', EXIT_AUTH);
-    if (pollRes.status === 410) throw new CliError('the connect request expired — run `pidb connect` again', EXIT_AUTH);
+    if (pollRes.status === 410) throw new CliError('the connect request expired — run `blindkey connect` again', EXIT_AUTH);
     throw new CliError(`connect failed: ${body.error ?? `HTTP ${pollRes.status}`}`, EXIT_AUTH);
   }
   if (!result) {
-    throw new CliError('timed out waiting for approval — run `pidb connect` again', EXIT_AUTH);
+    throw new CliError('timed out waiting for approval — run `blindkey connect` again', EXIT_AUTH);
   }
 
   await deps.store.set(profileName, result.token);

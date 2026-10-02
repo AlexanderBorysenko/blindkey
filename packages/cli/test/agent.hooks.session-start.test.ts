@@ -14,7 +14,7 @@ const cwd = '/repo/acme';
 
 beforeEach(async () => {
   s = await makeServer();
-  dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-session-start-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-session-start-'));
   store = memoryStore();
 });
 afterEach(async () => {
@@ -23,11 +23,11 @@ afterEach(async () => {
 
 const GOLDEN_RULE_SNIPPETS = [
   'Never ask the user to paste a secret or token into chat',
-  'pidb secret exec <target>',
+  'blindkey secret exec <target>',
   'secret_request_link',
   'write_document',
-  'run `pidb connect`',
-  'Never use curl against the pidb server',
+  'run `blindkey connect`',
+  'Never use curl against the Blindkey server',
 ];
 
 function expectGoldenRules(context: string): void {
@@ -58,13 +58,13 @@ describe('sessionContext — not connected (profile exists, no token)', () => {
 });
 
 describe('sessionContext — connected but repo unbound', () => {
-  it('reports connected + unbound, hinting at pidb_bind', async () => {
+  it('reports connected + unbound, hinting at blindkey_bind', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
     await store.set('work', s.token(['projects:read']));
     const context = await sessionContext({ cwd, dataDir, store });
     expect(context).toContain('Connected.');
-    expect(context).toContain('not bound to a pidb project');
-    expect(context).toContain('pidb_bind');
+    expect(context).toContain('not bound to a Blindkey project');
+    expect(context).toContain('blindkey_bind');
     expect(context.length).toBeLessThanOrEqual(4096);
     expectGoldenRules(context);
   });
@@ -115,7 +115,7 @@ describe('sessionContext — connected and bound: fetches real project detail', 
     const context = await sessionContext({ cwd, dataDir, store });
 
     expect(context).toContain(
-      'Project "does-not-exist" not found or not approved for this token — run `pidb connect` to approve it, or `pidb bind` another.',
+      'Project "does-not-exist" not found or not approved for this token — run `blindkey connect` to approve it, or `blindkey bind` another.',
     );
     expect(context.length).toBeLessThanOrEqual(4096);
     expectGoldenRules(context);
@@ -125,12 +125,12 @@ describe('sessionContext — connected and bound: fetches real project detail', 
     s.project('acme');
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
     saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'acme' } });
-    await store.set('work', 'pidb_revoked_or_bogus_token');
+    await store.set('work', 'bk_revoked_or_bogus_token');
 
     const context = await sessionContext({ cwd, dataDir, store });
 
-    expect(context).toContain('token expired or revoked — run `pidb connect`');
-    expect(context).not.toContain('pidb_revoked_or_bogus_token');
+    expect(context).toContain('token expired or revoked — run `blindkey connect`');
+    expect(context).not.toContain('bk_revoked_or_bogus_token');
     expect(context).not.toContain('unreachable');
     expectGoldenRules(context);
   });
@@ -143,7 +143,7 @@ describe('sessionContext — connected and bound: fetches real project detail', 
 
     const context = await sessionContext({ cwd, dataDir, store });
 
-    expect(context).toContain('the token lacks access to project "acme" — run `pidb connect` to widen');
+    expect(context).toContain('the token lacks access to project "acme" — run `blindkey connect` to widen');
     expect(context).not.toContain('unreachable');
     expectGoldenRules(context);
   });
@@ -333,7 +333,7 @@ describe('sessionContext — global (shared) docs and secrets', () => {
 
     const context = await sessionContext({ cwd, dataDir, store });
 
-    expect(context).toContain('not bound to a pidb project');
+    expect(context).toContain('not bound to a Blindkey project');
     expect(context).toContain('Global (shared across all projects');
     expect(context).toContain('hacon-vps-1 — hacon-vps-1');
     expect(context).toContain('Hacon VPS #1 (host, private_key*)');

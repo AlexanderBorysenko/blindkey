@@ -9,14 +9,14 @@ import { getProjectBySlug } from '../src/repos/projects.js';
 let t: TestCtx;
 let session: string;
 
-const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
 const csrfOf = (body: string) => /name="csrf" value="([^"]+)"/.exec(body)?.[1] ?? '';
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-  session = res.cookies.find((c) => c.name === 'pidb_session')!.value;
+  session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
   t.project('beta');
   t.db.prepare(`UPDATE projects SET status = 'archived' WHERE slug = 'beta'`).run();
@@ -61,7 +61,7 @@ describe('ui projects list', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/projects',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf: csrfOf(form.body), slug: 'gamma', name: 'Gamma', status: 'active', tags: 'client, wp', summary: 'Third one' },
     });
     expect(res.statusCode).toBe(302);
@@ -75,7 +75,7 @@ describe('ui projects list', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/projects',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { slug: 'nope', name: 'Nope' },
     });
     expect(res.statusCode).toBe(403);
@@ -93,7 +93,7 @@ describe('ui projects list', () => {
     const res = await t.app.inject({
       method: 'POST',
       url: '/projects',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf: csrfOf(form.body), slug: 'Not A Slug', name: 'X' },
     });
     expect(res.statusCode).toBe(400);

@@ -11,23 +11,23 @@ let dataDir: string;
 const cwd = '/repo/acme';
 
 beforeEach(() => {
-  dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-ctx-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-ctx-'));
 });
 
 describe('resolveAgentConfig', () => {
   it('errors when no profile is configured at all', async () => {
     const store = memoryStore();
     await expect(resolveAgentConfig({ cwd, store, dataDir })).rejects.toMatchObject({
-      message: expect.stringMatching(/no server configured.*pidb profile add/),
+      message: expect.stringMatching(/no server configured.*blindkey profile add/),
       exitCode: 3,
     });
   });
 
   it('uses the default profile when the repo has no binding', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://work.example.com' } } });
-    const store = memoryStore({ work: 'pidb_work_token' });
+    const store = memoryStore({ work: 'bk_work_token' });
     const cfg = await resolveAgentConfig({ cwd, store, dataDir });
-    expect(cfg).toEqual({ profile: 'work', url: 'https://work.example.com', token: 'pidb_work_token', project: null });
+    expect(cfg).toEqual({ profile: 'work', url: 'https://work.example.com', token: 'bk_work_token', project: null });
   });
 
   it("prefers the repo's bound profile over the default profile", async () => {
@@ -36,31 +36,31 @@ describe('resolveAgentConfig', () => {
       profiles: { work: { url: 'https://work.example.com' }, side: { url: 'https://side.example.com' } },
     });
     saveBindings(dataDir, { [cwd]: { profile: 'side', project: 'acme' } });
-    const store = memoryStore({ work: 'pidb_work_token', side: 'pidb_side_token' });
+    const store = memoryStore({ work: 'bk_work_token', side: 'bk_side_token' });
     const cfg = await resolveAgentConfig({ cwd, store, dataDir });
-    expect(cfg).toEqual({ profile: 'side', url: 'https://side.example.com', token: 'pidb_side_token', project: 'acme' });
+    expect(cfg).toEqual({ profile: 'side', url: 'https://side.example.com', token: 'bk_side_token', project: 'acme' });
   });
 
   it('errors when not connected (profile configured but no token in the store)', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://work.example.com' } } });
     const store = memoryStore();
     await expect(resolveAgentConfig({ cwd, store, dataDir })).rejects.toMatchObject({
-      message: expect.stringMatching(/not connected.*pidb connect/),
+      message: expect.stringMatching(/not connected.*blindkey connect/),
       exitCode: 3,
     });
   });
 
-  it('ignores PIDB_URL / PIDB_TOKEN entirely', async () => {
+  it('ignores BLINDKEY_URL / BLINDKEY_TOKEN entirely', async () => {
     saveProfiles(dataDir, { default: 'work', profiles: { work: { url: 'https://work.example.com' } } });
-    const store = memoryStore({ work: 'pidb_work_token' });
+    const store = memoryStore({ work: 'bk_work_token' });
     const cfg = await resolveAgentConfig({
       cwd,
       store,
       dataDir,
-      env: { PIDB_URL: 'https://should-be-ignored.example.com', PIDB_TOKEN: 'pidb_should_be_ignored' },
+      env: { BLINDKEY_URL: 'https://should-be-ignored.example.com', BLINDKEY_TOKEN: 'bk_should_be_ignored' },
     });
     expect(cfg.url).toBe('https://work.example.com');
-    expect(cfg.token).toBe('pidb_work_token');
+    expect(cfg.token).toBe('bk_work_token');
   });
 
   it('errors when the binding points at a profile that no longer exists', async () => {

@@ -12,15 +12,15 @@ export * from './program.js';
 
 /**
  * Whether the normal entry runs in agent mode (spec §2.3):
- *   - `PIDB_AGENT=1` (set by the plugin's bin shim) always selects it;
+ *   - `BLINDKEY_AGENT=1` (set by the plugin's bin shim) always selects it;
  *   - `CLAUDECODE=1` (set by Claude Code for its Bash tool's commands) selects it too, because Claude
- *     Code appends the plugin's `bin/` to the *end* of PATH — a user-installed `pidb` (npm link /
+ *     Code appends the plugin's `bin/` to the *end* of PATH — a user-installed `blindkey` (npm link /
  *     global install) earlier on PATH would otherwise run ungated, unredacted, as the user;
- *   - `PIDB_ALLOW_USER_MODE=1` opts out of the `CLAUDECODE` rule (the user's own `!pidb …` runs).
+ *   - `BLINDKEY_ALLOW_USER_MODE=1` opts out of the `CLAUDECODE` rule (the user's own `!blindkey …` runs).
  */
 export function agentModeFromEnv(env: NodeJS.ProcessEnv): boolean {
-  if (env.PIDB_AGENT === '1') return true;
-  return env.CLAUDECODE === '1' && env.PIDB_ALLOW_USER_MODE !== '1';
+  if (env.BLINDKEY_AGENT === '1') return true;
+  return env.CLAUDECODE === '1' && env.BLINDKEY_ALLOW_USER_MODE !== '1';
 }
 
 export async function main(argv: string[] = process.argv): Promise<void> {

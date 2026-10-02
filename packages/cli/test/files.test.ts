@@ -2,14 +2,14 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PidbClient } from '../src/client.js';
+import { BlindkeyClient } from '../src/client.js';
 import { parseMode, runSecretEnv, runSecretWrite } from '../src/commands/files.js';
 import { CliError } from '../src/errors.js';
 import { makeServer, type ServerFixture } from './helpers.js';
 
 let s: ServerFixture;
 let dir: string;
-const client = (scopes: Parameters<ServerFixture['token']>[0]) => new PidbClient({ url: s.url, token: s.token(scopes) });
+const client = (scopes: Parameters<ServerFixture['token']>[0]) => new BlindkeyClient({ url: s.url, token: s.token(scopes) });
 
 beforeAll(async () => {
   s = await makeServer();
@@ -24,7 +24,7 @@ afterAll(async () => {
   await s.close();
 });
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'pidb-files-'));
+  dir = mkdtempSync(join(tmpdir(), 'blindkey-files-'));
 });
 
 describe('parseMode', () => {
@@ -94,7 +94,7 @@ describe('secret env', () => {
 
   it('refuses a multi-line value and points at secret write', async () => {
     const err = await runSecretEnv(client(['secrets:reveal']), 'acme', 'SSH', { out: join(dir, '.env') }).catch((e: unknown) => e);
-    expect((err as CliError).message).toMatch(/pidb secret write/);
+    expect((err as CliError).message).toMatch(/blindkey secret write/);
     expect((err as CliError).message).not.toContain('BEGIN KEY');
   });
 

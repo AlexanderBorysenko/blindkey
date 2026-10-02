@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Agent entry point (spec §2.1 `bin/pidb`, §2.3): always builds the commander program in agent mode,
-// regardless of `PIDB_AGENT` — the plugin's bin shims set `PIDB_AGENT=1` too, but this file is itself
+// Agent entry point (spec §2.1 `bin/blindkey`, §2.3): always builds the commander program in agent mode,
+// regardless of `BLINDKEY_AGENT` — the plugin's bin shims set `BLINDKEY_AGENT=1` too, but this file is itself
 // sufficient to select it. Imports only `../program.js` (side-effect-free) — never `../cli.js` — so
-// that when esbuild bundles this file as its own entry point (spec §2.1, `dist/pidb.mjs`), the
+// that when esbuild bundles this file as its own entry point (spec §2.1, `dist/blindkey.mjs`), the
 // bundle doesn't also contain `cli.ts`'s `if (isEntryPoint()) void main()` top-level side effect,
 // which would otherwise fire too (same bundle, same `import.meta.url`) and run the normal program a
-// second time — reading `PIDB_URL`/`PIDB_TOKEN`/`~/.config/pidb` and running every command twice.
+// second time — reading `BLINDKEY_URL`/`BLINDKEY_TOKEN`/`~/.config/blindkey` and running every command twice.
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CommanderError } from 'commander';

@@ -8,8 +8,8 @@ export interface TokenStore {
   delete(profile: string): Promise<void>;
 }
 
-/** Keyring entry service (spec §2.2): service `pidb`, account `profile:<name>`. */
-const SERVICE = 'pidb';
+/** Keyring entry service (spec §2.2): service `blindkey`, account `profile:<name>`. */
+const SERVICE = 'blindkey';
 const account = (profile: string): string => `profile:${profile}`;
 
 interface KeyringEntry {
@@ -29,7 +29,7 @@ export type KeyringLoader = () => KeyringModule;
  * relative to the plugin data dir (where `npm install` puts the runtime
  * dependency on first run, per spec §2.1), then falling back to normal
  * module resolution (dev / monorepo, where it's an optionalDependency of
- * `@pidb/cli` itself).
+ * `@blindkey/cli` itself).
  */
 function defaultLoader(dataDir: string): KeyringLoader {
   return () => {

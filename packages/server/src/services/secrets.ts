@@ -1,4 +1,4 @@
-import { defaultSensitive, secretLookingKey, urlWithPassword, type SecretInput, type SecretPatch } from '@pidb/shared';
+import { defaultSensitive, secretLookingKey, urlWithPassword, type SecretInput, type SecretPatch } from '@blindkey/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { AppError, ForbiddenError, NotFoundError } from '../errors.js';

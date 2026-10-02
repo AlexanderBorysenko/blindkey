@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApiError, PidbClient, scopedPath } from '../src/client.js';
+import { ApiError, BlindkeyClient, scopedPath } from '../src/client.js';
 import type { PublicProject } from '../src/api-types.js';
 import { makeServer, type ServerFixture } from './helpers.js';
 
 let s: ServerFixture;
-const client = (token: string) => new PidbClient({ url: s.url, token });
+const client = (token: string) => new BlindkeyClient({ url: s.url, token });
 
 beforeAll(async () => {
   s = await makeServer();
@@ -26,7 +26,7 @@ describe('scopedPath', () => {
   });
 });
 
-describe('PidbClient', () => {
+describe('BlindkeyClient', () => {
   it('sends the bearer token and parses JSON', async () => {
     const projects = await client(s.token(['projects:read'])).json<PublicProject[]>('GET', '/api/v1/projects');
     expect(projects.map((p) => p.slug)).toEqual(['acme']);
@@ -48,7 +48,7 @@ describe('PidbClient', () => {
   });
 
   it('maps 401 to exit code 3', async () => {
-    const err = await client('pidb_nope').json('GET', '/api/v1/projects').catch((e: unknown) => e);
+    const err = await client('bk_nope').json('GET', '/api/v1/projects').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).exitCode).toBe(3);
     expect((err as ApiError).status).toBe(401);
@@ -85,7 +85,7 @@ describe('PidbClient', () => {
   });
 
   it('reports an unreachable server as a generic error', async () => {
-    const err = await new PidbClient({ url: 'http://127.0.0.1:1', token: 't' })
+    const err = await new BlindkeyClient({ url: 'http://127.0.0.1:1', token: 't' })
       .json('GET', '/api/v1/projects')
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
@@ -97,7 +97,7 @@ describe('PidbClient', () => {
     const html = `<html><body>${'x'.repeat(5000)}</body></html>`;
     const stubFetch = (async () =>
       new Response(html, { status: 502, headers: { 'content-type': 'text/html' } })) as unknown as typeof fetch;
-    const c = new PidbClient({ url: 'http://example.invalid', token: 't' }, stubFetch);
+    const c = new BlindkeyClient({ url: 'http://example.invalid', token: 't' }, stubFetch);
     const err = await c.json('GET', '/api/v1/projects').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).exitCode).toBe(1);
@@ -106,7 +106,7 @@ describe('PidbClient', () => {
 
   it('gives a helpful hint for an expired token', () => {
     const err = new ApiError(401, { error: 'token_expired', message: 'token expired' });
-    expect(err.message).toContain('token expired — run `pidb login <url>` again');
+    expect(err.message).toContain('token expired — run `blindkey login <url>` again');
     expect(err.exitCode).toBe(3);
   });
 

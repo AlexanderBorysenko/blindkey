@@ -98,17 +98,17 @@ function ensureDeps(opts) {
       const age = now() - since;
       if (age >= 0 && age < RETRY_MS) {
         if (running) {
-          return `pidb: plugin dependencies are still installing (started ${Math.round(age / 1e3)}s ago) — \`pidb connect\` and token access work once npm finishes.`;
+          return `blindkey: plugin dependencies are still installing (started ${Math.round(age / 1e3)}s ago) — \`blindkey connect\` and token access work once npm finishes.`;
         }
         const retryMin = Math.max(1, Math.ceil((RETRY_MS - age) / 6e4));
-        return `pidb: plugin dependency install failed (npm exit ${marker.exitCode}) — see ${logPath}; it is retried on a session start in ~${retryMin} min, or the user can run \`npm install --omit=dev\` in ${dataDir}.`;
+        return `blindkey: plugin dependency install failed (npm exit ${marker.exitCode}) — see ${logPath}; it is retried on a session start in ~${retryMin} min, or the user can run \`npm install --omit=dev\` in ${dataDir}.`;
       }
     }
     if (existsSync(markerPath)) unlinkSync(markerPath);
     mkdirSync(dataDir, { recursive: true });
     const startedAt = now();
     if (!claimMarker(markerPath, startedAt)) {
-      return "pidb: plugin dependencies are being installed by another session — `pidb connect` and token access work once npm finishes.";
+      return "blindkey: plugin dependencies are being installed by another session — `blindkey connect` and token access work once npm finishes.";
     }
     try {
       copyFileSync(pkg, join(dataDir, "package.json"));
@@ -133,10 +133,10 @@ function ensureDeps(opts) {
       }
       throw err;
     }
-    return "pidb: installing plugin dependencies (@napi-rs/keyring) in the background — `pidb connect` and token access work once it finishes (usually under a minute; otherwise next session).";
+    return "blindkey: installing plugin dependencies (@napi-rs/keyring) in the background — `blindkey connect` and token access work once it finishes (usually under a minute; otherwise next session).";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return `pidb: could not start the plugin dependency install (${message}) — ask the user to run \`npm install --omit=dev\` in the plugin data dir (${dataDir}).`;
+    return `blindkey: could not start the plugin dependency install (${message}) — ask the user to run \`npm install --omit=dev\` in the plugin data dir (${dataDir}).`;
   }
 }
 
@@ -152,9 +152,9 @@ function derivedDataDir(selfPath) {
   return `${pluginsDir}${sep2}data${sep2}${plugin}-${marketplace}`;
 }
 function resolveDataDir(env = process.env, selfPath = process.argv[1] ?? "") {
-  if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
+  if (env.BLINDKEY_PLUGIN_DATA) return env.BLINDKEY_PLUGIN_DATA;
   const claudeDir = env.CLAUDE_CONFIG_DIR || join2(env.HOME ?? homedir(), ".claude");
-  return derivedDataDir(selfPath) ?? join2(claudeDir, "plugins", "data", "pidb-pidb");
+  return derivedDataDir(selfPath) ?? join2(claudeDir, "plugins", "data", "blindkey-blindkey");
 }
 
 // packages/cli/src/agent/hooks/index.ts
@@ -234,7 +234,7 @@ function repoKey(cwd, opts = {}) {
 // packages/cli/src/agent/tokenstore.ts
 import { createRequire as createRequire2 } from "node:module";
 import { join as join4 } from "node:path";
-var SERVICE = "pidb";
+var SERVICE = "blindkey";
 var account = (profile) => `profile:${profile}`;
 function defaultLoader(dataDir) {
   return () => {
@@ -497,7 +497,7 @@ function consumeHeredocBodies(text, from, docs, out) {
     const ownerTokens = tokenize(doc.owner);
     let owner = commandWordOf(ownerTokens).word;
     const dd = ownerTokens.indexOf("--");
-    if (owner === "pidb" && dd !== -1) owner = commandWordOf(ownerTokens.slice(dd + 1)).word;
+    if (owner === "blindkey" && dd !== -1) owner = commandWordOf(ownerTokens.slice(dd + 1)).word;
     if (owner && SCRIPT_CONSUMERS.has(owner)) out.push(...splitSegments(lines.join("\n")));
   }
   return i;
@@ -662,7 +662,7 @@ function appDataOf(ctx) {
 }
 function protectedRoots(ctx) {
   const pm = pathModFor(ctx.platform);
-  return [ctx.dataDir, pm.join(ctx.home, ".config", "pidb"), pm.join(appDataOf(ctx), "pidb")].map((p) => pm.resolve(p));
+  return [ctx.dataDir, pm.join(ctx.home, ".config", "blindkey"), pm.join(appDataOf(ctx), "blindkey")].map((p) => pm.resolve(p));
 }
 function writtenFiles(ctx) {
   const pm = pathModFor(ctx.platform);
@@ -752,10 +752,10 @@ function deny(reason) {
 }
 var MAX_DEPTH = 8;
 var CD_WORDS = /* @__PURE__ */ new Set(["cd", "pushd", "chdir", "set-location", "sl"]);
-function isPidbWord(word) {
-  return word === "pidb";
+function isBlindkeyWord(word) {
+  return word === "blindkey";
 }
-function pidbArgs(seg) {
+function blindkeyArgs(seg) {
   const after = seg.tokens.slice(seg.index + 1);
   const dd = after.indexOf("--");
   if (dd === -1) return { own: after, childStart: null, hasDashDash: false };
@@ -763,8 +763,8 @@ function pidbArgs(seg) {
   return { own: after.slice(0, dd), childStart: childTok ? childTok.start : null, hasDashDash: true };
 }
 function isSecretExec(seg) {
-  if (!isPidbWord(seg.word)) return false;
-  const own = pidbArgs(seg).own.map((t) => t.toLowerCase());
+  if (!isBlindkeyWord(seg.word)) return false;
+  const own = blindkeyArgs(seg).own.map((t) => t.toLowerCase());
   const s = own.indexOf("secret");
   return s !== -1 && own[s + 1] === "exec";
 }
@@ -786,23 +786,23 @@ function expandSegments(text, cwd, ctx, inExec = false, depth = 0, out = []) {
     if (script && script.trim() && script.trim() !== raw) expandSegments(script, seg.cwd, ctx, seg.inExec, depth + 1, out);
     if (isSecretExec(seg)) {
       execSeen = true;
-      const { childStart } = pidbArgs(seg);
+      const { childStart } = blindkeyArgs(seg);
       if (childStart !== null) expandSegments(raw.slice(childStart), seg.cwd, ctx, true, depth + 1, out);
     }
   }
   return out;
 }
-function runsDisabledPidbCommand(segments) {
+function runsDisabledBlindkeyCommand(segments) {
   return segments.some((seg) => {
-    if (!isPidbWord(seg.word)) return false;
-    const own = pidbArgs(seg).own;
+    if (!isBlindkeyWord(seg.word)) return false;
+    const own = blindkeyArgs(seg).own;
     const next = (own[0] ?? "").toLowerCase();
     if (next === "login" || next === "token") return true;
     if (next !== "secret") return false;
     return own.slice(1).some((t) => t.toLowerCase() === "get" || t === "--print");
   });
 }
-var PIDB_VAR_REF = /\$\{?PIDB_[A-Za-z0-9_]*\}?|%PIDB_[A-Za-z0-9_]*%|\$\{?env:PIDB_[A-Za-z0-9_]*\}?/i;
+var BLINDKEY_VAR_REF = /\$\{?BLINDKEY_[A-Za-z0-9_]*\}?|%BLINDKEY_[A-Za-z0-9_]*%|\$\{?env:blindkey_[A-Za-z0-9_]*\}?/i;
 var PRINT_WORDS = /* @__PURE__ */ new Set([
   "echo",
   "printf",
@@ -889,13 +889,13 @@ function inlineCodeOf(seg) {
 function segmentPrintsEnvironment(seg) {
   const word = seg.word ?? "";
   const args = seg.tokens.slice(seg.index + 1);
-  if (/^\$\{?env:pidb_[a-z0-9_]*\}?$/i.test(word)) return true;
+  if (/^\$\{?env:blindkey_[a-z0-9_]*\}?$/i.test(word)) return true;
   if (word === "env" || word === "printenv" || word === "typeset") return true;
   if (word === "export" && (args.length === 0 || args[0] === "-p")) return true;
   if (word === "declare" && args.every((a) => a.startsWith("-"))) return true;
   if (word === "compgen" && args.some((a) => a === "-v" || a === "-e")) return true;
-  if (word === "set" && (args.length === 0 || /^pidb/i.test(args[0]))) return true;
-  if (PRINT_WORDS.has(word) && PIDB_VAR_REF.test(seg.raw)) return true;
+  if (word === "set" && (args.length === 0 || /^blindkey/i.test(args[0]))) return true;
+  if (PRINT_WORDS.has(word) && BLINDKEY_VAR_REF.test(seg.raw)) return true;
   if (ENV_PROVIDER_WORDS.has(word) && args.some((a) => /^env:/i.test(a))) return true;
   if (DOTNET_GETENV_RE.test(seg.raw) || PROC_ENVIRON_RE.test(seg.raw)) return true;
   const inline = inlineCodeOf(seg);
@@ -1213,43 +1213,43 @@ function targetsConfiguredServer(command, segments, ctx) {
   if (!segments.some((s) => NETWORK_WORDS.has(s.word ?? ""))) return false;
   return ctx.serverUrls.some((url) => commandMentionsUrl(command, url));
 }
-var AGENT_MODE_ESCAPE_RE = /\bPIDB_ALLOW_USER_MODE\b|\bCLAUDECODE\s*=|(?:\s-u\s*|--unset[=\s]\s*|\bunset\s+(?:-v\s+)?)CLAUDECODE\b|env:CLAUDECODE\b/i;
+var AGENT_MODE_ESCAPE_RE = /\bBLINDKEY_ALLOW_USER_MODE\b|\bCLAUDECODE\s*=|(?:\s-u\s*|--unset[=\s]\s*|\bunset\s+(?:-v\s+)?)CLAUDECODE\b|env:CLAUDECODE\b/i;
 function guardBashCommand(command, cwd, ctx) {
   if (AGENT_MODE_ESCAPE_RE.test(command)) {
-    return deny("switching pidb out of agent mode (PIDB_ALLOW_USER_MODE / CLAUDECODE) is for the user only — ask the user to run this themselves.");
+    return deny("switching blindkey out of agent mode (BLINDKEY_ALLOW_USER_MODE / CLAUDECODE) is for the user only — ask the user to run this themselves.");
   }
   const segments = expandSegments(command, cwd, ctx);
-  if (runsDisabledPidbCommand(segments)) {
+  if (runsDisabledBlindkeyCommand(segments)) {
     return deny(
-      "pidb login/token/secret get/--print are not available to the Claude agent — ask the user to run this themselves, or use `pidb connect`/`pidb secret exec` instead."
+      "blindkey login/token/secret get/--print are not available to the Claude agent — ask the user to run this themselves, or use `blindkey connect`/`blindkey secret exec` instead."
     );
   }
   if (segments.some((s) => s.inExec && segmentPrintsEnvironment(s))) {
     return deny(
-      'this looks like it would print the environment inside `pidb secret exec`, which would leak the substituted secret — use the value only inside the invoked program, e.g. `pidb secret exec <target> "<name>" -- npm test`.'
+      'this looks like it would print the environment inside `blindkey secret exec`, which would leak the substituted secret — use the value only inside the invoked program, e.g. `blindkey secret exec <target> "<name>" -- npm test`.'
     );
   }
   const access = segments.map((s) => segmentReadsProtected(s, ctx));
   if (!access.includes("read") && access.includes("overwrite")) {
     return deny(
-      "this would overwrite a pidb-written secret file (produced by `pidb secret write|env`) — regenerate it with `pidb secret write|env --out <file>` instead, or write to a different path."
+      "this would overwrite a blindkey-written secret file (produced by `blindkey secret write|env`) — regenerate it with `blindkey secret write|env --out <file>` instead, or write to a different path."
     );
   }
   if (access.includes("read")) {
     return deny(
-      "this command reads pidb's protected data (the plugin data dir, its config, or a file `pidb secret write|env` produced) — use the pidb CLI/MCP tools instead of reading it directly."
+      "this command reads blindkey's protected data (the plugin data dir, its config, or a file `blindkey secret write|env` produced) — use the Blindkey CLI/MCP tools instead of reading it directly."
     );
   }
   if (readsCredentialStore(command, segments)) {
-    return deny("reading the OS credential store directly is not available to the agent — use `pidb connect` (or the MCP tools) instead.");
+    return deny("reading the OS credential store directly is not available to the agent — use `blindkey connect` (or the MCP tools) instead.");
   }
   if (targetsConfiguredServer(command, segments, ctx)) {
-    return deny("direct HTTP calls to the pidb server are not available to the agent — use the pidb MCP tools or CLI instead.");
+    return deny("direct HTTP calls to the Blindkey server are not available to the agent — use the blindkey MCP tools or CLI instead.");
   }
   return ALLOW;
 }
 var PATH_KEYS = ["file_path", "path", "notebook_path"];
-var PROTECTED_PATH_REASON = "this path is inside pidb's protected data (the plugin data dir, its config, or a file `pidb secret write|env` produced) — use the pidb CLI/MCP tools instead of reading it directly.";
+var PROTECTED_PATH_REASON = "this path is inside blindkey's protected data (the plugin data dir, its config, or a file `blindkey secret write|env` produced) — use the Blindkey CLI/MCP tools instead of reading it directly.";
 function collectStrings(value, depth = 0) {
   if (depth > 8) return [];
   if (typeof value === "string") return [value];
@@ -1277,7 +1277,7 @@ function guardGrepTool(toolInput, cwd, ctx) {
   const hits = admittedProtected(root, globs, types, ctx);
   if (hits.length === 0) return ALLOW;
   return deny(
-    `this search would reach a file \`pidb secret write|env\` produced (${hits.slice(0, 5).join(", ")}) — pass a \`path\` that does not contain it, or a \`glob\`/\`type\` that excludes it (e.g. \`glob: "*.ts"\`), and never read that file.`
+    `this search would reach a file \`blindkey secret write|env\` produced (${hits.slice(0, 5).join(", ")}) — pass a \`path\` that does not contain it, or a \`glob\`/\`type\` that excludes it (e.g. \`glob: "*.ts"\`), and never read that file.`
   );
 }
 function guardPathArgs(toolName, toolInput, cwd, ctx) {
@@ -1304,15 +1304,15 @@ function guardDecision(input, ctx) {
 }
 
 // packages/cli/src/agent/hooks/redact.ts
-var REDACTED = "[pidb:redacted]";
-var PIDB_TOKEN_RE = /pidb_[A-Za-z0-9_-]{20,}/g;
+var REDACTED = "[blindkey:redacted]";
+var BLINDKEY_TOKEN_RE = /bk_[A-Za-z0-9_-]{20,}/g;
 var PEM_BLOCK_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 var AKIA_RE = /AKIA[0-9A-Z]{16}/g;
 var SENSITIVE_KEY_NAME_RE = /(PASS(WORD)?|SECRET|TOKEN|API_?KEY|PRIVATE)/i;
 var KEY_VALUE_LINE_RE = /^([ \t]*(?:export\s+)?)([A-Z][A-Z0-9_]*)=(.*)$/gm;
 function redactOutput(text) {
   let out = text.replace(PEM_BLOCK_RE, REDACTED);
-  out = out.replace(PIDB_TOKEN_RE, REDACTED);
+  out = out.replace(BLINDKEY_TOKEN_RE, REDACTED);
   out = out.replace(AKIA_RE, REDACTED);
   out = out.replace(KEY_VALUE_LINE_RE, (whole, prefix, key, value) => {
     if (!SENSITIVE_KEY_NAME_RE.test(key)) return whole;
@@ -1350,7 +1350,7 @@ function exitCodeFor(status) {
   return EXIT_GENERIC;
 }
 function describeError(status, body) {
-  if (status === 401 && body.error === "token_expired") return "token expired — run `pidb login <url>` again";
+  if (status === 401 && body.error === "token_expired") return "token expired — run `blindkey login <url>` again";
   const head = body.message && body.message !== body.error ? `${body.error}: ${body.message}` : body.error;
   const lines = [`${head} (HTTP ${status})`];
   if (typeof body.scope === "string") lines.push(`  required scope: ${body.scope}`);
@@ -1384,7 +1384,7 @@ var ApiError = class extends CliError {
   status;
   body;
 };
-var PidbClient = class {
+var BlindkeyClient = class {
   constructor(config, fetchImpl = fetch) {
     this.config = config;
     this.fetchImpl = fetchImpl;
@@ -1453,11 +1453,11 @@ var MAX_CONTEXT_CHARS = 4096;
 var MAX_LIST_ITEMS = 20;
 var GOLDEN_RULES = [
   "Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.",
-  'Use values only via `pidb secret exec <target> "<name>" -- <cmd>` (env PIDB_<KEY>), or `pidb secret write|env --out <file>` for tools that need files; never read those files back.',
+  'Use values only via `blindkey secret exec <target> "<name>" -- <cmd>` (env BLINDKEY_<KEY>), or `blindkey secret write|env --out <file>` for tools that need files; never read those files back.',
   "Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.",
   'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret facts go into non-sensitive fields via `upsert_secret_meta` (host, port, url, username, database, public_key, or any non-credential key with `sensitive: false`); credentials → `secret_request_link`; a new project → `create_project`.',
-  "401/expired → run `pidb connect` (the user approves in the browser); 403 on a project → `pidb connect` to widen.",
-  "Never use curl against the pidb server; use MCP tools / the CLI."
+  "401/expired → run `blindkey connect` (the user approves in the browser); 403 on a project → `blindkey connect` to widen.",
+  "Never use curl against the Blindkey server; use MCP tools / the CLI."
 ];
 var GOLDEN_RULES_BLOCK = ["", "Golden rules:", ...GOLDEN_RULES.map((r, i) => `${i + 1}. ${r}`)].join("\n");
 function bulletedList(items, max) {
@@ -1469,7 +1469,7 @@ function bulletedList(items, max) {
 async function fetchProjectDetail(url, token, project, deps, deadline) {
   const fetchImpl = deps.fetchImpl ?? fetch;
   try {
-    const client = new PidbClient({ url, token }, fetchImpl);
+    const client = new BlindkeyClient({ url, token }, fetchImpl);
     return await withDeadline(client.json("GET", `/api/v1/projects/${encodeURIComponent(project)}`), deadline);
   } catch (err) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 404)) return err.status;
@@ -1477,7 +1477,7 @@ async function fetchProjectDetail(url, token, project, deps, deadline) {
   }
 }
 async function fetchGlobals(url, token, deps, deadline) {
-  const client = new PidbClient({ url, token }, deps.fetchImpl ?? fetch);
+  const client = new BlindkeyClient({ url, token }, deps.fetchImpl ?? fetch);
   const list = async (path) => {
     try {
       const v = await withDeadline(client.json("GET", path), deadline);
@@ -1523,14 +1523,14 @@ async function buildBody(deps, deadline) {
   const profile = profileName ? profiles.profiles[profileName] : void 0;
   if (!profileName || !profile) {
     return [
-      "pidb: no server configured for this agent.",
-      "Ask the user to run `/pidb:server <name> <url>` and then `/pidb:connect` (or `pidb profile add <name> <url>` / `pidb connect` directly)."
+      "blindkey: no server configured for this agent.",
+      "Ask the user to run `/blindkey:server <name> <url>` and then `/blindkey:connect` (or `blindkey profile add <name> <url>` / `blindkey connect` directly)."
     ];
   }
-  const lines = [`pidb: profile "${profileName}" — ${profile.url}`];
+  const lines = [`blindkey: profile "${profileName}" — ${profile.url}`];
   const token = await withDeadline(Promise.resolve(deps.store.get(profileName)), deadline);
   if (!token) {
-    lines.push("Not connected — run `pidb connect` (browser approval), or ask the user to run `/pidb:connect`.");
+    lines.push("Not connected — run `blindkey connect` (browser approval), or ask the user to run `/blindkey:connect`.");
     return lines;
   }
   lines.push("Connected.");
@@ -1542,26 +1542,26 @@ async function buildBody(deps, deadline) {
 async function projectSection(url, token, project, deps, deadline) {
   const lines = [];
   if (!project) {
-    lines.push("This repo is not bound to a pidb project — call `pidb_bind` or ask the user which project this is.");
+    lines.push("This repo is not bound to a Blindkey project — call `blindkey_bind` or ask the user which project this is.");
     return lines;
   }
   lines.push(`Bound project: ${project}`);
   const detail = await fetchProjectDetail(url, token, project, deps, deadline);
   if (detail === "down") {
-    lines.push(`pidb server (${url}) is unreachable right now — project details unavailable this session.`);
+    lines.push(`blindkey server (${url}) is unreachable right now — project details unavailable this session.`);
     return lines;
   }
   if (detail === 401) {
-    lines.push("pidb: token expired or revoked — run `pidb connect`.");
+    lines.push("blindkey: token expired or revoked — run `blindkey connect`.");
     return lines;
   }
   if (detail === 403) {
-    lines.push(`pidb: the token lacks access to project "${project}" — run \`pidb connect\` to widen.`);
+    lines.push(`blindkey: the token lacks access to project "${project}" — run \`blindkey connect\` to widen.`);
     return lines;
   }
   if (detail === 404) {
     lines.push(
-      `Project "${project}" not found or not approved for this token — run \`pidb connect\` to approve it, or \`pidb bind\` another.`
+      `Project "${project}" not found or not approved for this token — run \`blindkey connect\` to approve it, or \`blindkey bind\` another.`
     );
     return lines;
   }
@@ -1595,7 +1595,7 @@ function finalize(bodyLines) {
 ${GOLDEN_RULES_BLOCK}`;
 }
 function fallbackContext(message, notes = []) {
-  return finalize([...notes, `pidb: session context unavailable (${message}).`]);
+  return finalize([...notes, `blindkey: session context unavailable (${message}).`]);
 }
 async function sessionContext(deps) {
   const deadline = Date.now() + Math.min(deps.timeoutMs ?? 4e3, 4e3);
@@ -1645,7 +1645,7 @@ function loadWrittenPathsSafe(dataDir) {
     return { paths: loadWritten(dataDir).paths };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { paths: [], note: `pidb hook (guard): written.json unreadable (${message}) — treating as empty` };
+    return { paths: [], note: `blindkey hook (guard): written.json unreadable (${message}) — treating as empty` };
   }
 }
 function guardOutput(reason) {
@@ -1664,7 +1664,7 @@ function exportDataDir(env, dataDir) {
   if (!file) return;
   const quoted = `'${dataDir.replace(/'/g, `'\\''`)}'`;
   try {
-    appendFileSync(file, `export PIDB_PLUGIN_DATA=${quoted}
+    appendFileSync(file, `export BLINDKEY_PLUGIN_DATA=${quoted}
 `);
   } catch {
   }
@@ -1715,9 +1715,9 @@ async function runHook(kind, stdinText, env = process.env, deps = {}) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (kind === "session-start") {
-      return { stdout: sessionStartOutput(fallbackContext(message)), exitCode: 0, stderr: `pidb hook (session-start): ${message}` };
+      return { stdout: sessionStartOutput(fallbackContext(message)), exitCode: 0, stderr: `blindkey hook (session-start): ${message}` };
     }
-    return { stdout: "", exitCode: 0, stderr: `pidb hook (${kind}): ${message} — allowing by default` };
+    return { stdout: "", exitCode: 0, stderr: `blindkey hook (${kind}): ${message} — allowing by default` };
   }
 }
 
@@ -1736,7 +1736,7 @@ async function readStdin() {
 async function main() {
   const kindArg = process.argv[2];
   if (!isValidKind(kindArg)) {
-    console.error(`pidb hook: unknown or missing kind "${kindArg ?? ""}" (expected guard|redact|session-start)`);
+    console.error(`blindkey hook: unknown or missing kind "${kindArg ?? ""}" (expected guard|redact|session-start)`);
     process.exit(0);
   }
   let stdinText = "";
@@ -1768,7 +1768,7 @@ function isEntryPoint() {
 }
 if (isEntryPoint()) {
   void main().catch((err) => {
-    console.error(`pidb hook: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`blindkey hook: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(0);
   });
 }

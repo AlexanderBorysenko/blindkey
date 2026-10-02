@@ -14,7 +14,7 @@ function exitCodeFor(status: number): number {
 }
 
 function describeError(status: number, body: ApiErrorBody): string {
-  if (status === 401 && body.error === 'token_expired') return 'token expired — run `pidb login <url>` again';
+  if (status === 401 && body.error === 'token_expired') return 'token expired — run `blindkey login <url>` again';
   const head = body.message && body.message !== body.error ? `${body.error}: ${body.message}` : body.error;
   const lines = [`${head} (HTTP ${status})`];
   if (typeof body.scope === 'string') lines.push(`  required scope: ${body.scope}`);
@@ -65,7 +65,7 @@ export function scopedPath(target: string, kind: 'secrets' | 'docs', rest = ''):
   return `${base}${rest}`;
 }
 
-export class PidbClient {
+export class BlindkeyClient {
   constructor(
     private readonly config: CliConfig,
     private readonly fetchImpl: typeof fetch = fetch,

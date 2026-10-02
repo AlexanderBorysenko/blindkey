@@ -12,7 +12,7 @@ beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
   createSecret(t.db, t.ring, {
     projectId: getProjectBySlug(t.db, 'acme')!.id,
@@ -28,7 +28,7 @@ afterAll(async () => {
 
 describe('ui hardening', () => {
   it('sends a restrictive CSP and the usual protective headers on pages', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     const csp = String(res.headers['content-security-policy'] ?? '');
     expect(csp).toContain("default-src 'self'");
     expect(csp).not.toContain('unsafe-eval');
@@ -39,7 +39,7 @@ describe('ui hardening', () => {
   });
 
   it('does not let a page with a secret on it be cached', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/p/acme/secrets/DB', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/p/acme/secrets/DB', cookies: { blindkey_session: session } });
     expect(String(res.headers['cache-control'])).toContain('no-store');
   });
 

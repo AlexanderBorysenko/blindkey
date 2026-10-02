@@ -34,9 +34,9 @@ Saving a document that looks like it contains a real credential is rejected; fix
 Agents read documents and secret *metadata* (names, field keys, non-sensitive fields like host/username). Values are consumed through the CLI so they never enter the model context:
 
 \`\`\`example
-pidb secret exec my-project "Staging server" -- ssh $PIDB_USERNAME@$PIDB_HOST
-pidb secret write my-project "Staging server" private_key --out ~/.ssh/staging_key --mode 600
-pidb secret env my-project "App env" --out .env
+blindkey secret exec my-project "Staging server" -- ssh $BLINDKEY_USERNAME@$BLINDKEY_HOST
+blindkey secret write my-project "Staging server" private_key --out ~/.ssh/staging_key --mode 600
+blindkey secret env my-project "App env" --out .env
 \`\`\`
 
 ## Writing style

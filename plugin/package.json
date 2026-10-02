@@ -1,9 +1,9 @@
 {
-  "name": "pidb-plugin-runtime",
+  "name": "blindkey-plugin-runtime",
   "version": "0.1.0",
   "private": true,
-  "description": "Runtime dependencies of the pidb Claude Code plugin, installed into the plugin data dir on first session start",
-  "license": "UNLICENSED",
+  "description": "Runtime dependencies of the blindkey Claude Code plugin, installed into the plugin data dir on first session start",
+  "license": "MIT",
   "dependencies": {
     "@napi-rs/keyring": "^2.1.0"
   }

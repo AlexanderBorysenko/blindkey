@@ -42,7 +42,7 @@ describe('totp', () => {
 
   it('builds an otpauth URI', () => {
     expect(otpauthUri('alex', RFC_SECRET)).toBe(
-      `otpauth://totp/pidb:alex?secret=${base32Encode(RFC_SECRET)}&issuer=pidb&algorithm=SHA1&digits=6&period=30`,
+      `otpauth://totp/blindkey:alex?secret=${base32Encode(RFC_SECRET)}&issuer=Blindkey&algorithm=SHA1&digits=6&period=30`,
     );
   });
 });

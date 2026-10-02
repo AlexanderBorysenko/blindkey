@@ -6,13 +6,13 @@ import { createToken, revokeToken } from '../src/repos/tokens.js';
 
 let t: TestCtx;
 let session: string;
-const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
 });
 afterAll(async () => {
@@ -37,7 +37,7 @@ describe('nav API tokens count', () => {
 describe('no-store on every UI page', () => {
   it('sets cache-control: no-store on the secrets tab, the home page and login', async () => {
     for (const url of ['/p/acme?tab=secrets', '/', '/login']) {
-      const res = await t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+      const res = await t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
       expect(String(res.headers['cache-control']), url).toContain('no-store');
     }
   });

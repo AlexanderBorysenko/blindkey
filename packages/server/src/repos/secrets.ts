@@ -1,4 +1,4 @@
-import { defaultSensitive, type SecretInput, type SecretPatch } from '@pidb/shared';
+import { defaultSensitive, type SecretInput, type SecretPatch } from '@blindkey/shared';
 import type { Db } from '../db/connection.js';
 import type { KeyRing } from '../config.js';
 import { decryptField, encryptField, generateDek, unwrapDek, wrapDek } from '../crypto/envelope.js';
@@ -242,7 +242,7 @@ export function rewrapAllSecrets(db: Db, ring: KeyRing): number {
   })();
 }
 
-/** One status per key_version present in `secrets`, for `pidb-server key-versions` (spec §4). */
+/** One status per key_version present in `secrets`, for `blindkey-server key-versions` (spec §4). */
 export function secretKeyVersionReport(db: Db, ring: KeyRing): KeyVersionStatus[] {
   const rows = db.prepare(`SELECT ${COLS} FROM secrets ORDER BY key_version`).all() as RawSecret[];
   return keyVersionReport(rows, (row) => row.key_version, ring, (row, key) => unwrapDek(key, row.dek_wrapped));

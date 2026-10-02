@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <title><%= it.title %> · pidb</title>
+    <title><%= it.title %> · blindkey</title>
     <link rel="stylesheet" href="/assets/app.css" />
     <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false}' />
     <script src="/assets/htmx.min.js" defer></script>
@@ -28,7 +28,7 @@
       <div class="topbar">
         <a class="brand" href="/">
           <span class="mark">pi</span>
-          <span>pidb</span>
+          <span>blindkey</span>
         </a>
         <details class="nav-drawer">
           <summary class="btn ghost"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg> Menu</summary>

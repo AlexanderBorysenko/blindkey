@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 /**
- * Drift guard (spec §2.4, F2): the bridge's static descriptors must equal what a live pidb server's
+ * Drift guard (spec §2.4, F2): the bridge's static descriptors must equal what a live blindkey server's
  * `/mcp` lists — name, description and JSON inputSchema — so an edit to packages/server/src/http/mcp.ts
  * that isn't mirrored into packages/cli/src/agent/upstream-tools.ts fails the suite.
  */

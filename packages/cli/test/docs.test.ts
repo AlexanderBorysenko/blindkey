@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PidbClient } from '../src/client.js';
+import { BlindkeyClient } from '../src/client.js';
 import { ApiError } from '../src/client.js';
 import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from '../src/commands/docs.js';
 import type { PublicDoc } from '../src/api-types.js';
@@ -10,11 +10,11 @@ import { makeServer, type ServerFixture } from './helpers.js';
 
 let s: ServerFixture;
 let dir: string;
-const client = (scopes: Parameters<ServerFixture['token']>[0]) => new PidbClient({ url: s.url, token: s.token(scopes) });
+const client = (scopes: Parameters<ServerFixture['token']>[0]) => new BlindkeyClient({ url: s.url, token: s.token(scopes) });
 
 beforeAll(async () => {
   s = await makeServer();
-  dir = mkdtempSync(join(tmpdir(), 'pidb-docs-'));
+  dir = mkdtempSync(join(tmpdir(), 'blindkey-docs-'));
   s.project('acme');
   s.doc('acme', 'deploy', '# Deploy\n\nssh to the box.\n');
   s.doc(null, 'guidelines', '# Guidelines\n');
@@ -61,7 +61,7 @@ describe('docs get', () => {
     const result = await runDocsGet(client(['docs:read', 'secrets:meta']), 'acme', 'refs-doc', { refs: true });
     expect(result.text).toContain('{{secret:DB}}');
     expect(result.text).toMatch(/host/);
-    expect(result.text).toMatch(/pidb secret exec/);
+    expect(result.text).toMatch(/blindkey secret exec/);
     expect(result.text).not.toContain('db.internal');
     expect(JSON.stringify(result.json)).not.toContain('db.internal');
   });
@@ -103,13 +103,13 @@ describe('docs put', () => {
     // status: 200 with equal timestamps must still report "updated" — a
     // timestamp-based implementation (created_at === updated_at) would
     // wrongly call this "created".
-    const stub200 = { jsonStatus: async () => ({ status: 200, data: sameTimestamps }) } as unknown as PidbClient;
+    const stub200 = { jsonStatus: async () => ({ status: 200, data: sameTimestamps }) } as unknown as BlindkeyClient;
     const resultUpdated = await runDocsPut(stub200, 'acme', 'stub', { file, title: 'Stub', category: 'notes' });
     expect(resultUpdated.text).toMatch(/updated/);
 
     // status: 201 with different timestamps must still report "created" —
     // pinning that the status code drives the wording, not the timestamps.
-    const stub201 = { jsonStatus: async () => ({ status: 201, data: differentTimestamps }) } as unknown as PidbClient;
+    const stub201 = { jsonStatus: async () => ({ status: 201, data: differentTimestamps }) } as unknown as BlindkeyClient;
     const resultCreated = await runDocsPut(stub201, 'acme', 'stub', { file, title: 'Stub', category: 'notes' });
     expect(resultCreated.text).toMatch(/created/);
   });

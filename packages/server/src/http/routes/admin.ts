@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { authTokenRequestSchema, tokenInputSchema } from '@pidb/shared';
+import { authTokenRequestSchema, tokenInputSchema } from '@blindkey/shared';
 import type { AppContext } from '../context.js';
 import { actorOf, parseBody, principalOf } from '../helpers.js';
 import { AppError, UnauthorizedError, ValidationError } from '../../errors.js';

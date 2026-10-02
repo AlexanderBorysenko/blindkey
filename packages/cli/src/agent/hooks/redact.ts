@@ -1,13 +1,13 @@
 // PostToolUse redaction (spec §3.2): a second, independent redaction pass over *whatever a tool
 // actually printed* — unlike `agent/redact.ts`'s streaming `Redactor` (which only knows about the
-// specific secret values a `pidb secret exec` run substituted), this one has no knowledge of any
-// particular secret's value. It instead pattern-matches things that *look like* pidb tokens, PEM
+// specific secret values a `blindkey secret exec` run substituted), this one has no knowledge of any
+// particular secret's value. It instead pattern-matches things that *look like* blindkey tokens, PEM
 // private keys, AWS-style access key ids, or a `KEY=value` line whose key name looks sensitive —
-// catching cases the exec redactor can't (e.g. Claude printing a pidb token it was never supposed to
+// catching cases the exec redactor can't (e.g. Claude printing a Blindkey token it was never supposed to
 // have, or `cat`ing a `.env`-shaped file). It never fetches or otherwise learns a real secret value.
-export const REDACTED = '[pidb:redacted]';
+export const REDACTED = '[blindkey:redacted]';
 
-const PIDB_TOKEN_RE = /pidb_[A-Za-z0-9_-]{20,}/g;
+const BLINDKEY_TOKEN_RE = /bk_[A-Za-z0-9_-]{20,}/g;
 // Non-greedy body so two adjacent PEM blocks don't get swallowed into a single match.
 const PEM_BLOCK_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 const AKIA_RE = /AKIA[0-9A-Z]{16}/g;
@@ -21,17 +21,17 @@ const SENSITIVE_KEY_NAME_RE = /(PASS(WORD)?|SECRET|TOKEN|API_?KEY|PRIVATE)/i;
 const KEY_VALUE_LINE_RE = /^([ \t]*(?:export\s+)?)([A-Z][A-Z0-9_]*)=(.*)$/gm;
 
 /**
- * Redacts pidb tokens, PEM private key blocks, AWS-style `AKIA...` access key ids, and `KEY=value`
+ * Redacts blindkey tokens, PEM private key blocks, AWS-style `AKIA...` access key ids, and `KEY=value`
  * lines whose key looks like a password/secret/token/api key/private-key field (spec §3.2). Pure and
  * total over any string input — never throws.
  */
 export function redactOutput(text: string): string {
   let out = text.replace(PEM_BLOCK_RE, REDACTED);
-  out = out.replace(PIDB_TOKEN_RE, REDACTED);
+  out = out.replace(BLINDKEY_TOKEN_RE, REDACTED);
   out = out.replace(AKIA_RE, REDACTED);
   out = out.replace(KEY_VALUE_LINE_RE, (whole: string, prefix: string, key: string, value: string) => {
     if (!SENSITIVE_KEY_NAME_RE.test(key)) return whole;
-    if (value.length === 0) return whole; // nothing to redact, and avoids a pointless [pidb:redacted] on e.g. `FOO_SECRET=`
+    if (value.length === 0) return whole; // nothing to redact, and avoids a pointless [blindkey:redacted] on e.g. `FOO_SECRET=`
     return `${prefix}${key}=${REDACTED}`;
   });
   return out;

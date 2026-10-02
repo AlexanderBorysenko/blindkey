@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ApiError, PidbClient } from '../src/client.js';
+import { ApiError, BlindkeyClient } from '../src/client.js';
 import { runSecretGet, runSecretSet, runSecretsList } from '../src/commands/secrets.js';
 import type { PublicSecret } from '../src/api-types.js';
 import { CliError } from '../src/errors.js';
@@ -11,12 +11,12 @@ import { makeServer, type ServerFixture } from './helpers.js';
 
 let s: ServerFixture;
 let dir: string;
-const client = (scopes: Parameters<ServerFixture['token']>[0]) => new PidbClient({ url: s.url, token: s.token(scopes) });
+const client = (scopes: Parameters<ServerFixture['token']>[0]) => new BlindkeyClient({ url: s.url, token: s.token(scopes) });
 const stdinOf = (text: string) => Readable.from([text]) as unknown as NodeJS.ReadableStream;
 
 beforeAll(async () => {
   s = await makeServer();
-  dir = mkdtempSync(join(tmpdir(), 'pidb-secrets-'));
+  dir = mkdtempSync(join(tmpdir(), 'blindkey-secrets-'));
   s.project('acme');
   s.secret('acme', 'DB', [
     { key: 'host', value: 'db.internal' },
@@ -49,7 +49,7 @@ describe('secret get', () => {
     const err = await runSecretGet(client(['secrets:reveal']), 'acme', 'DB', 'password', {}).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CliError);
     expect((err as CliError).exitCode).toBe(2);
-    expect((err as CliError).message).toMatch(/pidb secret exec/);
+    expect((err as CliError).message).toMatch(/blindkey secret exec/);
     expect((err as CliError).message).not.toContain('hunter2hunter2');
   });
 

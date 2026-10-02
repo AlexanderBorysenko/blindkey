@@ -3,9 +3,9 @@
 // This module is side-effect-free and fully testable in-process — `createBridge` returns a plain
 // low-level `Server` that a test can connect to with the SDK's `InMemoryTransport` and a real `Client`.
 //
-// Proxies the pidb server's own `/mcp` tools (spec §1.5) over Streamable HTTP with the agent token
-// from the OS credential store, and adds three local tools (`pidb_status`, `pidb_bind`,
-// `pidb_profiles`) that never leave this process. Profile/token are resolved fresh on every call
+// Proxies the Blindkey server's own `/mcp` tools (spec §1.5) over Streamable HTTP with the agent token
+// from the OS credential store, and adds three local tools (`blindkey_status`, `blindkey_bind`,
+// `blindkey_profiles`) that never leave this process. Profile/token are resolved fresh on every call
 // (spec: "profile or binding may change mid-session") — only the upstream MCP `Client` (keyed by
 // `url`+`token`) is cached, and dropped on an authentication/authorization failure so a retry
 // reconnects rather than reusing a session tied to a token that's since been rotated or widened.
@@ -25,7 +25,7 @@ export interface BridgeDeps {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   store: TokenStore;
-  /** Overrides the derived plugin data dir (tests; production derives it via `resolveDataDir`, which itself honours `PIDB_PLUGIN_DATA`). */
+  /** Overrides the derived plugin data dir (tests; production derives it via `resolveDataDir`, which itself honours `BLINDKEY_PLUGIN_DATA`). */
   dataDir?: string;
   /**
    * While not connected, re-resolve the config every this many ms and send
@@ -35,25 +35,25 @@ export interface BridgeDeps {
   watchIntervalMs?: number;
 }
 
-const CONNECT_HINT = 'not connected — run `pidb connect`';
-const WIDEN_HINT = 'the token lacks access — run `pidb connect` to widen';
-const NOT_ALLOWED = 'tool not allowed by the pidb plugin';
+const CONNECT_HINT = 'not connected — run `blindkey connect`';
+const WIDEN_HINT = 'the token lacks access — run `blindkey connect` to widen';
+const NOT_ALLOWED = 'tool not allowed by the Blindkey plugin';
 /** `secrets:write` is never grantable to an agent token, so "connect to widen" would be a dead end here. */
 const SENSITIVE_HINT = 'use secret_request_link for sensitive fields — the user types the value in the admin UI';
 
 const LOCAL_TOOLS: Tool[] = [
   {
-    name: 'pidb_status',
+    name: 'blindkey_status',
     description:
-      "Show the pidb agent's own connection status: bound profile + server url, bound project, whether a token is stored, " +
+      "Show the blindkey agent's own connection status: bound profile + server url, bound project, whether a token is stored, " +
       'and its approved projects/expiry if known. Never returns the token itself.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'pidb_bind',
+    name: 'blindkey_bind',
     description:
-      "Bind this repo (Claude Code's project dir) to a pidb project slug, on a chosen or default profile — the exact same " +
-      'binding logic as the `pidb bind` CLI command.',
+      "Bind this repo (Claude Code's project dir) to a Blindkey project slug, on a chosen or default profile — the exact same " +
+      'binding logic as the `blindkey bind` CLI command.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -64,15 +64,15 @@ const LOCAL_TOOLS: Tool[] = [
     },
   },
   {
-    name: 'pidb_profiles',
-    description: 'List configured pidb server profiles and which one (if any) is the default.',
+    name: 'blindkey_profiles',
+    description: 'List configured blindkey server profiles and which one (if any) is the default.',
     inputSchema: { type: 'object', properties: {} },
   },
 ];
 const LOCAL_TOOL_NAMES = new Set(LOCAL_TOOLS.map((t) => t.name));
 
 /**
- * The exact tools the pidb server's own `/mcp` exposes (spec §1.5) — anything else the upstream
+ * The exact tools the Blindkey server's own `/mcp` exposes (spec §1.5) — anything else the upstream
  * server happens to list (a future tool this bridge hasn't been reviewed against, a misbehaving or
  * malicious server) is dropped from `tools/list` and refused for `tools/call`, never forwarded.
  * Always listed, from static descriptors, even when not connected (spec §2.4).
@@ -122,7 +122,7 @@ function isProjectNotFound(result: CallToolResult): boolean {
 }
 
 const PROJECT_NOT_FOUND_HINT =
-  'the project does not exist or the token was not approved for it — run `pidb connect` and approve that project in the browser, or check the slug with list_projects';
+  'the project does not exist or the token was not approved for it — run `blindkey connect` and approve that project in the browser, or check the slug with list_projects';
 
 function withHint(result: CallToolResult, hint: string): CallToolResult {
   return {
@@ -145,7 +145,7 @@ export function createBridge(deps: BridgeDeps): Server {
 
   const upstream = new Map<string, Client>();
   // Tracks the most recent token cached for each url, so that resolving a *different* token for a
-  // url we've already cached a client for (a rotation — `pidb connect` issuing a fresh token for the
+  // url we've already cached a client for (a rotation — `blindkey connect` issuing a fresh token for the
   // same profile) can close the now-unreachable superseded client instead of leaking it forever.
   const lastTokenForUrl = new Map<string, string>();
   const clientKey = (url: string, token: string): string => `${url}\u0000${token}`;
@@ -171,7 +171,7 @@ export function createBridge(deps: BridgeDeps): Server {
     const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`), {
       requestInit: { headers: { authorization: `Bearer ${token}` } },
     });
-    const client = new Client({ name: 'pidb-bridge', version: '0.1.0' });
+    const client = new Client({ name: 'blindkey-bridge', version: '0.1.0' });
     await client.connect(transport);
     upstream.set(key, client);
     lastTokenForUrl.set(url, token);
@@ -237,7 +237,7 @@ export function createBridge(deps: BridgeDeps): Server {
 
   /**
    * On a 401/403, drops the stale client and retries exactly once against a freshly resolved config
-   * (spec §2.4 error mapping) — this is what makes a token rotated by a concurrent `pidb connect`
+   * (spec §2.4 error mapping) — this is what makes a token rotated by a concurrent `blindkey connect`
    * work on the very first tool call after it, instead of requiring the caller to retry. Only if the
    * retry *also* fails (or there's nothing left to reconnect to) is the hinted error returned.
    */
@@ -285,7 +285,7 @@ export function createBridge(deps: BridgeDeps): Server {
 
   function handleBind(rawArgs: Record<string, unknown> | undefined): CallToolResult {
     const project = typeof rawArgs?.project === 'string' ? rawArgs.project : undefined;
-    if (!project) return textResult('pidb_bind requires a "project" argument', true);
+    if (!project) return textResult('blindkey_bind requires a "project" argument', true);
     const profile = typeof rawArgs?.profile === 'string' ? rawArgs.profile : undefined;
     try {
       const result = performBind(dataDir, cwd, project, profile);
@@ -305,7 +305,7 @@ export function createBridge(deps: BridgeDeps): Server {
     return textResult(JSON.stringify({ default: profiles.default, profiles: list }, null, 2));
   }
 
-  const server = new Server({ name: 'pidb-bridge', version: '0.1.0' }, { capabilities: { tools: { listChanged: true } } });
+  const server = new Server({ name: 'blindkey-bridge', version: '0.1.0' }, { capabilities: { tools: { listChanged: true } } });
 
   if (deps.watchIntervalMs !== undefined && deps.watchIntervalMs > 0) {
     watchTimer = setInterval(() => {
@@ -328,7 +328,7 @@ export function createBridge(deps: BridgeDeps): Server {
     } catch (err) {
       // tools/list has no per-item error channel (unlike tools/call) — degrade to local tools only,
       // but still report the unexpected failure on stderr rather than silently swallowing it.
-      console.error(`pidb bridge: tools/list could not resolve the agent config (${err instanceof Error ? err.message : String(err)})`);
+      console.error(`blindkey bridge: tools/list could not resolve the agent config (${err instanceof Error ? err.message : String(err)})`);
     }
     let upstreamTools: Tool[] = [];
     if (cfg) {
@@ -352,8 +352,8 @@ export function createBridge(deps: BridgeDeps): Server {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     if (LOCAL_TOOL_NAMES.has(name)) {
-      if (name === 'pidb_status') return handleStatus();
-      if (name === 'pidb_bind') return handleBind(args);
+      if (name === 'blindkey_status') return handleStatus();
+      if (name === 'blindkey_bind') return handleBind(args);
       return handleProfiles();
     }
     if (!ALLOWED_UPSTREAM_TOOLS.has(name)) return textResult(NOT_ALLOWED, true);

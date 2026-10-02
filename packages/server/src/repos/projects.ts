@@ -1,4 +1,4 @@
-import type { ProjectInput, ProjectPatch, ProjectStatus } from '@pidb/shared';
+import type { ProjectInput, ProjectPatch, ProjectStatus } from '@blindkey/shared';
 import type { Db } from '../db/connection.js';
 import { ConflictError, NotFoundError } from '../errors.js';
 import { inList, isUniqueViolation, now, parseJsonArray } from './util.js';

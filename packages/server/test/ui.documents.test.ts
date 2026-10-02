@@ -8,14 +8,14 @@ import { getProjectBySlug } from '../src/repos/projects.js';
 
 let t: TestCtx;
 let session: string;
-const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
 const csrfOf = (b: string) => /name="csrf" value="([^"]+)"/.exec(b)?.[1] ?? '';
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   t.project('acme');
   const id = getProjectBySlug(t.db, 'acme')!.id;
   createSecret(t.db, t.ring, { projectId: id, name: 'DB', description: '', tags: [], fields: [{ key: 'password', value: 'hunter2hunter2' }] });
@@ -133,14 +133,14 @@ describe('ui document view', () => {
 
   it('deletes a document with a CSRF token and rejects one without', async () => {
     const view = await page('/p/acme/docs/doomed');
-    const bad = await t.app.inject({ method: 'POST', url: '/p/acme/docs/doomed/delete', cookies: { pidb_session: session }, payload: {} });
+    const bad = await t.app.inject({ method: 'POST', url: '/p/acme/docs/doomed/delete', cookies: { blindkey_session: session }, payload: {} });
     expect(bad.statusCode).toBe(403);
     expect(getDocument(t.db, getProjectBySlug(t.db, 'acme')!.id, 'doomed')).not.toBeNull();
 
     const ok = await t.app.inject({
       method: 'POST',
       url: '/p/acme/docs/doomed/delete',
-      cookies: { pidb_session: session },
+      cookies: { blindkey_session: session },
       payload: { csrf: csrfOf(view.body) },
     });
     expect(ok.statusCode).toBe(302);

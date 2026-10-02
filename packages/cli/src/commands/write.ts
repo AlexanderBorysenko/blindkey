@@ -1,7 +1,7 @@
 // Agent-safe write commands (spec §2.3): project creation, document deletion, non-sensitive secret
 // metadata and secret request links — the CLI counterparts of the MCP tools of the same purpose.
-import { secretRequestPath, type SecretFieldInput } from '@pidb/shared';
-import type { PidbClient } from '../client.js';
+import { secretRequestPath, type SecretFieldInput } from '@blindkey/shared';
+import type { BlindkeyClient } from '../client.js';
 import { ApiError, scopedPath, seg } from '../client.js';
 import type { PublicProject } from '../api-types.js';
 import type { CommandResult } from '../output.js';
@@ -17,14 +17,14 @@ function splitList(raw: string | undefined): string[] {
   return (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-export async function runProjectsCreate(client: PidbClient, slug: string, opts: ProjectCreateOptions): Promise<CommandResult> {
+export async function runProjectsCreate(client: BlindkeyClient, slug: string, opts: ProjectCreateOptions): Promise<CommandResult> {
   const project = await client.json<PublicProject>('POST', '/api/v1/projects', {
     body: { slug, name: opts.name, summary: opts.summary ?? '', tags: splitList(opts.tags) },
   });
   return { json: project, text: `created project ${project.slug} (${project.name})` };
 }
 
-export async function runDocsDelete(client: PidbClient, target: string, doc: string): Promise<CommandResult> {
+export async function runDocsDelete(client: BlindkeyClient, target: string, doc: string): Promise<CommandResult> {
   await client.empty('DELETE', scopedPath(target, 'docs', `/${seg(doc)}`));
   return { json: { deleted: doc, target }, text: `deleted ${target === 'global' ? '' : `${target}/`}${doc}` };
 }
@@ -36,7 +36,7 @@ export function parseFieldArg(raw: string): SecretFieldInput {
   return { key: raw.slice(0, i), value: raw.slice(i + 1), sensitive: false };
 }
 
-async function secretExists(client: PidbClient, target: string, name: string): Promise<boolean> {
+async function secretExists(client: BlindkeyClient, target: string, name: string): Promise<boolean> {
   try {
     await client.json('GET', scopedPath(target, 'secrets', `/${seg(name)}`));
     return true;
@@ -52,7 +52,7 @@ export interface SecretMetaOptions {
   tags?: string;
 }
 
-export async function runSecretsMeta(client: PidbClient, target: string, name: string, opts: SecretMetaOptions): Promise<CommandResult> {
+export async function runSecretsMeta(client: BlindkeyClient, target: string, name: string, opts: SecretMetaOptions): Promise<CommandResult> {
   const fields = (opts.field ?? []).map(parseFieldArg);
   const tags = opts.tags === undefined ? undefined : splitList(opts.tags);
   // Create first and patch on 409, so this needs only secrets:meta-write (no metadata read) and has
@@ -84,7 +84,7 @@ export interface SecretRequestOptions {
   tags?: string;
 }
 
-export async function runSecretsRequest(client: PidbClient, target: string, name: string, opts: SecretRequestOptions): Promise<CommandResult> {
+export async function runSecretsRequest(client: BlindkeyClient, target: string, name: string, opts: SecretRequestOptions): Promise<CommandResult> {
   const keys = [
     ...(opts.key ?? []).map((key) => ({ key, sensitive: true })),
     ...(opts.plainKey ?? []).map((key) => ({ key, sensitive: false })),

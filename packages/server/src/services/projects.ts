@@ -1,4 +1,4 @@
-import type { ProjectInput, ProjectPatch } from '@pidb/shared';
+import type { ProjectInput, ProjectPatch } from '@blindkey/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { ForbiddenError } from '../errors.js';

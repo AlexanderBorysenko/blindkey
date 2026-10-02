@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import { ApiError, PidbClient } from '../client.js';
+import { ApiError, BlindkeyClient } from '../client.js';
 import { normalizeUrl, saveConfig } from '../config.js';
 import { CliError, EXIT_AUTH } from '../errors.js';
 import type { CommandResult } from '../output.js';
@@ -43,9 +43,9 @@ export async function runLogin(
   if (!username || !password) throw new CliError('username and password are required');
   const name = opts.name ?? `cli-${hostname()}`;
 
-  // No token yet: the /auth/token route is public, and PidbClient omits the
+  // No token yet: the /auth/token route is public, and BlindkeyClient omits the
   // Authorization header for an empty token.
-  const client = new PidbClient({ url, token: '' });
+  const client = new BlindkeyClient({ url, token: '' });
   const body = { username, password, name, expires_days };
   let res: AuthTokenResponse;
   try {

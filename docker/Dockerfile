@@ -20,8 +20,8 @@ RUN npm prune --omit=dev
 # ---- runtime ----------------------------------------------------------------
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production \
-    PIDB_DATA_DIR=/data \
-    PIDB_PORT=8080
+    BLINDKEY_DATA_DIR=/data \
+    BLINDKEY_PORT=8080
 WORKDIR /app
 RUN mkdir -p /data && chown node:node /data
 COPY --from=build /app/node_modules ./node_modules

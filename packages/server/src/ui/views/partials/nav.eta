@@ -1,6 +1,6 @@
 <a class="brand" href="/">
   <span class="mark">pi</span>
-  <span>pidb</span>
+  <span>blindkey</span>
 </a>
 <form class="side-search" method="get" action="/search">
   <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { DOC_CATEGORIES, PROJECT_STATUSES, projectInputSchema, projectPatchSchema } from '@pidb/shared';
+import { DOC_CATEGORIES, PROJECT_STATUSES, projectInputSchema, projectPatchSchema } from '@blindkey/shared';
 import type { AppContext } from '../../http/context.js';
 import { ValidationError } from '../../errors.js';
 import { createProjectFor, deleteProjectFor, getProjectDetailFor, listProjectsFor, updateProjectFor } from '../../services/projects.js';

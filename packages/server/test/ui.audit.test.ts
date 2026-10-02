@@ -6,13 +6,13 @@ import { writeAudit, listAudit } from '../src/repos/audit.js';
 
 let t: TestCtx;
 let session: string;
-const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { pidb_session: session } });
+const page = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
   session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'pidb_session')!.value;
+    .cookies.find((c) => c.name === 'blindkey_session')!.value;
   for (let i = 0; i < 5; i++) {
     writeAudit(t.db, { actor_type: 'token', actor_id: null, action: 'secret.reveal', target_type: 'secret', target_id: i, field_key: 'password', ip: '10.0.0.1', user_agent: 'agent' });
   }

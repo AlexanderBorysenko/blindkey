@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 // Regression test for the critical bundling bug: esbuild bundling `agent/cli.ts` as its own entry
-// point (spec §2.1 `dist/pidb.mjs`) must NOT also pull in `cli.ts`'s top-level
+// point (spec §2.1 `dist/blindkey.mjs`) must NOT also pull in `cli.ts`'s top-level
 // `if (isEntryPoint()) void main()` — that would run the *normal* program a second time in the same
-// process (reading PIDB_URL/PIDB_TOKEN/~/.config/pidb, and running every command twice), because a
+// process (reading BLINDKEY_URL/BLINDKEY_TOKEN/~/.config/blindkey, and running every command twice), because a
 // bundle shares one `import.meta.url` across every module it contains. `program.ts` (imported by
 // both entries) has no top-level side effects, and `agent/cli.ts` never imports `cli.ts`, so bundling
 // `agent/cli.ts` alone must not run the normal entry's self-exec block at all.
@@ -18,8 +18,8 @@ const cliDir = fileURLToPath(new URL('..', import.meta.url));
 let bundlePath: string;
 
 beforeAll(async () => {
-  const outDir = mkdtempSync(join(tmpdir(), 'pidb-agent-bundle-'));
-  bundlePath = join(outDir, 'pidb-agent.mjs');
+  const outDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-bundle-'));
+  bundlePath = join(outDir, 'blindkey-agent.mjs');
   await build({
     entryPoints: [join(cliDir, 'src/agent/cli.ts')],
     outfile: bundlePath,
@@ -48,16 +48,16 @@ function run(args: string[], env: Record<string, string>): Promise<{ status: num
 }
 
 describe('bundled agent entry (esbuild, matching the real plugin build)', () => {
-  it('(a) `token list` with PIDB_URL/PIDB_TOKEN set and no PIDB_AGENT: only the refusal, exit 2, no network attempt', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-bundle-data-'));
+  it('(a) `token list` with BLINDKEY_URL/BLINDKEY_TOKEN set and no BLINDKEY_AGENT: only the refusal, exit 2, no network attempt', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-bundle-data-'));
     const r = await run(['token', 'list'], {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
-      PIDB_PLUGIN_DATA: dataDir,
+      BLINDKEY_PLUGIN_DATA: dataDir,
       // Present to prove the normal program never runs (it would try to reach this and fail
       // differently, or succeed and print token data) — agent mode always ignores these anyway.
-      PIDB_URL: 'http://127.0.0.1:1',
-      PIDB_TOKEN: 'pidb_should_be_ignored',
+      BLINDKEY_URL: 'http://127.0.0.1:1',
+      BLINDKEY_TOKEN: 'bk_should_be_ignored',
     });
     expect(r.status).toBe(2);
     const occurrences = r.stderr.split('not available to the Claude agent — ask the user').length - 1;
@@ -68,11 +68,11 @@ describe('bundled agent entry (esbuild, matching the real plugin build)', () => 
   });
 
   it('(b) `unbind` prints its result exactly once (no double execution from the bundle)', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'pidb-agent-bundle-data-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'blindkey-agent-bundle-data-'));
     const r = await run(['unbind'], {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
-      PIDB_PLUGIN_DATA: dataDir,
+      BLINDKEY_PLUGIN_DATA: dataDir,
     });
     expect(r.status).toBe(0);
     const occurrences = r.stdout.split('this repo was not bound').length - 1;

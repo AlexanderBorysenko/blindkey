@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 export default defineConfig({
   resolve: {
     alias: {
-      '@pidb/shared': fileURLToPath(new URL('./packages/shared/src/index.ts', import.meta.url)),
+      '@blindkey/shared': fileURLToPath(new URL('./packages/shared/src/index.ts', import.meta.url)),
     },
   },
   test: {

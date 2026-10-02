@@ -1,4 +1,4 @@
-import type { AuthTokenRequest, TokenInput } from '@pidb/shared';
+import type { AuthTokenRequest, TokenInput } from '@blindkey/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, type Actor, type Principal } from '../auth/principal.js';
 import { NotFoundError, ValidationError } from '../errors.js';

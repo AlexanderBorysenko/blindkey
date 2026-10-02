@@ -51,8 +51,8 @@ describe('agent token kind (spec §1.1)', () => {
     registerSessionResolver(app, t.ctx);
     app.get('/tokens', async (req) => (req as unknown as { principal: Principal }).principal ?? null);
     const loginRes = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = loginRes.cookies.find((c) => c.name === 'pidb_session')!.value;
-    const res = await app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: session } });
+    const session = loginRes.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const res = await app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } });
     expect(res.json().kind).toBe('admin');
     expect(res.json().agent).toBe(false);
     await app.close();
@@ -64,10 +64,10 @@ describe('agent token kind (spec §1.1)', () => {
     const { hashPassword } = await import('../src/crypto/passwords.js');
     createAdmin(t.db, 'alex', await hashPassword('pw'));
     const session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-      .cookies.find((c) => c.name === 'pidb_session')!.value;
+      .cookies.find((c) => c.name === 'blindkey_session')!.value;
     createToken(t.db, { name: 'the-agent-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
     createToken(t.db, { name: 'the-user-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'user' });
-    const res = await t.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } });
     expect(res.statusCode).toBe(200);
     const body = res.body;
     // Each token is a card; its title line ends at the first </div> after the name.
@@ -85,8 +85,8 @@ describe('agent token kind (spec §1.1)', () => {
     const { hashPassword } = await import('../src/crypto/passwords.js');
     createAdmin(t.db, 'alex', await hashPassword('pw'));
     const session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-      .cookies.find((c) => c.name === 'pidb_session')!.value;
-    const res = await t.app.inject({ method: 'GET', url: '/tokens', cookies: { pidb_session: session } });
+      .cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const res = await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } });
     for (const scope of ['projects:write', 'secrets:meta-write', 'secrets:use']) {
       expect(res.body).toContain(`value="${scope}"`);
     }

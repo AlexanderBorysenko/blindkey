@@ -19424,9 +19424,9 @@ function derivedDataDir(selfPath) {
   return `${pluginsDir}${sep2}data${sep2}${plugin}-${marketplace}`;
 }
 function resolveDataDir(env = process.env, selfPath = process.argv[1] ?? "") {
-  if (env.PIDB_PLUGIN_DATA) return env.PIDB_PLUGIN_DATA;
+  if (env.BLINDKEY_PLUGIN_DATA) return env.BLINDKEY_PLUGIN_DATA;
   const claudeDir = env.CLAUDE_CONFIG_DIR || join(env.HOME ?? homedir(), ".claude");
-  return derivedDataDir(selfPath) ?? join(claudeDir, "plugins", "data", "pidb-pidb");
+  return derivedDataDir(selfPath) ?? join(claudeDir, "plugins", "data", "blindkey-blindkey");
 }
 
 // packages/cli/src/agent/state.ts
@@ -19477,7 +19477,7 @@ function performBind(dataDir, cwd, project, profileOverride) {
   const key = repoKey(cwd);
   const profileName = profileOverride ?? bindings[key]?.profile ?? profiles.default;
   if (!profileName || !profiles.profiles[profileName]) {
-    throw new CliError("no server configured — run `pidb profile add <name> <url>`", EXIT_AUTH);
+    throw new CliError("no server configured — run `blindkey profile add <name> <url>`", EXIT_AUTH);
   }
   bindings[key] = { profile: profileName, project };
   saveBindings(dataDir, bindings);
@@ -19511,11 +19511,11 @@ async function resolveAgentConfig(input) {
   const profileName = binding?.profile ?? profiles.default;
   const profile = profileName ? profiles.profiles[profileName] : void 0;
   if (!profileName || !profile) {
-    throw new CliError("no server configured — run `pidb profile add <name> <url>`", EXIT_AUTH);
+    throw new CliError("no server configured — run `blindkey profile add <name> <url>`", EXIT_AUTH);
   }
   const token = await input.store.get(profileName);
   if (!token) {
-    throw new CliError("not connected — run `pidb connect`", EXIT_AUTH);
+    throw new CliError("not connected — run `blindkey connect`", EXIT_AUTH);
   }
   return { profile: profileName, url: profile.url, token, project: binding?.project ?? null };
 }
@@ -19869,19 +19869,19 @@ var UPSTREAM_TOOL_DESCRIPTORS = [
 ];
 
 // packages/cli/src/agent/bridge.ts
-var CONNECT_HINT = "not connected — run `pidb connect`";
-var WIDEN_HINT = "the token lacks access — run `pidb connect` to widen";
-var NOT_ALLOWED = "tool not allowed by the pidb plugin";
+var CONNECT_HINT = "not connected — run `blindkey connect`";
+var WIDEN_HINT = "the token lacks access — run `blindkey connect` to widen";
+var NOT_ALLOWED = "tool not allowed by the Blindkey plugin";
 var SENSITIVE_HINT = "use secret_request_link for sensitive fields — the user types the value in the admin UI";
 var LOCAL_TOOLS = [
   {
-    name: "pidb_status",
-    description: "Show the pidb agent's own connection status: bound profile + server url, bound project, whether a token is stored, and its approved projects/expiry if known. Never returns the token itself.",
+    name: "blindkey_status",
+    description: "Show the blindkey agent's own connection status: bound profile + server url, bound project, whether a token is stored, and its approved projects/expiry if known. Never returns the token itself.",
     inputSchema: { type: "object", properties: {} }
   },
   {
-    name: "pidb_bind",
-    description: "Bind this repo (Claude Code's project dir) to a pidb project slug, on a chosen or default profile — the exact same binding logic as the `pidb bind` CLI command.",
+    name: "blindkey_bind",
+    description: "Bind this repo (Claude Code's project dir) to a Blindkey project slug, on a chosen or default profile — the exact same binding logic as the `blindkey bind` CLI command.",
     inputSchema: {
       type: "object",
       properties: {
@@ -19892,8 +19892,8 @@ var LOCAL_TOOLS = [
     }
   },
   {
-    name: "pidb_profiles",
-    description: "List configured pidb server profiles and which one (if any) is the default.",
+    name: "blindkey_profiles",
+    description: "List configured blindkey server profiles and which one (if any) is the default.",
     inputSchema: { type: "object", properties: {} }
   }
 ];
@@ -19923,7 +19923,7 @@ function isProjectNotFound(result) {
   const text = first && first.type === "text" ? first.text : "";
   return /^not_found: project not found\b/.test(text);
 }
-var PROJECT_NOT_FOUND_HINT = "the project does not exist or the token was not approved for it — run `pidb connect` and approve that project in the browser, or check the slug with list_projects";
+var PROJECT_NOT_FOUND_HINT = "the project does not exist or the token was not approved for it — run `blindkey connect` and approve that project in the browser, or check the slug with list_projects";
 function withHint(result, hint) {
   return {
     ...result,
@@ -19959,7 +19959,7 @@ function createBridge(deps) {
     const transport = new StreamableHTTPClientTransport(new URL(`${url2}/mcp`), {
       requestInit: { headers: { authorization: `Bearer ${token}` } }
     });
-    const client = new Client({ name: "pidb-bridge", version: "0.1.0" });
+    const client = new Client({ name: "blindkey-bridge", version: "0.1.0" });
     await client.connect(transport);
     upstream.set(key, client);
     lastTokenForUrl.set(url2, token);
@@ -20050,7 +20050,7 @@ function createBridge(deps) {
   }
   function handleBind(rawArgs) {
     const project = typeof rawArgs?.project === "string" ? rawArgs.project : void 0;
-    if (!project) return textResult('pidb_bind requires a "project" argument', true);
+    if (!project) return textResult('blindkey_bind requires a "project" argument', true);
     const profile = typeof rawArgs?.profile === "string" ? rawArgs.profile : void 0;
     try {
       const result = performBind(dataDir, cwd, project, profile);
@@ -20065,7 +20065,7 @@ function createBridge(deps) {
     const list = Object.entries(profiles.profiles).map(([name, p]) => ({ name, url: p.url, default: name === profiles.default }));
     return textResult(JSON.stringify({ default: profiles.default, profiles: list }, null, 2));
   }
-  const server = new Server({ name: "pidb-bridge", version: "0.1.0" }, { capabilities: { tools: { listChanged: true } } });
+  const server = new Server({ name: "blindkey-bridge", version: "0.1.0" }, { capabilities: { tools: { listChanged: true } } });
   if (deps.watchIntervalMs !== void 0 && deps.watchIntervalMs > 0) {
     watchTimer = setInterval(() => {
       if (connected === true) return;
@@ -20085,7 +20085,7 @@ function createBridge(deps) {
     try {
       cfg = await resolveConfig();
     } catch (err) {
-      console.error(`pidb bridge: tools/list could not resolve the agent config (${err instanceof Error ? err.message : String(err)})`);
+      console.error(`blindkey bridge: tools/list could not resolve the agent config (${err instanceof Error ? err.message : String(err)})`);
     }
     let upstreamTools = [];
     if (cfg) {
@@ -20104,8 +20104,8 @@ function createBridge(deps) {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     if (LOCAL_TOOL_NAMES.has(name)) {
-      if (name === "pidb_status") return handleStatus();
-      if (name === "pidb_bind") return handleBind(args);
+      if (name === "blindkey_status") return handleStatus();
+      if (name === "blindkey_bind") return handleBind(args);
       return handleProfiles();
     }
     if (!ALLOWED_UPSTREAM_TOOLS.has(name)) return textResult(NOT_ALLOWED, true);
@@ -20119,7 +20119,7 @@ function createBridge(deps) {
 // packages/cli/src/agent/tokenstore.ts
 import { createRequire } from "node:module";
 import { join as join3 } from "node:path";
-var SERVICE = "pidb";
+var SERVICE = "blindkey";
 var account = (profile) => `profile:${profile}`;
 function defaultLoader(dataDir) {
   return () => {
