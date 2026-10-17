@@ -1,0 +1,5 @@
+<div class="auth-card">
+  <p class="code"><%= it.code %></p>
+  <p><%= it.message %></p>
+  <a class="btn primary" href="/">Back to projects</a>
+</div>

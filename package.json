@@ -1,0 +1,21 @@
+{
+  "name": "blindkey-monorepo",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "npm run build -w @blindkey/shared && npm run build -w @blindkey/server && npm run build -w @blindkey/cli",
+    "build:plugin": "node scripts/build-plugin.mjs",
+    "typecheck": "npm run build -w @blindkey/shared && tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.0"
+  }
+}

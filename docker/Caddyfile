@@ -1,0 +1,13 @@
+{
+	email {$BLINDKEY_ACME_EMAIL}
+}
+
+{$BLINDKEY_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy server:8080
+	log {
+		output stdout
+		format json
+	}
+}

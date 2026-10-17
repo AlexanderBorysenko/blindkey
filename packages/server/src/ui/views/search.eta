@@ -1,0 +1,72 @@
+<div class="page-head">
+  <div>
+    <h1>Search</h1>
+  </div>
+</div>
+
+<form method="get" action="/search" role="search" class="row-actions">
+  <input type="search" name="q" placeholder="Search" value="<%= it.q %>" />
+  <button class="btn primary" type="submit">Search</button>
+</form>
+
+<% var hasProjects = it.result.projects && it.result.projects.length;
+   var hasDocuments = it.result.documents && it.result.documents.length;
+   var hasSecrets = it.result.secrets && it.result.secrets.length;
+%>
+
+<% if (hasProjects) { %>
+<h2>Projects <span class="count"><%= it.result.projects.length %></span></h2>
+<div class="table-wrap">
+  <table>
+    <tbody>
+      <% it.result.projects.forEach(function (p) { %>
+      <tr>
+        <td><a class="mono" href="/p/<%= encodeURIComponent(p.slug) %>"><%= p.slug %></a></td>
+        <td><%= p.name %></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<% if (hasDocuments) { %>
+<h2>Documents <span class="count"><%= it.result.documents.length %></span></h2>
+<div class="table-wrap">
+  <table>
+    <tbody>
+      <% it.result.documents.forEach(function (d) { %>
+      <tr>
+        <td>
+          <a href="<%= d.project ? '/p/' + encodeURIComponent(d.project) : '/global' %>/docs/<%= encodeURIComponent(d.slug) %>"><%= d.title %></a>
+        </td>
+        <td><span class="tag"><%= d.project || 'global' %></span> <span class="tag"><%= d.category %></span></td>
+        <td><small><%= d.snippet %></small></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<% if (hasSecrets) { %>
+<h2>Secrets <span class="count"><%= it.result.secrets.length %></span></h2>
+<div class="table-wrap">
+  <table>
+    <tbody>
+      <% it.result.secrets.forEach(function (s) { %>
+      <tr>
+        <td><a class="mono" href="<%= s.project ? '/p/' + encodeURIComponent(s.project) : '/global' %>/secrets/<%= encodeURIComponent(s.name) %>"><%= s.name %></a></td>
+        <td><span class="tag"><%= s.project || 'global' %></span></td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<% if (it.q && !hasProjects && !hasDocuments && !hasSecrets) { %>
+<div class="empty">
+  <p>Nothing matches “<%= it.q %>”.</p>
+</div>
+<% } %>

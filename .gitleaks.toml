@@ -1,0 +1,11 @@
+# The redaction and secret-lint tests must contain secret-shaped strings to prove they are caught.
+# All of them are synthetic; provider-specific prefixes are split in the source so scanners don't match.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "synthetic secret-shaped fixtures in redaction/lint tests"
+paths = [
+  '''packages/cli/test/agent\.hooks\.redact\.test\.ts''',
+  '''packages/shared/test/lint\.test\.ts''',
+]

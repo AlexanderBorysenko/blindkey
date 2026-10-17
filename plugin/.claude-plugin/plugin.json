@@ -1,0 +1,16 @@
+{
+  "name": "blindkey",
+  "displayName": "Blindkey",
+  "version": "1.0.0",
+  "description": "Working context from a Blindkey server: the bound project's docs, non-secret data and secret names; secret values used only through env/file substitution, never shown to Claude. Login is a browser-approved, project-scoped agent token.",
+  "author": {
+    "name": "Alexander Borysenko"
+  },
+  "keywords": [
+    "blindkey",
+    "secrets",
+    "ai-agents",
+    "mcp",
+    "claude-code"
+  ]
+}

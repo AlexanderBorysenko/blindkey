@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "blindkey": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp.mjs"],
+      "env": {
+        "BLINDKEY_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}",
+        "BLINDKEY_AGENT": "1"
+      }
+    }
+  }
+}

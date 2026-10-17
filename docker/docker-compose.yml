@@ -1,0 +1,73 @@
+name: blindkey
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: blindkey-server:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BLINDKEY_MASTER_KEY_FILE: /run/secrets/master_key
+      BLINDKEY_DATA_DIR: /data
+      BLINDKEY_PORT: "8080"
+      BLINDKEY_TRUST_PROXY: "true"
+    secrets:
+      - master_key
+    volumes:
+      - blindkey-data:/data
+    # Never publish ports for this service: BLINDKEY_TRUST_PROXY=true above is only
+    # safe because Caddy is the sole way in.
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      BLINDKEY_DOMAIN: ${BLINDKEY_DOMAIN}
+      BLINDKEY_ACME_EMAIL: ${BLINDKEY_ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  backup:
+    image: blindkey-server:local
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      BLINDKEY_MASTER_KEY_FILE: /run/secrets/master_key
+      BLINDKEY_DATA_DIR: /data
+    secrets:
+      - master_key
+    volumes:
+      - blindkey-data:/data
+    entrypoint: ["/bin/sh", "/app/docker/backup-loop.sh"]
+    healthcheck:
+      disable: true
+
+volumes:
+  blindkey-data:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  # Mounted read-only at /run/secrets/master_key. The container runs as uid 1000 (node):
+  # on the host run `chmod 600 secrets/master_key && sudo chown 1000:1000 secrets/master_key`.
+  master_key:
+    file: ./secrets/master_key

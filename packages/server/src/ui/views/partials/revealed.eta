@@ -1,0 +1,11 @@
+<div class="kv-row revealed" data-field-row="<%= it.key %>">
+  <div class="mono field-key locked"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg> <%= it.key %></div>
+  <div data-field="<%= it.key %>">
+    <span class="field-value<%= it.value.includes('\n') ? ' multiline' : '' %>"><%= it.value %></span>
+  </div>
+  <div class="row-buttons">
+    <span class="timer" data-seconds="30">hides in 30 s</span>
+    <button class="btn sm ghost" type="button" data-action="copy-field">Copy</button>
+    <button class="btn sm ghost" type="button" data-action="hide-field">Hide</button>
+  </div>
+</div>

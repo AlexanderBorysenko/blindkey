@@ -1,0 +1,13 @@
+{
+  "name": "blindkey",
+  "owner": {
+    "name": "Alexander Borysenko"
+  },
+  "plugins": [
+    {
+      "name": "blindkey",
+      "source": "./plugin",
+      "description": "Blindkey for Claude Code: secrets your agent can use but never see, plus project docs and memory"
+    }
+  ]
+}
