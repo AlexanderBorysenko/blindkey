@@ -21,10 +21,10 @@ afterAll(async () => {
 
 describe('nav API tokens count', () => {
   it('counts only active tokens: not revoked, not expired', async () => {
-    const { row: active } = createToken(t.db, { name: 'active', scopes: ['admin'], projectIds: null, expiresAt: null });
-    const { row: revoked } = createToken(t.db, { name: 'revoked', scopes: ['admin'], projectIds: null, expiresAt: null });
+    const { row: active } = createToken(t.db, { userId: t.owner().id, name: 'active', scopes: ['admin'], projectIds: null, expiresAt: null });
+    const { row: revoked } = createToken(t.db, { userId: t.owner().id, name: 'revoked', scopes: ['admin'], projectIds: null, expiresAt: null });
     revokeToken(t.db, revoked.id);
-    createToken(t.db, { name: 'expired', scopes: ['admin'], projectIds: null, expiresAt: Date.now() - 1000 });
+    createToken(t.db, { userId: t.owner().id, name: 'expired', scopes: ['admin'], projectIds: null, expiresAt: Date.now() - 1000 });
 
     const res = await page('/');
     const nav = res.body.slice(res.body.indexOf('API tokens'), res.body.indexOf('API tokens') + 200);

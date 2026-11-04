@@ -4,6 +4,8 @@ export interface SecretRequestLinkInput {
   /** Project slug, or null for a global secret. */
   project: string | null;
   name: string;
+  /** Workspace slug for a global secret; ignored for project secrets (the project fixes its workspace). */
+  workspace?: string;
   /** Whether a secret with this name already exists (edit page) or not (new-secret form). */
   exists: boolean;
   description?: string;
@@ -24,6 +26,7 @@ export function secretRequestPath(input: SecretRequestLinkInput): string {
   if (input.description) qs.set('description', input.description);
   if (input.tags && input.tags.length > 0) qs.set('tags', input.tags.join(','));
   qs.set('keys', input.keys.map((k) => (k.sensitive || defaultSensitive(k.key) ? k.key : `${k.key}!`)).join(','));
+  if (!input.project && input.workspace) qs.set('workspace', input.workspace);
   const path = input.exists ? `${prefix}/secrets/${encodeURIComponent(input.name)}/edit` : `${prefix}/secrets/new`;
   return `${path}?${qs.toString()}`;
 }

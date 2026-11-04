@@ -17,6 +17,9 @@
     history.replaceState(history.state, '', url);
   })();
 
+  // CSS hides the no-JS submit buttons (e.g. the workspace switcher's) only once this script runs.
+  if (document.documentElement) document.documentElement.classList.add('js');
+
   var timers = new WeakMap();
 
   function flashCopied(btn) {
@@ -226,7 +229,51 @@
     if (fn) fn(el);
   });
 
+  // Grant editor: Protected/Public/Docs parents mirror their Read/Write children. Without this script
+  // the boxes are plain checkboxes and the server treats a checked parent (`protected.*`) as both children.
+  function syncGroup(group) {
+    var parent = group.querySelector('input[data-perm-parent]');
+    var kids = group.querySelectorAll('input[data-perm-child]');
+    if (!parent || kids.length === 0) return;
+    var on = 0;
+    kids.forEach(function (k) { if (k.checked) on += 1; });
+    parent.checked = on === kids.length;
+    parent.indeterminate = on > 0 && on < kids.length;
+  }
+
+  document.addEventListener('change', function (e) {
+    var target = e.target instanceof Element ? e.target : null;
+    if (!target) return;
+    if (target.matches('select[data-autosubmit]')) {
+      var form = target.closest('form');
+      if (form && form.requestSubmit) form.requestSubmit();
+      else if (form) form.submit();
+      return;
+    }
+    if (target.matches('input[data-perm-all]')) {
+      // Unchecking "All" reveals the detail with everything ticked, ready to be narrowed down.
+      var tree = target.closest('.perm-tree');
+      if (!target.checked && tree) {
+        tree.querySelectorAll('.perm-detail input[type="checkbox"]').forEach(function (c) { c.checked = true; c.indeterminate = false; });
+      }
+      return;
+    }
+    if (target.matches('input[data-perm-parent]')) {
+      var g = target.closest('.perm-group');
+      if (g) {
+        g.querySelectorAll('input[data-perm-child]').forEach(function (c) { c.checked = target.checked; });
+        target.indeterminate = false;
+      }
+      return;
+    }
+    if (target.matches('input[data-perm-child]')) {
+      var group = target.closest('.perm-group');
+      if (group) syncGroup(group);
+    }
+  });
+
   document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.perm-group').forEach(syncGroup);
     document.querySelectorAll('dialog[data-open-on-load]').forEach(function (d) {
       if (!d.open) d.showModal();
     });

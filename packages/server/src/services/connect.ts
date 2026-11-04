@@ -2,9 +2,10 @@ import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { AGENT_SCOPES, agentScopesSchema, type ConnectStartInput, type Scope } from '@blindkey/shared';
 import type { AppContext } from '../http/context.js';
-import type { Actor } from '../auth/principal.js';
+import type { Actor, Principal } from '../auth/principal.js';
+import { accessFor } from '../auth/access.js';
 import { AppError, NotFoundError, ValidationError } from '../errors.js';
-import { auditAs } from './common.js';
+import { assertNotImpersonating, auditAs } from './common.js';
 import { writeAudit } from '../repos/audit.js';
 import { isUniqueViolation } from '../repos/util.js';
 import { getProjectBySlug, listProjects, type ProjectRow } from '../repos/projects.js';
@@ -127,10 +128,13 @@ function issueAgentToken(ctx: AppContext, requestId: number, ip: string, userAge
     // gone or was no longer `approved` by the time this transaction ran.
     if (!claimed) throw new AppError(400, 'invalid_request', 'this request was already used');
     // A reconnect under the same name keeps the label the admin gave the session it supersedes.
-    const label = claimed.approved_label ?? latestAgentLabel(ctx.db, claimed.name);
-    revokeAgentTokensByName(ctx.db, claimed.name);
+    // The token acts as whoever approved it; an approver deleted in the meantime leaves nobody to act as.
+    if (claimed.approved_by_user_id === null) throw new AppError(400, 'invalid_request', 'the approving user no longer exists');
+    const label = claimed.approved_label ?? latestAgentLabel(ctx.db, claimed.approved_by_user_id, claimed.name);
+    revokeAgentTokensByName(ctx.db, claimed.approved_by_user_id, claimed.name);
     const expiresAt = Date.now() + (claimed.approved_expires_days ?? claimed.expires_days) * DAY_MS;
     const { token, row: tokenRow } = createToken(ctx.db, {
+      userId: claimed.approved_by_user_id,
       name: claimed.name,
       scopes: claimed.approved_scopes ?? [],
       projectIds: claimed.approved_project_ids ?? [],
@@ -195,13 +199,13 @@ export type ConnectView =
   | { state: 'error'; message: string }
   | { state: 'form'; row: ConnectRequestRow; allScopes: readonly Scope[]; allProjects: ProjectRow[] };
 
-/** Backs `GET /connect?code=` (spec §1.3): unknown/expired/already-decided codes render as an error state. */
-export function viewConnectRequest(ctx: AppContext, code: string): ConnectView {
+/** Backs `GET /connect?code=` (spec §1.3): unknown/expired/already-decided codes render as an error state. The project choices are the approver's visible projects. */
+export function viewConnectRequest(ctx: AppContext, principal: Principal, code: string): ConnectView {
   const row = getConnectRequestByUserCode(ctx.db, normalizeUserCode(code));
   if (!row || row.status !== 'pending' || row.expires_at <= Date.now()) {
     return { state: 'error', message: 'This code is invalid, expired, or already used.' };
   }
-  return { state: 'form', row, allScopes: AGENT_SCOPES, allProjects: listProjects(ctx.db, null) };
+  return { state: 'form', row, allScopes: AGENT_SCOPES, allProjects: accessFor(ctx.db, principal).visibleProjects() };
 }
 
 /**
@@ -223,17 +227,20 @@ export function approveConnect(
   expiresDaysInput: string,
   labelInput = '',
 ): void {
+  assertNotImpersonating(actor.principal);
   const row = mustPendingConnectRequest(ctx, code);
   const label = parseTokenLabel(labelInput);
   const parsedScopes = agentScopesSchema.safeParse(scopeInputs);
   if (!parsedScopes.success) throw new ValidationError(parsedScopes.error.issues);
   const scopes = Array.from(new Set(parsedScopes.data));
+  const access = accessFor(ctx.db, actor.principal);
   const seenProjectIds = new Set<number>();
   const projectIds: number[] = [];
   const matchedSlugs: string[] = [];
   for (const slug of projectSlugInputs) {
     const p = getProjectBySlug(ctx.db, slug);
-    if (p && !seenProjectIds.has(p.id)) {
+    // Only projects the approver can see; others are dropped like unknown slugs.
+    if (p && access.projectVisible(p) && !seenProjectIds.has(p.id)) {
       seenProjectIds.add(p.id);
       projectIds.push(p.id);
       matchedSlugs.push(slug);
@@ -245,7 +252,7 @@ export function approveConnect(
   }
   const parsedExpiresDays = expiresDaysSchema.safeParse(expiresDaysInput);
   if (!parsedExpiresDays.success) throw new ValidationError(parsedExpiresDays.error.issues);
-  const ok = approveConnectRequest(ctx.db, row.id, { scopes, projectIds, expiresDays: parsedExpiresDays.data, label });
+  const ok = approveConnectRequest(ctx.db, row.id, { userId: actor.principal.userId, scopes, projectIds, expiresDays: parsedExpiresDays.data, label });
   if (!ok) throw new NotFoundError('connect request not found or already decided');
   auditAs(ctx, actor, {
     action: 'connect.approved',

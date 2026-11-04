@@ -35,6 +35,9 @@ function describeError(status: number, body: ApiErrorBody): string {
       const path = (issue.path ?? []).join('.') || '(root)';
       lines.push(`  ${path}: ${issue.message ?? 'invalid'}`);
     }
+    if (status === 400 && body.issues.some((i) => (i as { message?: string }).message === 'workspace required')) {
+      lines.push('  you can see several workspaces — name one with the target `global@<workspace-slug>` (list them with `blindkey workspaces`)');
+    }
   }
   return lines.join('\n');
 }
@@ -59,17 +62,59 @@ export function seg(value: string): string {
   return encodeURIComponent(value);
 }
 
-/** `global` targets the top-level collection; anything else is a project slug. */
-export function scopedPath(target: string, kind: 'secrets' | 'docs', rest = ''): string {
-  const base = target === 'global' ? `/api/v1/${kind}` : `/api/v1/projects/${seg(target)}/${kind}`;
-  return `${base}${rest}`;
+/**
+ * Same pattern as `slugSchema` in @blindkey/shared. Duplicated on purpose: importing the zod schema
+ * would bundle all of zod into the plugin hook (67 KB -> 757 KB); client.test.ts pins the two together.
+ */
+export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+
+export type Target = { kind: 'project'; slug: string } | { kind: 'global'; workspace: string | null };
+
+/** `<target>`: a project slug, `global` (workspace inferred) or `global@<workspace-slug>`. */
+export function parseTarget(raw: string): Target {
+  if (raw !== 'global' && !raw.startsWith('global@')) return { kind: 'project', slug: raw };
+  if (raw === 'global') return { kind: 'global', workspace: null };
+  const workspace = raw.slice('global@'.length);
+  if (!SLUG_RE.test(workspace)) {
+    throw new CliError(
+      `invalid target "${raw}" — expected \`global@<workspace-slug>\` (lowercase letters, digits, dashes); list workspaces with \`blindkey workspaces\``,
+    );
+  }
+  return { kind: 'global', workspace };
+}
+
+/**
+ * `global` / `global@<ws>` target the top-level collection (with `?workspace=` when named); anything
+ * else is a project slug. `defaultWorkspace` fills in a bare `global` (see `BlindkeyClient.scoped`).
+ */
+export function scopedPath(target: string, kind: 'secrets' | 'docs', rest = '', defaultWorkspace?: string): string {
+  const t = parseTarget(target);
+  if (t.kind === 'project') return `/api/v1/projects/${seg(t.slug)}/${kind}${rest}`;
+  const workspace = t.workspace ?? defaultWorkspace;
+  return `/api/v1/${kind}${rest}${workspace ? `?workspace=${seg(workspace)}` : ''}`;
+}
+
+export interface ClientOptions {
+  /** Workspace for a bare `global` target (e.g. the bound project's); undefined = let the server decide. */
+  defaultWorkspace?: () => Promise<string | undefined>;
+}
+
+/** `scopedPath` with the client's default workspace applied to a bare `global` target. */
+export async function scopedFor(client: BlindkeyClient, target: string, kind: 'secrets' | 'docs', rest = ''): Promise<string> {
+  return scopedPath(target, kind, rest, target === 'global' ? await client.defaultWorkspace() : undefined);
 }
 
 export class BlindkeyClient {
   constructor(
     private readonly config: CliConfig,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly options: ClientOptions = {},
   ) {}
+
+  /** The workspace a bare `global` resolves to client-side, if any. */
+  async defaultWorkspace(): Promise<string | undefined> {
+    return this.options.defaultWorkspace ? await this.options.defaultWorkspace() : undefined;
+  }
 
   get url(): string {
     return this.config.url;

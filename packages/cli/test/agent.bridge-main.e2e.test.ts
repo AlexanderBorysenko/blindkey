@@ -95,6 +95,7 @@ describe('MCP bridge executable entry (packages/cli/src/agent/bridge-main.ts), r
         'create_project',
         'list_projects',
         'list_secrets',
+        'list_workspaces',
         'blindkey_bind',
         'blindkey_profiles',
         'blindkey_status',

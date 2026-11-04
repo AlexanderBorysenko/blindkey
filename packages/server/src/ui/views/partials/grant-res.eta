@@ -1,0 +1,56 @@
+<%
+  var r = it.r;
+  var groups = [];
+  if (r.type !== 'document') {
+    groups.push({ label: 'Protected', parent: 'protected.*', kids: [['protected.read', 'Read'], ['protected.write', 'Write']] });
+    groups.push({ label: 'Public', parent: 'public.*', kids: [['public.read', 'Read'], ['public.write', 'Write']] });
+    if (r.type === 'project') groups.push({ label: 'Docs', parent: 'docs.*', kids: [['docs.read', 'Read'], ['docs.write', 'Write']] });
+  }
+%>
+<div class="grant-res">
+  <div class="grant-row">
+    <label class="check"><input type="checkbox" name="access" value="<%= r.key %>"<%~ r.granted ? ' checked' : '' %> /> <span class="mono"><%= r.label %></span><small><%= r.kind %></small></label>
+  </div>
+  <fieldset class="perm-tree">
+    <legend>Permissions for <%= r.label %></legend>
+    <% if (r.type === 'document') { %>
+    <div class="perm-detail">
+      <div class="perm-children">
+        <label class="check"><input type="checkbox" name="<%= r.name %>" value="docs.read"<%~ r.has['docs.read'] ? ' checked' : '' %> /> Read</label>
+        <label class="check"><input type="checkbox" name="<%= r.name %>" value="docs.write"<%~ r.has['docs.write'] ? ' checked' : '' %> /> Write</label>
+      </div>
+    </div>
+    <% } else { %>
+    <div class="perm-all">
+      <label class="check"><input type="checkbox" name="<%= r.name %>" value="*" data-perm-all<%~ r.all ? ' checked' : '' %> /> All (*)</label>
+    </div>
+    <div class="perm-detail">
+      <% groups.forEach(function (g) { %>
+      <fieldset class="perm-group">
+        <legend class="sr-only"><%= g.label %></legend>
+        <label class="check"><input type="checkbox" name="<%= r.name %>" value="<%= g.parent %>" data-perm-parent<%~ r.has[g.kids[0][0]] && r.has[g.kids[1][0]] ? ' checked' : '' %> /> <%= g.label %></label>
+        <div class="perm-children">
+          <% g.kids.forEach(function (k) { %>
+          <label class="check"><input type="checkbox" name="<%= r.name %>" value="<%= k[0] %>" data-perm-child<%~ r.has[k[0]] ? ' checked' : '' %> /> <%= k[1] %></label>
+          <% }); %>
+        </div>
+      </fieldset>
+      <% }); %>
+      <div class="perm-group">
+        <label class="check"><input type="checkbox" name="<%= r.name %>" value="cli"<%~ r.has['cli'] ? ' checked' : '' %> /> CLI</label>
+        <p class="note">Lets this user run commands with the secret's values (blindkey secret exec / env / write) without showing them in the UI. The values do reach the user's machine.</p>
+      </div>
+    </div>
+    <% } %>
+  </fieldset>
+  <% if (r.children && r.children.length) { %>
+  <details class="grant-children"<%~ r.childrenOpen ? ' open' : '' %>>
+    <summary><%= r.children.length %> secrets and documents</summary>
+    <div class="grant-children-body">
+      <% r.children.forEach(function (c) { %>
+      <%~ include('./grant-res', { r: c }) %>
+      <% }); %>
+    </div>
+  </details>
+  <% } %>
+</div>

@@ -5,6 +5,8 @@ import type { SecretFieldMeta, SecretMeta } from '../repos/secrets.js';
 
 export interface PublicProject {
   slug: string;
+  /** Slug of the workspace the project lives in (workspace ids are never exposed). */
+  workspace: string;
   name: string;
   status: ProjectStatus;
   tags: string[];
@@ -12,8 +14,8 @@ export interface PublicProject {
   created_at: number;
   updated_at: number;
 }
-export function publicProject(p: ProjectRow): PublicProject {
-  return { slug: p.slug, name: p.name, status: p.status, tags: p.tags, summary: p.summary, created_at: p.created_at, updated_at: p.updated_at };
+export function publicProject(p: ProjectRow, workspace: string): PublicProject {
+  return { slug: p.slug, workspace, name: p.name, status: p.status, tags: p.tags, summary: p.summary, created_at: p.created_at, updated_at: p.updated_at };
 }
 
 export interface PublicDocSummary {
@@ -42,6 +44,14 @@ export interface PublicSecret {
   created_at: number;
   updated_at: number;
 }
-export function publicSecret(s: SecretMeta): PublicSecret {
-  return { name: s.name, description: s.description, tags: s.tags, fields: s.fields, created_at: s.created_at, updated_at: s.updated_at };
+/** `showValues` false drops the non-sensitive values too (the caller lacks `public.read`): keys and sensitivity stay. */
+export function publicSecret(s: SecretMeta, showValues = true): PublicSecret {
+  const fields = showValues ? s.fields : s.fields.map((f) => ({ key: f.key, sensitive: f.sensitive }));
+  return { name: s.name, description: s.description, tags: s.tags, fields, created_at: s.created_at, updated_at: s.updated_at };
+}
+
+export interface PublicWorkspace {
+  slug: string;
+  name: string;
+  role: 'owner' | 'member';
 }

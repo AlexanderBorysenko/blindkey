@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { ApiError, scopedPath, seg, type BlindkeyClient } from '../client.js';
+import { ApiError, scopedFor, seg, type BlindkeyClient } from '../client.js';
 import type { PublicSecret } from '../api-types.js';
 import { CliError, EXIT_REFUSED } from '../errors.js';
 import { table, type CommandResult } from '../output.js';
@@ -12,7 +12,7 @@ export interface SecretSetOptions {
 }
 
 export async function runSecretsList(client: BlindkeyClient, target: string): Promise<CommandResult> {
-  const secrets = await client.json<PublicSecret[]>('GET', scopedPath(target, 'secrets'));
+  const secrets = await client.json<PublicSecret[]>('GET', await scopedFor(client, target, 'secrets'));
   return {
     json: secrets,
     text: [
@@ -51,7 +51,7 @@ export async function runSecretGet(
       EXIT_REFUSED,
     );
   }
-  const value = await client.text('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields/${seg(field)}`));
+  const value = await client.text('GET', await scopedFor(client, target, 'secrets', `/${seg(name)}/fields/${seg(field)}`));
   return { json: { key: field, value }, text: value };
 }
 
@@ -90,13 +90,13 @@ export async function runSecretSet(
   const fieldInput = { key: field, value, ...(sensitive === undefined ? {} : { sensitive }) };
 
   try {
-    const secret = await client.json<PublicSecret>('PATCH', scopedPath(target, 'secrets', `/${seg(name)}`), {
+    const secret = await client.json<PublicSecret>('PATCH', await scopedFor(client, target, 'secrets', `/${seg(name)}`), {
       body: { fields: [fieldInput] },
     });
     return { json: secret, text: `updated ${target}/${secret.name} field "${field}"` };
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 404 || opts.create !== true) throw err;
-    const secret = await client.json<PublicSecret>('POST', scopedPath(target, 'secrets'), {
+    const secret = await client.json<PublicSecret>('POST', await scopedFor(client, target, 'secrets'), {
       body: { name, fields: [fieldInput] },
     });
     return { json: secret, text: `created ${target}/${secret.name} with field "${field}"` };

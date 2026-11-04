@@ -2,7 +2,7 @@
 // metadata and secret request links — the CLI counterparts of the MCP tools of the same purpose.
 import { secretRequestPath, type SecretFieldInput } from '@blindkey/shared';
 import type { BlindkeyClient } from '../client.js';
-import { ApiError, scopedPath, seg } from '../client.js';
+import { ApiError, parseTarget, scopedFor, seg } from '../client.js';
 import type { PublicProject } from '../api-types.js';
 import type { CommandResult } from '../output.js';
 import { CliError } from '../errors.js';
@@ -11,6 +11,8 @@ export interface ProjectCreateOptions {
   name: string;
   summary?: string;
   tags?: string;
+  /** Workspace slug (required only when you own several). */
+  workspace?: string;
 }
 
 function splitList(raw: string | undefined): string[] {
@@ -19,13 +21,19 @@ function splitList(raw: string | undefined): string[] {
 
 export async function runProjectsCreate(client: BlindkeyClient, slug: string, opts: ProjectCreateOptions): Promise<CommandResult> {
   const project = await client.json<PublicProject>('POST', '/api/v1/projects', {
-    body: { slug, name: opts.name, summary: opts.summary ?? '', tags: splitList(opts.tags) },
+    body: {
+      slug,
+      name: opts.name,
+      summary: opts.summary ?? '',
+      tags: splitList(opts.tags),
+      ...(opts.workspace ? { workspace: opts.workspace } : {}),
+    },
   });
   return { json: project, text: `created project ${project.slug} (${project.name})` };
 }
 
 export async function runDocsDelete(client: BlindkeyClient, target: string, doc: string): Promise<CommandResult> {
-  await client.empty('DELETE', scopedPath(target, 'docs', `/${seg(doc)}`));
+  await client.empty('DELETE', await scopedFor(client, target, 'docs', `/${seg(doc)}`));
   return { json: { deleted: doc, target }, text: `deleted ${target === 'global' ? '' : `${target}/`}${doc}` };
 }
 
@@ -38,7 +46,7 @@ export function parseFieldArg(raw: string): SecretFieldInput {
 
 async function secretExists(client: BlindkeyClient, target: string, name: string): Promise<boolean> {
   try {
-    await client.json('GET', scopedPath(target, 'secrets', `/${seg(name)}`));
+    await client.json('GET', await scopedFor(client, target, 'secrets', `/${seg(name)}`));
     return true;
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return false;
@@ -59,7 +67,7 @@ export async function runSecretsMeta(client: BlindkeyClient, target: string, nam
   // no check-then-write race.
   if (fields.length > 0) {
     try {
-      await client.json('POST', scopedPath(target, 'secrets'), {
+      await client.json('POST', await scopedFor(client, target, 'secrets'), {
         body: { name, description: opts.description ?? '', tags: tags ?? [], fields },
       });
       return { json: { created: name }, text: `created secret "${name}" (${fields.length} non-sensitive field(s))` };
@@ -67,7 +75,7 @@ export async function runSecretsMeta(client: BlindkeyClient, target: string, nam
       if (!(err instanceof ApiError && err.status === 409)) throw err;
     }
   }
-  await client.json('PATCH', scopedPath(target, 'secrets', `/${seg(name)}`), {
+  await client.json('PATCH', await scopedFor(client, target, 'secrets', `/${seg(name)}`), {
     body: {
       ...(opts.description !== undefined ? { description: opts.description } : {}),
       ...(tags !== undefined ? { tags } : {}),
@@ -91,8 +99,11 @@ export async function runSecretsRequest(client: BlindkeyClient, target: string, 
   ];
   if (keys.length === 0) throw new CliError('give at least one --key (sensitive) or --plain-key');
   const exists = await secretExists(client, target, name);
+  const t = parseTarget(target);
+  const workspace = t.kind === 'global' ? (t.workspace ?? (await client.defaultWorkspace())) : undefined;
   const url = `${client.url}${secretRequestPath({
-    project: target === 'global' ? null : target,
+    project: t.kind === 'project' ? t.slug : null,
+    workspace,
     name,
     exists,
     description: opts.description,

@@ -7,16 +7,17 @@ description: Use when working in a repo bound to a blindkey (Blindkey) project, 
 
 blindkey is a self-hosted server that holds, per project, **documents** (Markdown: architecture, deploy runbooks, conventions, client notes — the project's long-term memory) and **secrets** (named groups of fields such as `host`, `port`, `username`, `password`). This plugin gives you that context safely:
 
-- The SessionStart hook injects the bound project's summary, document index and secret names (sensitive fields marked `*`).
+- The SessionStart hook injects the bound project's summary, document index and secret names (sensitive fields marked `*`), plus the globals of that project's workspace (labelled with the workspace name). With no binding and several visible workspaces it lists them instead.
 - The `blindkey` MCP server (tools below) reads and writes docs and non-secret data.
 - The `blindkey` command (on the Bash PATH) runs things with secret values **substituted** — you never see a value.
 - A guard hook blocks commands that would print, read or exfiltrate secret values, tokens or blindkey's own state. If a command is denied, its reason names the safe alternative — use it; don't try to work around the guard.
 
 ## Data model
 
+- **Workspace** — a group of projects plus their shared (global) docs and secrets; users get access per workspace. Every project lives in exactly one workspace (`slug`, name, your role `owner|member`).
 - **Project** — `slug`, name, status (`active|paused|archived`), tags, summary.
 - **Document** — per project (or global), `slug`, title, category (`context|architecture|deploy|conventions|client|notes|guidelines`), Markdown body. Docs may reference secrets as `{{secret:Name}}` — never paste a value into a doc (the server rejects docs that look like they contain one).
-- **Secret** — per project (or global), a `name` with fields; each field is sensitive (value hidden) or not. Only these keys are non-sensitive by default: `host`, `port`, `url`, `username`, `database`, `public_key` — every other key (`password`, `account_id`, `api_key`, …) is sensitive. Global docs/secrets are visible to every project-scoped token.
+- **Secret** — per project (or global), a `name` with fields; each field is sensitive (value hidden) or not. Only these keys are non-sensitive by default: `host`, `port`, `url`, `username`, `database`, `public_key` — every other key (`password`, `account_id`, `api_key`, …) is sensitive. Global docs/secrets belong to a workspace and are visible to every project-scoped token in it.
 - **Binding** — this repo (git top level) → `{ profile, project }`, stored locally in the plugin data dir (never committed).
 - **Profile** — a named server URL (`prod`, `local`, …) with its agent token kept in the OS credential store.
 
@@ -25,7 +26,7 @@ blindkey is a self-hosted server that holds, per project, **documents** (Markdow
 1. Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.
 2. Use values only via `blindkey secret exec <target> "<name>" -- <cmd>` (env `BLINDKEY_<KEY>`), or `blindkey secret write|env --out <file>` for tools that need files; never read those files back.
 3. Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.
-4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret connection facts go into non-sensitive fields via `upsert_secret_meta` (`host`, `port`, `url`, `username`, `database`, `public_key` by default; any other non-credential key with `sensitive: false`). A new project you need → `create_project` (needs `projects:create`); it joins your token immediately.
+4. Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted (add `workspace: "<slug>"` when you can see several workspaces — `list_workspaces`); update project summary/tags with `update_project`; non-secret connection facts go into non-sensitive fields via `upsert_secret_meta` (`host`, `port`, `url`, `username`, `database`, `public_key` by default; any other non-credential key with `sensitive: false`). A new project you need → `create_project` (needs `projects:create`); it joins your token immediately.
 5. 401/expired → run `blindkey connect` (the user approves in the browser); 403 on a project → `blindkey connect` to widen.
 6. Never use curl against the Blindkey server; use MCP tools / the CLI.
 
@@ -36,20 +37,21 @@ Local (answered by the plugin itself):
 - `blindkey_bind(project, profile?)` — bind this repo to a project (same as `blindkey bind`).
 - `blindkey_profiles` — configured server profiles and the default.
 
-Server (proxied with the agent token; project defaults to global when omitted):
+Server (proxied with the agent token; `project` omitted = the globals of a workspace; the optional `workspace` slug picks which one — omit it when the bound project's workspace, or your only one, is meant, otherwise the server answers `workspace required`):
+- `list_workspaces` — visible workspaces: slug, name, role.
 - `list_projects`, `get_project(slug)`, `search(query)` — never searches secret values.
-- `list_documents(project?)`, `read_document(project?, slug)`, `write_document(project?, slug, title, category, body_md, force?)`.
-- `list_secrets(project?)` — names, field keys, sensitivity; never values.
-- `create_project(slug, name, status?, tags?, summary?)` — needs `projects:create`; the project is added to this token's projects at once (same session).
+- `list_documents(project?, workspace?)`, `read_document(project?, workspace?, slug)`, `write_document(project?, workspace?, slug, title, category, body_md, force?)`.
+- `list_secrets(project?, workspace?)` — names, field keys, sensitivity; never values.
+- `create_project(slug, name, workspace?, status?, tags?, summary?)` — needs `projects:create` and ownership of the workspace (`workspace` only needed if you own several); the project is added to this token's projects at once (same session).
 - `update_project(slug, name?, status?, tags?, summary?)`.
-- `upsert_secret_meta(project?, name, description?, tags?, fields?: [{key, value, sensitive?: false}])` — non-sensitive fields only: `host`, `port`, `url`, `username`, `database`, `public_key` by default, or any key passed with `sensitive: false` unless it looks like a credential (`pass`, `secret`, `token`, `key`, `salt`, `auth`, `private`, …) — that, and every sensitive field, is refused; use `secret_request_link` for it.
-- `secret_request_link(project?, name, description?, tags?, keys: [{key, sensitive}])` — a prefilled admin-UI link for the user. `sensitive: false` only takes effect for the non-sensitive keys above; any other key stays sensitive.
+- `upsert_secret_meta(project?, workspace?, name, description?, tags?, fields?: [{key, value, sensitive?: false}])` — non-sensitive fields only: `host`, `port`, `url`, `username`, `database`, `public_key` by default, or any key passed with `sensitive: false` unless it looks like a credential (`pass`, `secret`, `token`, `key`, `salt`, `auth`, `private`, …) — that, and every sensitive field, is refused; use `secret_request_link` for it.
+- `secret_request_link(project?, workspace?, name, description?, tags?, keys: [{key, sensitive}])` — a prefilled admin-UI link for the user. `sensitive: false` only takes effect for the non-sensitive keys above; any other key stays sensitive.
 
 There is deliberately no tool that returns a secret value.
 
 ## CLI (`blindkey`, agent mode)
 
-`<target>` is a project slug or `global`. Examples are the same in bash/zsh (macOS, Linux, Git Bash on Windows) and PowerShell unless shown separately.
+`<target>` is a project slug, `global` (the globals of the bound project's workspace; if no project is bound, of the only workspace you can see) or `global@<workspace-slug>` (a specific workspace — list them with `blindkey workspaces`). When several workspaces are visible and none can be inferred the server answers `workspace required`: retry with `global@<slug>`. Examples are the same in bash/zsh (macOS, Linux, Git Bash on Windows) and PowerShell unless shown separately.
 
 ```sh
 blindkey status                                  # profile, url, bound project, connected?
@@ -57,7 +59,9 @@ blindkey profile add prod https://blindkey.example.com
 blindkey profile list | use <name> | set-url <name> <url> | remove <name>
 blindkey connect [--profile prod]                # prints a URL + code; the user approves in the browser
 blindkey bind acme [--profile prod]              # bind this repo; `blindkey unbind` to undo
+blindkey workspaces                              # slug, name, role
 blindkey projects list | get acme
+blindkey secrets list global@team-a                 # globals of one workspace
 blindkey docs list acme ; blindkey docs get acme deploy
 blindkey secrets list acme                       # names/keys only
 blindkey search "staging database"
@@ -83,7 +87,7 @@ Never: `echo`/`printf`/`Write-Output` a `BLINDKEY_*` variable, run `env`/`printe
 
 ## Secret-request flow (a value you need doesn't exist yet)
 
-1. `list_secrets(project)` — confirm it's really missing (check global too).
+1. `list_secrets(project)` — confirm it's really missing (check the workspace's globals too).
 2. Store what isn't secret yourself: `upsert_secret_meta(project, "Postgres", description, fields: [{key: "host", value: "db.internal"}, {key: "port", value: "5432"}, {key: "username", value: "app"}, {key: "schema", value: "public", sensitive: false}])`. A credential-looking key (e.g. `password`, `api_token`) or a sensitive one is refused with "sensitive fields need secrets:write" — that is expected, not a scope problem; don't `blindkey connect` to widen, request it instead (step 3).
 3. `secret_request_link(project, "Postgres", description, keys: [{key: "password", sensitive: true}])` → give the user the link and say what to type there. Don't ask for the value in chat. (Keys other than the non-sensitive ones always come out sensitive; the user can untick one in the form if it isn't secret.)
 4. Wait for the user to say it's done, then `list_secrets(project)` to verify the field exists, then use it with `blindkey secret exec`.
@@ -100,6 +104,7 @@ After meaningful work — a new service, a changed deploy procedure, a decision 
 Servers, domains and cross-project conventions are **global** documents (listed under "Global documents" in the session context), e.g. `vps-1` for VPS #1, with credentials in the matching global secret.
 - Before touching a server: `read_document` (no `project`) and follow its conventions and "Connecting" section.
 - After changing it (new site, port, service, fix): `write_document` (no `project`) with the full updated body — update the relevant section and append a dated line to its change log. Never put a secret value in it; reference `{{secret:global/Name}}`.
+- Several workspaces each have their own globals: use `list_workspaces` and pass `workspace` to read or write the right set; `{{secret:global/Name}}` in a document resolves in the document's own workspace.
 - A new server gets its own global doc (category `deploy`) plus a global secret (`host`/`port`/`username`/`public_key` via `upsert_secret_meta`, the private key via `secret_request_link`).
 
 ## Troubleshooting
@@ -115,8 +120,8 @@ Servers, domains and cross-project conventions are **global** documents (listed 
 
 ## CLI equivalents (when the MCP tools are not loaded)
 
-- `blindkey projects create <slug> --name "<Name>" [--summary …] [--tags a,b]`
-- `blindkey docs delete <project|global-doc-slug> [doc]`
-- `blindkey secrets meta <project|global> "<Name>" --field key=value [--field …] [--description …] [--tags …]` (fields are sent as non-sensitive)
-- `blindkey secrets request <project|global> "<Name>" --key password [--plain-key host]` → prints the link for the user
+- `blindkey projects create <slug> --name "<Name>" [--summary …] [--tags a,b] [--workspace <slug>]`
+- `blindkey docs delete <project|global|global@ws|global-doc-slug> [doc]`
+- `blindkey secrets meta <project|global|global@ws> "<Name>" --field key=value [--field …] [--description …] [--tags …]` (fields are sent as non-sensitive)
+- `blindkey secrets request <project|global|global@ws> "<Name>" --key password [--plain-key host]` → prints the link for the user
 - `blindkey secret exec` masks only the secret's sensitive values in command output; non-sensitive ones (host, username) stay readable.

@@ -20,8 +20,7 @@ interface Selection {
 
 export function registerConnectRoutes(app: FastifyInstance, ctx: AppContext): void {
   const page = (req: FastifyRequest, code: string, error: string | null, status = 200, selected?: Selection) => {
-    requireAdmin(req);
-    const view = viewConnectRequest(ctx, code);
+    const view = viewConnectRequest(ctx, requireAdmin(req), code);
     // On a validation error the form is re-rendered with what the approver actually ticked
     // (Review: don't silently reset their selection back to the original request's checkboxes).
     const fallback: Selection | undefined =

@@ -185,6 +185,82 @@ ALTER TABLE api_tokens ADD COLUMN label TEXT;
 ALTER TABLE connect_requests ADD COLUMN approved_label TEXT;
 `,
   },
+  {
+    id: 7,
+    sql: `
+-- Multi-user + workspaces. The table keeps its old name \`admin\` (it now holds every user).
+ALTER TABLE admin ADD COLUMN is_super INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE admin ADD COLUMN disabled_at INTEGER;
+ALTER TABLE admin ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE workspaces (
+  id INTEGER PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE workspace_owners (
+  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES admin(id) ON DELETE CASCADE,
+  PRIMARY KEY (workspace_id, user_id)
+);
+CREATE INDEX workspace_owners_user ON workspace_owners(user_id);
+
+ALTER TABLE projects ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id);
+ALTER TABLE secrets ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id);
+ALTER TABLE documents ADD COLUMN workspace_id INTEGER REFERENCES workspaces(id);
+CREATE INDEX projects_workspace ON projects(workspace_id);
+CREATE INDEX secrets_workspace ON secrets(workspace_id);
+CREATE INDEX documents_workspace ON documents(workspace_id);
+
+ALTER TABLE api_tokens ADD COLUMN user_id INTEGER REFERENCES admin(id) ON DELETE CASCADE;
+ALTER TABLE connect_requests ADD COLUMN approved_by_user_id INTEGER REFERENCES admin(id) ON DELETE SET NULL;
+ALTER TABLE sessions ADD COLUMN impersonator_id INTEGER REFERENCES admin(id) ON DELETE CASCADE;
+ALTER TABLE audit_log ADD COLUMN workspace_id INTEGER;
+
+-- Globals are unique per workspace, project items per project (replaces COALESCE(project_id, 0)).
+DROP INDEX secrets_project_name;
+DROP INDEX documents_project_slug;
+CREATE UNIQUE INDEX secrets_global_name ON secrets(workspace_id, name) WHERE project_id IS NULL;
+CREATE UNIQUE INDEX secrets_project_item_name ON secrets(project_id, name) WHERE project_id IS NOT NULL;
+CREATE UNIQUE INDEX documents_global_slug ON documents(workspace_id, slug) WHERE project_id IS NULL;
+CREATE UNIQUE INDEX documents_project_item_slug ON documents(project_id, slug) WHERE project_id IS NOT NULL;
+
+CREATE TABLE grants (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES admin(id) ON DELETE CASCADE,
+  target_type TEXT NOT NULL CHECK (target_type IN ('project', 'secret', 'document')),
+  target_id INTEGER NOT NULL,
+  perms TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, target_type, target_id)
+);
+CREATE INDEX grants_target ON grants(target_type, target_id);
+
+-- Row ids are reused (no AUTOINCREMENT): a stale grant would hand a later row with the same id to its old grantee.
+CREATE TRIGGER projects_grants_ad AFTER DELETE ON projects BEGIN
+  DELETE FROM grants WHERE target_type = 'project' AND target_id = old.id;
+END;
+CREATE TRIGGER secrets_grants_ad AFTER DELETE ON secrets BEGIN
+  DELETE FROM grants WHERE target_type = 'secret' AND target_id = old.id;
+END;
+CREATE TRIGGER documents_grants_ad AFTER DELETE ON documents BEGIN
+  DELETE FROM grants WHERE target_type = 'document' AND target_id = old.id;
+END;
+
+-- Data migration: one default workspace, every existing user is a super owning it, all data lands in it.
+INSERT INTO workspaces (slug, name, created_at, updated_at) VALUES
+  ('default', 'Default', CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+UPDATE admin SET is_super = 1;
+INSERT INTO workspace_owners (workspace_id, user_id) SELECT w.id, a.id FROM workspaces w CROSS JOIN admin a;
+UPDATE projects SET workspace_id = (SELECT id FROM workspaces WHERE slug = 'default');
+UPDATE secrets SET workspace_id = (SELECT id FROM workspaces WHERE slug = 'default');
+UPDATE documents SET workspace_id = (SELECT id FROM workspaces WHERE slug = 'default');
+UPDATE api_tokens SET user_id = (SELECT id FROM admin ORDER BY id LIMIT 1);
+UPDATE connect_requests SET approved_by_user_id = (SELECT id FROM admin ORDER BY id LIMIT 1);
+`,
+  },
 ];
 
 export function runMigrations(db: Database.Database): number {

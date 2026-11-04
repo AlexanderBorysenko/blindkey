@@ -17,6 +17,7 @@ export interface ConnectRequestRow {
   approved_project_ids: number[] | null;
   approved_expires_days: number | null;
   approved_label: string | null;
+  approved_by_user_id: number | null;
   ip: string;
   user_agent: string;
   created_at: number;
@@ -36,6 +37,7 @@ interface RawRow {
   approved_project_ids: string | null;
   approved_expires_days: number | null;
   approved_label: string | null;
+  approved_by_user_id: number | null;
   ip: string;
   user_agent: string;
   created_at: number;
@@ -43,7 +45,7 @@ interface RawRow {
 }
 
 const COLS =
-  'id, device_hash, user_code, name, scopes, projects, expires_days, status, approved_scopes, approved_project_ids, approved_expires_days, approved_label, ip, user_agent, created_at, expires_at';
+  'id, device_hash, user_code, name, scopes, projects, expires_days, status, approved_scopes, approved_project_ids, approved_expires_days, approved_label, approved_by_user_id, ip, user_agent, created_at, expires_at';
 
 function toRow(r: RawRow): ConnectRequestRow {
   return {
@@ -106,6 +108,8 @@ export function getConnectRequestByUserCode(db: Db, userCode: string): ConnectRe
 }
 
 export interface ApproveConnectRequestInput {
+  /** The user who approved: the issued token acts as them. */
+  userId: number;
   scopes: Scope[];
   projectIds: number[];
   expiresDays: number;
@@ -117,10 +121,10 @@ export function approveConnectRequest(db: Db, id: number, approved: ApproveConne
   return (
     db
       .prepare(
-        `UPDATE connect_requests SET status = 'approved', approved_scopes = ?, approved_project_ids = ?, approved_expires_days = ?, approved_label = ?
+        `UPDATE connect_requests SET status = 'approved', approved_scopes = ?, approved_project_ids = ?, approved_expires_days = ?, approved_label = ?, approved_by_user_id = ?
          WHERE id = ? AND status = 'pending'`,
       )
-      .run(JSON.stringify(approved.scopes), JSON.stringify(approved.projectIds), approved.expiresDays, approved.label ?? null, id).changes > 0
+      .run(JSON.stringify(approved.scopes), JSON.stringify(approved.projectIds), approved.expiresDays, approved.label ?? null, approved.userId, id).changes > 0
   );
 }
 
@@ -148,9 +152,9 @@ export function purgeExpiredConnectRequests(db: Db, nowTs: number = now()): numb
   return db.prepare(`DELETE FROM connect_requests WHERE expires_at <= ?`).run(nowTs).changes;
 }
 
-/** Approved device-flow requests the agent has not claimed yet (still within their TTL), oldest first. */
-export function listApprovedConnectRequests(db: Db, nowTs: number = now()): ConnectRequestRow[] {
+/** Approved device-flow requests (approved by `userId`) the agent has not claimed yet (still within their TTL), oldest first. */
+export function listApprovedConnectRequests(db: Db, userId: number, nowTs: number = now()): ConnectRequestRow[] {
   return (
-    db.prepare(`SELECT ${COLS} FROM connect_requests WHERE status = 'approved' AND expires_at > ? ORDER BY id`).all(nowTs) as RawRow[]
+    db.prepare(`SELECT ${COLS} FROM connect_requests WHERE status = 'approved' AND approved_by_user_id = ? AND expires_at > ? ORDER BY id`).all(userId, nowTs) as RawRow[]
   ).map(toRow);
 }

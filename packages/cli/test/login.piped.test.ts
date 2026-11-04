@@ -44,7 +44,7 @@ describe('blindkey login — piped (non-interactive) stdin', () => {
       await s.admin('jo', 'correct horse battery');
       const adminId = (s.db.prepare('SELECT id FROM admin WHERE username = ?').get('jo') as { id: number }).id;
       const ctx: AppContext = { db: s.db, ring: s.ring };
-      const actor: Actor = { principal: { kind: 'admin', id: adminId, scopes: ['admin'], projectIds: null }, ip: '1.1.1.1', userAgent: 't' };
+      const actor: Actor = { principal: { kind: 'admin', id: adminId, userId: adminId, isSuper: true, impersonatorId: null, scopes: ['admin'], projectIds: null, agent: false }, ip: '1.1.1.1', userAgent: 't' };
       startEnrollment(ctx, adminId);
       const enrollSecret = openTotpSecret(s.ring, getTotp(s.db, adminId)!);
       await confirmEnrollment(ctx, actor, hotp(enrollSecret, stepAt(Date.now())));

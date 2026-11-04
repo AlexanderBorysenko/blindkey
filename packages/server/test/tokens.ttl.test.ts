@@ -61,7 +61,7 @@ describe('created tokens', () => {
 
 describe('expired tokens', () => {
   it('get 401 token_expired, are audited, and do not trip the failure limiter', async () => {
-    const { token } = createToken(t.db, { name: 'old', scopes: ['projects:read'], projectIds: null, expiresAt: Date.now() - 1 });
+    const { token } = createToken(t.db, { userId: t.owner().id, name: 'old', scopes: ['projects:read'], projectIds: null, expiresAt: Date.now() - 1 });
     for (let i = 0; i < 25; i++) {
       const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth(token) });
       expect(res.statusCode).toBe(401);
@@ -73,7 +73,7 @@ describe('expired tokens', () => {
   });
 
   it('throttles: 3 uses of one expired token write exactly one auth.token_expired row, all 3 responses 401', async () => {
-    const { token, row } = createToken(t.db, { name: 'old-throttled', scopes: ['projects:read'], projectIds: null, expiresAt: Date.now() - 1 });
+    const { token, row } = createToken(t.db, { userId: t.owner().id, name: 'old-throttled', scopes: ['projects:read'], projectIds: null, expiresAt: Date.now() - 1 });
     for (let i = 0; i < 3; i++) {
       const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth(token) });
       expect(res.statusCode).toBe(401);

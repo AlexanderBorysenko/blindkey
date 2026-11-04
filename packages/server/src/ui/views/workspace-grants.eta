@@ -1,0 +1,36 @@
+<% var base = '/w/' + encodeURIComponent(it.workspace.slug); %>
+<p class="crumbs"><%= it.workspace.name %> / <a href="<%= base %>/members">Members</a> / <span class="current"><%= it.username %></span></p>
+<div class="page-head">
+  <div>
+    <h1>Access for <%= it.username %></h1>
+    <p class="lede">Tick what <%= it.username %> may use in <%= it.workspace.name %>. Anything left unticked is hidden from them.</p>
+  </div>
+</div>
+<% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+
+<form method="post" action="<%= base %>/members/<%= encodeURIComponent(it.username) %>" class="grant-editor">
+  <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+
+  <section class="grant-section">
+    <h2>Global documents</h2>
+    <% if (it.globalDocs.length === 0) { %><p class="note">None.</p><% } %>
+    <% it.globalDocs.forEach(function (r) { %><%~ include('partials/grant-res', { r: r }) %><% }); %>
+  </section>
+
+  <section class="grant-section">
+    <h2>Global secrets</h2>
+    <% if (it.globalSecrets.length === 0) { %><p class="note">None.</p><% } %>
+    <% it.globalSecrets.forEach(function (r) { %><%~ include('partials/grant-res', { r: r }) %><% }); %>
+  </section>
+
+  <section class="grant-section">
+    <h2>Projects</h2>
+    <% if (it.projects.length === 0) { %><p class="note">None.</p><% } %>
+    <% it.projects.forEach(function (r) { %><%~ include('partials/grant-res', { r: r }) %><% }); %>
+  </section>
+
+  <div class="save-bar">
+    <button class="btn primary" type="submit">Save access</button>
+    <a class="btn" href="<%= base %>/members">Cancel</a>
+  </div>
+</form>

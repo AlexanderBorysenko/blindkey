@@ -13,6 +13,7 @@ import { writeAudit } from '../../repos/audit.js';
 import { adminActor, requireAdmin, uiSessionId } from '../session.js';
 import { assertCsrf } from '../csrf.js';
 import { body, pageContext, str } from '../forms.js';
+import { assertNotImpersonating } from '../../services/common.js';
 import { renderPage } from '../render.js';
 
 type View =
@@ -49,12 +50,13 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
 
   app.post('/settings/2fa/start', limited, async (req, reply) => {
     assertCsrf(ctx, req);
-    startEnrollment(ctx, adminOf(req).id);
+    startEnrollment(ctx, adminOf(req).id, requireAdmin(req));
     return page(req, reply, await currentView(req), null);
   });
 
   app.post('/settings/2fa/confirm', limited, async (req, reply) => {
     assertCsrf(ctx, req);
+    assertNotImpersonating(requireAdmin(req));
     const codes = await confirmEnrollment(ctx, adminActor(req), str(body(req), 'code'), uiSessionId(req) ?? '');
     if (!codes) return page(req, reply, await currentView(req), 'Invalid code.', 400);
     return page(req, reply, { state: 'codes', codes }, null);
@@ -82,6 +84,7 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
 
   app.post('/settings/2fa/recovery', limited, async (req, reply) => {
     assertCsrf(ctx, req);
+    assertNotImpersonating(requireAdmin(req));
     if (!isTotpEnabled(ctx, adminOf(req).id)) return reply.redirect('/settings/2fa', 302);
     const failed = await reauth(req);
     if (failed) return page(req, reply, await currentView(req), failed.error, failed.status);
@@ -90,6 +93,7 @@ export function registerTwoFactorRoutes(app: FastifyInstance, ctx: AppContext): 
 
   app.post('/settings/2fa/disable', limited, async (req, reply) => {
     assertCsrf(ctx, req);
+    assertNotImpersonating(requireAdmin(req));
     if (!isTotpEnabled(ctx, adminOf(req).id)) return reply.redirect('/settings/2fa', 302);
     const failed = await reauth(req);
     if (failed) return page(req, reply, await currentView(req), failed.error, failed.status);

@@ -8,11 +8,12 @@ import {
 } from '../src/repos/secrets.js';
 import { ConflictError, CryptoError } from '../src/errors.js';
 import type { KeyRing } from '../src/config.js';
+import { homeId } from './helpers.js';
 
 function setup() {
   const db = openDb(':memory:');
   const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
-  const p = createProject(db, { slug: 'alpha', name: 'A', status: 'active', tags: [], summary: '' });
+  const p = createProject(db, { slug: 'alpha', name: 'A', status: 'active', tags: [], summary: '' }, homeId(db));
   return { db, ring, p };
 }
 const staging = { name: 'Staging server', description: 'ssh box', tags: ['ssh'], fields: [
@@ -50,8 +51,8 @@ describe('secrets repo', () => {
     const { db, ring, p } = setup();
     createSecret(db, ring, { projectId: p.id, ...staging });
     expect(() => createSecret(db, ring, { projectId: p.id, ...staging })).toThrow(ConflictError);
-    expect(createSecret(db, ring, { projectId: null, ...staging }).project_id).toBeNull();
-    expect(getSecretMeta(db, ring, null, 'Staging server')).not.toBeNull();
+    expect(createSecret(db, ring, { projectId: null, workspaceId: homeId(db), ...staging }).project_id).toBeNull();
+    expect(getSecretMeta(db, ring, null, 'Staging server', homeId(db))).not.toBeNull();
     expect(listSecrets(db, ring, p.id)).toHaveLength(1);
   });
   it('reveals fields', () => {
@@ -82,7 +83,7 @@ describe('secrets repo', () => {
   it('deletes and searches by name', () => {
     const { db, ring, p } = setup();
     createSecret(db, ring, { projectId: p.id, ...staging });
-    createSecret(db, ring, { projectId: null, name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
+    createSecret(db, ring, { projectId: null, workspaceId: homeId(db), name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
     expect(searchSecretNames(db, 'server', null).map((s) => s.name)).toEqual(['Staging server']);
     expect(searchSecretNames(db, 'git', [p.id]).map((s) => s.name)).toEqual(['GitHub PAT']);
     expect(searchSecretNames(db, 'server', [])).toEqual([]);
@@ -124,7 +125,7 @@ describe('secrets repo', () => {
     createSecret(db, ring, { projectId: p.id, ...staging });
     const keyB = randomBytes(32);
     const ring2: KeyRing = { current: 2, keys: new Map([[1, ring.keys.get(1)!], [2, keyB]]) };
-    createSecret(db, ring2, { projectId: null, name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
+    createSecret(db, ring2, { projectId: null, workspaceId: homeId(db), name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
 
     expect(secretKeyVersionReport(db, ring2)).toEqual([
       { version: 1, rows: 1, status: 'ok', ok: true },

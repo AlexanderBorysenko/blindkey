@@ -1,0 +1,20 @@
+<% if (it.access) { %>
+<fieldset class="access-field">
+  <legend>Access</legend>
+  <% if (it.access.members.length === 0) { %>
+  <p class="note">No other members in this workspace yet. Add people on the Members page.</p>
+  <% } else { %>
+  <% it.access.members.forEach(function (m) { %>
+  <label class="check"><input type="checkbox" name="access_user" value="<%= m %>" /> <%= m %></label>
+  <% }); %>
+  <label>Permissions for the ticked members
+    <select name="access_preset">
+      <% it.access.presets.forEach(function (p) { %>
+      <option value="<%= p.value %>"><%= p.label %></option>
+      <% }); %>
+    </select>
+  </label>
+  <% } %>
+  <p class="note">Workspace owners always have access.</p>
+</fieldset>
+<% } %>

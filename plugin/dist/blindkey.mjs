@@ -3420,6 +3420,9 @@ function describeError(status, body) {
       const path2 = (issue2.path ?? []).join(".") || "(root)";
       lines.push(`  ${path2}: ${issue2.message ?? "invalid"}`);
     }
+    if (status === 400 && body.issues.some((i) => i.message === "workspace required")) {
+      lines.push("  you can see several workspaces — name one with the target `global@<workspace-slug>` (list them with `blindkey workspaces`)");
+    }
   }
   return lines.join("\n");
 }
@@ -3436,17 +3439,40 @@ var ApiError = class extends CliError {
 function seg(value) {
   return encodeURIComponent(value);
 }
-function scopedPath(target, kind, rest = "") {
-  const base = target === "global" ? `/api/v1/${kind}` : `/api/v1/projects/${seg(target)}/${kind}`;
-  return `${base}${rest}`;
+var SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+function parseTarget(raw) {
+  if (raw !== "global" && !raw.startsWith("global@")) return { kind: "project", slug: raw };
+  if (raw === "global") return { kind: "global", workspace: null };
+  const workspace = raw.slice("global@".length);
+  if (!SLUG_RE.test(workspace)) {
+    throw new CliError(
+      `invalid target "${raw}" — expected \`global@<workspace-slug>\` (lowercase letters, digits, dashes); list workspaces with \`blindkey workspaces\``
+    );
+  }
+  return { kind: "global", workspace };
+}
+function scopedPath(target, kind, rest = "", defaultWorkspace) {
+  const t = parseTarget(target);
+  if (t.kind === "project") return `/api/v1/projects/${seg(t.slug)}/${kind}${rest}`;
+  const workspace = t.workspace ?? defaultWorkspace;
+  return `/api/v1/${kind}${rest}${workspace ? `?workspace=${seg(workspace)}` : ""}`;
+}
+async function scopedFor(client, target, kind, rest = "") {
+  return scopedPath(target, kind, rest, target === "global" ? await client.defaultWorkspace() : void 0);
 }
 var BlindkeyClient = class {
-  constructor(config2, fetchImpl = fetch) {
+  constructor(config2, fetchImpl = fetch, options = {}) {
     this.config = config2;
     this.fetchImpl = fetchImpl;
+    this.options = options;
   }
   config;
   fetchImpl;
+  options;
+  /** The workspace a bare `global` resolves to client-side, if any. */
+  async defaultWorkspace() {
+    return this.options.defaultWorkspace ? await this.options.defaultWorkspace() : void 0;
+  }
   get url() {
     return this.config.url;
   }
@@ -3723,6 +3749,13 @@ async function runProjectsList(client) {
       ["SLUG", "NAME", "STATUS", "TAGS", "UPDATED"],
       projects.map((p) => [p.slug, p.name, p.status, p.tags.join(","), fmtTime(p.updated_at)])
     )
+  };
+}
+async function runWorkspaces(client) {
+  const workspaces = await client.json("GET", "/api/v1/workspaces");
+  return {
+    json: workspaces,
+    text: table(["SLUG", "NAME", "ROLE"], workspaces.map((w) => [w.slug, w.name, w.role]))
   };
 }
 async function runProjectsGet(client, slug) {
@@ -23499,6 +23532,7 @@ var projectInputSchema = external_exports.strictObject({
   tags: tagsSchema.default([]),
   summary: external_exports.string().max(5e3).default("")
 });
+var projectCreateSchema = projectInputSchema.extend({ workspace: slugSchema.optional() });
 var projectPatchSchema = external_exports.strictObject({
   slug: slugSchema.optional(),
   name: external_exports.string().min(1).max(200).optional(),
@@ -23571,6 +23605,7 @@ function secretRequestPath(input2) {
   if (input2.description) qs.set("description", input2.description);
   if (input2.tags && input2.tags.length > 0) qs.set("tags", input2.tags.join(","));
   qs.set("keys", input2.keys.map((k) => k.sensitive || defaultSensitive(k.key) ? k.key : `${k.key}!`).join(","));
+  if (!input2.project && input2.workspace) qs.set("workspace", input2.workspace);
   const path2 = input2.exists ? `${prefix}/secrets/${encodeURIComponent(input2.name)}/edit` : `${prefix}/secrets/new`;
   return `${path2}?${qs.toString()}`;
 }
@@ -23580,14 +23615,14 @@ function resolveDocTarget(a, b) {
   return b === void 0 ? { target: "global", doc: a } : { target: a, doc: b };
 }
 async function runDocsList(client, target) {
-  const docs = await client.json("GET", scopedPath(target, "docs"));
+  const docs = await client.json("GET", await scopedFor(client, target, "docs"));
   return {
     json: docs,
     text: table(["SLUG", "TITLE", "CATEGORY", "UPDATED"], docs.map((d) => [d.slug, d.title, d.category, fmtTime(d.updated_at)]))
   };
 }
 async function runDocsGet(client, target, doc, opts) {
-  const result = await client.json("GET", scopedPath(target, "docs", `/${seg(doc)}`), {
+  const result = await client.json("GET", await scopedFor(client, target, "docs", `/${seg(doc)}`), {
     query: { resolve: opts.refs ? "meta" : void 0 }
   });
   let text = result.body_md;
@@ -23620,7 +23655,7 @@ async function runDocsPut(client, target, doc, opts) {
   } catch (err) {
     throw new CliError(`cannot read ${opts.file}: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const { status, data: saved } = await client.jsonStatus("PUT", scopedPath(target, "docs", `/${seg(doc)}`), {
+  const { status, data: saved } = await client.jsonStatus("PUT", await scopedFor(client, target, "docs", `/${seg(doc)}`), {
     body: { title: opts.title, category: opts.category, body_md, force: opts.force === true }
   });
   const created = status === 201;
@@ -23633,7 +23668,7 @@ async function runDocsPut(client, target, doc, opts) {
 // packages/cli/src/commands/secrets.ts
 import { readFileSync as readFileSync3 } from "node:fs";
 async function runSecretsList(client, target) {
-  const secrets = await client.json("GET", scopedPath(target, "secrets"));
+  const secrets = await client.json("GET", await scopedFor(client, target, "secrets"));
   return {
     json: secrets,
     text: [
@@ -23665,7 +23700,7 @@ async function runSecretGet(client, target, name, field, opts) {
       EXIT_REFUSED
     );
   }
-  const value = await client.text("GET", scopedPath(target, "secrets", `/${seg(name)}/fields/${seg(field)}`));
+  const value = await client.text("GET", await scopedFor(client, target, "secrets", `/${seg(name)}/fields/${seg(field)}`));
   return { json: { key: field, value }, text: value };
 }
 async function readStdin(stdin2) {
@@ -23693,13 +23728,13 @@ async function runSecretSet(client, target, name, field, opts, stdin2 = process.
   const sensitive = opts.sensitive === true ? true : opts.nonSensitive === true ? false : void 0;
   const fieldInput = { key: field, value, ...sensitive === void 0 ? {} : { sensitive } };
   try {
-    const secret = await client.json("PATCH", scopedPath(target, "secrets", `/${seg(name)}`), {
+    const secret = await client.json("PATCH", await scopedFor(client, target, "secrets", `/${seg(name)}`), {
       body: { fields: [fieldInput] }
     });
     return { json: secret, text: `updated ${target}/${secret.name} field "${field}"` };
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 404 || opts.create !== true) throw err;
-    const secret = await client.json("POST", scopedPath(target, "secrets"), {
+    const secret = await client.json("POST", await scopedFor(client, target, "secrets"), {
       body: { name, fields: [fieldInput] }
     });
     return { json: secret, text: `created ${target}/${secret.name} with field "${field}"` };
@@ -23819,9 +23854,9 @@ function spawnAndAwaitExit(bin, args, spawnOpts, attach, beforeExit) {
 async function runSecretExec(client, target, name, command, opts = {}) {
   const [bin, ...args] = command;
   if (!bin) throw new CliError('no command given — usage: blindkey secret exec <target> "<name>" -- <command...>');
-  const revealed = opts.agent ? await client.json("POST", scopedPath(target, "secrets", `/${seg(name)}/use`), {
+  const revealed = opts.agent ? await client.json("POST", await scopedFor(client, target, "secrets", `/${seg(name)}/use`), {
     body: { purpose: "exec" }
-  }) : await client.json("GET", scopedPath(target, "secrets", `/${seg(name)}/fields`));
+  }) : await client.json("GET", await scopedFor(client, target, "secrets", `/${seg(name)}/fields`));
   const env = buildEnv(revealed.fields, process.env, opts.agent === true);
   if (!opts.agent) {
     return await spawnAndAwaitExit(bin, args, { stdio: "inherit", env });
@@ -24007,7 +24042,7 @@ async function runSecretWrite(client, target, name, field, opts) {
   const absOut = guardAgentOut(opts.out, opts);
   let value;
   if (opts.agent) {
-    const revealed = await client.json("POST", scopedPath(target, "secrets", `/${seg(name)}/use`), {
+    const revealed = await client.json("POST", await scopedFor(client, target, "secrets", `/${seg(name)}/use`), {
       body: { purpose: "write", fields: [field] }
     });
     const fieldValue = revealed.fields[field];
@@ -24016,7 +24051,7 @@ async function runSecretWrite(client, target, name, field, opts) {
     }
     value = fieldValue;
   } else {
-    value = await client.text("GET", scopedPath(target, "secrets", `/${seg(name)}/fields/${seg(field)}`));
+    value = await client.text("GET", await scopedFor(client, target, "secrets", `/${seg(name)}/fields/${seg(field)}`));
   }
   writeSecretFile(opts.out, value, mode, opts.force === true);
   if (opts.agent && opts.dataDir) recordWritten(opts.dataDir, absOut);
@@ -24028,7 +24063,7 @@ async function runSecretWrite(client, target, name, field, opts) {
 async function runSecretEnv(client, target, name, opts) {
   const mode = parseMode(opts.mode);
   const absOut = guardAgentOut(opts.out, opts);
-  const revealed = opts.agent ? await client.json("POST", scopedPath(target, "secrets", `/${seg(name)}/use`), { body: { purpose: "env" } }) : await client.json("GET", scopedPath(target, "secrets", `/${seg(name)}/fields`));
+  const revealed = opts.agent ? await client.json("POST", await scopedFor(client, target, "secrets", `/${seg(name)}/use`), { body: { purpose: "env" } }) : await client.json("GET", await scopedFor(client, target, "secrets", `/${seg(name)}/fields`));
   const lines = [];
   for (const [key, value] of Object.entries(revealed.fields)) {
     if (value.includes("\n")) {
@@ -24053,12 +24088,18 @@ function splitList(raw) {
 }
 async function runProjectsCreate(client, slug, opts) {
   const project = await client.json("POST", "/api/v1/projects", {
-    body: { slug, name: opts.name, summary: opts.summary ?? "", tags: splitList(opts.tags) }
+    body: {
+      slug,
+      name: opts.name,
+      summary: opts.summary ?? "",
+      tags: splitList(opts.tags),
+      ...opts.workspace ? { workspace: opts.workspace } : {}
+    }
   });
   return { json: project, text: `created project ${project.slug} (${project.name})` };
 }
 async function runDocsDelete(client, target, doc) {
-  await client.empty("DELETE", scopedPath(target, "docs", `/${seg(doc)}`));
+  await client.empty("DELETE", await scopedFor(client, target, "docs", `/${seg(doc)}`));
   return { json: { deleted: doc, target }, text: `deleted ${target === "global" ? "" : `${target}/`}${doc}` };
 }
 function parseFieldArg(raw) {
@@ -24068,7 +24109,7 @@ function parseFieldArg(raw) {
 }
 async function secretExists(client, target, name) {
   try {
-    await client.json("GET", scopedPath(target, "secrets", `/${seg(name)}`));
+    await client.json("GET", await scopedFor(client, target, "secrets", `/${seg(name)}`));
     return true;
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return false;
@@ -24080,7 +24121,7 @@ async function runSecretsMeta(client, target, name, opts) {
   const tags = opts.tags === void 0 ? void 0 : splitList(opts.tags);
   if (fields.length > 0) {
     try {
-      await client.json("POST", scopedPath(target, "secrets"), {
+      await client.json("POST", await scopedFor(client, target, "secrets"), {
         body: { name, description: opts.description ?? "", tags: tags ?? [], fields }
       });
       return { json: { created: name }, text: `created secret "${name}" (${fields.length} non-sensitive field(s))` };
@@ -24088,7 +24129,7 @@ async function runSecretsMeta(client, target, name, opts) {
       if (!(err instanceof ApiError && err.status === 409)) throw err;
     }
   }
-  await client.json("PATCH", scopedPath(target, "secrets", `/${seg(name)}`), {
+  await client.json("PATCH", await scopedFor(client, target, "secrets", `/${seg(name)}`), {
     body: {
       ...opts.description !== void 0 ? { description: opts.description } : {},
       ...tags !== void 0 ? { tags } : {},
@@ -24104,8 +24145,11 @@ async function runSecretsRequest(client, target, name, opts) {
   ];
   if (keys.length === 0) throw new CliError("give at least one --key (sensitive) or --plain-key");
   const exists = await secretExists(client, target, name);
+  const t = parseTarget(target);
+  const workspace = t.kind === "global" ? t.workspace ?? await client.defaultWorkspace() : void 0;
   const url2 = `${client.url}${secretRequestPath({
-    project: target === "global" ? null : target,
+    project: t.kind === "project" ? t.slug : null,
+    workspace,
     name,
     exists,
     description: opts.description,
@@ -24446,6 +24490,8 @@ function keyringStore(dataDir, loader = defaultLoader(dataDir)) {
 function clientFrom(env = process.env) {
   return new BlindkeyClient(loadConfig(env));
 }
+var TARGET_HELP = `project slug, "global" (the bound project's workspace, else the only one you can see) or "global@<workspace-slug>"`;
+var DOC_TARGET_HELP = `${TARGET_HELP}; or, alone, the document slug for a global document`;
 var AGENT_REFUSED_MESSAGE = "not available to the Claude agent — ask the user";
 function buildProgram(opts = {}) {
   const agent = opts.agent === true;
@@ -24456,7 +24502,15 @@ function buildProgram(opts = {}) {
   const client = async () => {
     if (!agent) return clientFrom(env);
     const cfg = await resolveAgentConfig({ cwd, env, store, dataDir });
-    return new BlindkeyClient({ url: cfg.url, token: cfg.token });
+    const bound = cfg.project;
+    if (!bound) return new BlindkeyClient({ url: cfg.url, token: cfg.token });
+    const base = new BlindkeyClient({ url: cfg.url, token: cfg.token });
+    let inferred;
+    const defaultWorkspace = () => {
+      inferred ??= base.json("GET", `/api/v1/projects/${encodeURIComponent(bound)}`).then((p) => typeof p.workspace === "string" ? p.workspace : void 0).catch(() => void 0);
+      return inferred;
+    };
+    return new BlindkeyClient({ url: cfg.url, token: cfg.token }, fetch, { defaultWorkspace });
   };
   const refuseInAgentMode = () => {
     if (agent) throw new CliError(AGENT_REFUSED_MESSAGE, EXIT_REFUSED);
@@ -24476,61 +24530,64 @@ function buildProgram(opts = {}) {
   projects.command("get").argument("<slug>").option("--json", "raw JSON output").action(async (slug, opts2) => {
     emit(await runProjectsGet(await client(), slug), opts2.json === true);
   });
-  projects.command("create").argument("<slug>").requiredOption("--name <name>", "display name").option("--summary <text>", "one-paragraph summary").option("--tags <tags>", "comma-separated tags").option("--json", "raw JSON output").description("Create a project (admin or projects:create; an agent token gets it added to its projects)").action(async (slug, opts2) => {
+  projects.command("create").argument("<slug>").requiredOption("--name <name>", "display name").option("--summary <text>", "one-paragraph summary").option("--tags <tags>", "comma-separated tags").option("--workspace <slug>", "workspace to create it in (needed only if you own several)").option("--json", "raw JSON output").description("Create a project (admin or projects:create; an agent token gets it added to its projects)").action(async (slug, opts2) => {
     emit(await runProjectsCreate(await client(), slug, opts2), opts2.json === true);
+  });
+  program2.command("workspaces").option("--json", "raw JSON output").description("List the workspaces you can see (slug, name, role); use a slug as `global@<slug>`").action(async (opts2) => {
+    emit(await runWorkspaces(await client()), opts2.json === true);
   });
   program2.command("search").argument("<query>").option("--json", "raw JSON output").description("Search projects, documents and secret names (never values)").action(async (query, opts2) => {
     emit(await runSearch(await client(), query), opts2.json === true);
   });
   const docs = program2.command("docs").description("Documents (Markdown)");
-  docs.command("list").argument("[target]", 'project slug or "global"', "global").option("--json", "raw JSON output").action(async (target, opts2) => {
+  docs.command("list").argument("[target]", TARGET_HELP, "global").option("--json", "raw JSON output").action(async (target, opts2) => {
     emit(await runDocsList(await client(), target), opts2.json === true);
   });
-  docs.command("get").argument("<target>", "project slug, or the document slug for a global document").argument("[doc]", "document slug").option("--refs", "resolve {{secret:...}} references").option("--json", "raw JSON output").action(async (a, b, opts2) => {
+  docs.command("get").argument("<target>", DOC_TARGET_HELP).argument("[doc]", "document slug").option("--refs", "resolve {{secret:...}} references").option("--json", "raw JSON output").action(async (a, b, opts2) => {
     const { target, doc } = resolveDocTarget(a, b);
     emit(await runDocsGet(await client(), target, doc, { refs: opts2.refs }), opts2.json === true);
   });
-  docs.command("put").argument("<target>", "project slug, or the document slug for a global document").argument("[doc]", "document slug").requiredOption("--file <path>", "Markdown file to upload").requiredOption("--title <title>", "document title").requiredOption("--category <category>", "document category").option("--force", "save despite lint findings or unresolved refs").option("--json", "raw JSON output").action(
+  docs.command("put").argument("<target>", DOC_TARGET_HELP).argument("[doc]", "document slug").requiredOption("--file <path>", "Markdown file to upload").requiredOption("--title <title>", "document title").requiredOption("--category <category>", "document category").option("--force", "save despite lint findings or unresolved refs").option("--json", "raw JSON output").action(
     async (a, b, opts2) => {
       const { target, doc } = resolveDocTarget(a, b);
       emit(await runDocsPut(await client(), target, doc, opts2), opts2.json === true);
     }
   );
-  docs.command("delete").argument("<target>", "project slug, or the document slug for a global document").argument("[doc]", "document slug").option("--json", "raw JSON output").action(async (a, b, opts2) => {
+  docs.command("delete").argument("<target>", DOC_TARGET_HELP).argument("[doc]", "document slug").option("--json", "raw JSON output").action(async (a, b, opts2) => {
     const { target, doc } = resolveDocTarget(a, b);
     emit(await runDocsDelete(await client(), target, doc), opts2.json === true);
   });
   const secrets = program2.command("secrets").description("Secret metadata (never values)");
-  secrets.command("list", { isDefault: true }).argument("[target]", 'project slug or "global"', "global").option("--json", "raw JSON output").action(async (target, opts2) => {
+  secrets.command("list", { isDefault: true }).argument("[target]", TARGET_HELP, "global").option("--json", "raw JSON output").action(async (target, opts2) => {
     emit(await runSecretsList(await client(), target), opts2.json === true);
   });
   const collect = (v, prev = []) => [...prev, v];
-  secrets.command("meta").argument("<target>", 'project slug or "global"').argument("<name>", "secret name").option("--field <key=value>", "non-sensitive field (repeatable); credential-looking keys are refused", collect).option("--description <text>").option("--tags <tags>", "comma-separated tags").option("--json", "raw JSON output").description("Create a secret or patch its description/tags/non-sensitive fields (never sensitive values)").action(async (target, name, opts2) => {
+  secrets.command("meta").argument("<target>", TARGET_HELP).argument("<name>", "secret name").option("--field <key=value>", "non-sensitive field (repeatable); credential-looking keys are refused", collect).option("--description <text>").option("--tags <tags>", "comma-separated tags").option("--json", "raw JSON output").description("Create a secret or patch its description/tags/non-sensitive fields (never sensitive values)").action(async (target, name, opts2) => {
     emit(await runSecretsMeta(await client(), target, name, opts2), opts2.json === true);
   });
-  secrets.command("request").argument("<target>", 'project slug or "global"').argument("<name>", "secret name").option("--key <key>", "sensitive key the user fills in (repeatable)", collect).option("--plain-key <key>", "non-sensitive key the user fills in (repeatable)", collect).option("--description <text>").option("--tags <tags>", "comma-separated tags").option("--json", "raw JSON output").description("Print a prefilled admin-UI link where the user types the values in").action(async (target, name, opts2) => {
+  secrets.command("request").argument("<target>", TARGET_HELP).argument("<name>", "secret name").option("--key <key>", "sensitive key the user fills in (repeatable)", collect).option("--plain-key <key>", "non-sensitive key the user fills in (repeatable)", collect).option("--description <text>").option("--tags <tags>", "comma-separated tags").option("--json", "raw JSON output").description("Print a prefilled admin-UI link where the user types the values in").action(async (target, name, opts2) => {
     emit(await runSecretsRequest(await client(), target, name, opts2), opts2.json === true);
   });
   const secret = program2.command("secret").description("Consume a single secret");
-  secret.command("get", { hidden: agent }).argument("<target>", 'project slug or "global"').argument("<name>", "secret name").argument("<field>", "field key").option("--print", "print the value to stdout (refused without this flag)").option("--json", "raw JSON output").action(async (target, name, field, opts2) => {
+  secret.command("get", { hidden: agent }).argument("<target>", TARGET_HELP).argument("<name>", "secret name").argument("<field>", "field key").option("--print", "print the value to stdout (refused without this flag)").option("--json", "raw JSON output").action(async (target, name, field, opts2) => {
     refuseInAgentMode();
     emit(await runSecretGet(await client(), target, name, field, opts2), opts2.json === true);
   });
-  secret.command("set", { hidden: agent }).argument("<target>", 'project slug or "global"').argument("<name>", "secret name").argument("<field>", "field key").option("--from-file <path>", "read the value from a file instead of stdin").option("--sensitive", "mark the field sensitive").option("--non-sensitive", "mark the field non-sensitive").option("--create", "create the secret when it does not exist").option("--json", "raw JSON output").action(
+  secret.command("set", { hidden: agent }).argument("<target>", TARGET_HELP).argument("<name>", "secret name").argument("<field>", "field key").option("--from-file <path>", "read the value from a file instead of stdin").option("--sensitive", "mark the field sensitive").option("--non-sensitive", "mark the field non-sensitive").option("--create", "create the secret when it does not exist").option("--json", "raw JSON output").action(
     async (target, name, field, opts2) => {
       refuseInAgentMode();
       emit(await runSecretSet(await client(), target, name, field, opts2), opts2.json === true);
     }
   );
-  secret.command("write").argument("<target>", 'project slug or "global"').argument("<name>", "secret name").argument("<field>", "field key").requiredOption("--out <path>", "destination file").option("--mode <mode>", "octal file mode", "600").option("--force", "overwrite an existing file").option("--json", "raw JSON output").description("Write one field value to a file (never printed)").action(
+  secret.command("write").argument("<target>", TARGET_HELP).argument("<name>", "secret name").argument("<field>", "field key").requiredOption("--out <path>", "destination file").option("--mode <mode>", "octal file mode", "600").option("--force", "overwrite an existing file").option("--json", "raw JSON output").description("Write one field value to a file (never printed)").action(
     async (target, name, field, opts2) => {
       emit(await runSecretWrite(await client(), target, name, field, { ...opts2, agent, dataDir }), opts2.json === true);
     }
   );
-  secret.command("env").argument("<target>", 'project slug or "global"').argument("<name>", "secret name").requiredOption("--out <path>", "destination file").option("--mode <mode>", "octal file mode", "600").option("--force", "overwrite an existing file").option("--json", "raw JSON output").description("Write every field as key=value lines to a file (never printed)").action(async (target, name, opts2) => {
+  secret.command("env").argument("<target>", TARGET_HELP).argument("<name>", "secret name").requiredOption("--out <path>", "destination file").option("--mode <mode>", "octal file mode", "600").option("--force", "overwrite an existing file").option("--json", "raw JSON output").description("Write every field as key=value lines to a file (never printed)").action(async (target, name, opts2) => {
     emit(await runSecretEnv(await client(), target, name, { ...opts2, agent, dataDir }), opts2.json === true);
   });
-  secret.command("exec").argument("<target>", 'project slug or "global"').argument("<name>", "secret name").argument("<command...>", "command to run after --").description("Run a command with the secret fields injected as BLINDKEY_<KEY> environment variables").action(async (target, name, command) => {
+  secret.command("exec").argument("<target>", TARGET_HELP).argument("<name>", "secret name").argument("<command...>", "command to run after --").description("Run a command with the secret fields injected as BLINDKEY_<KEY> environment variables").action(async (target, name, command) => {
     process.exitCode = await runSecretExec(await client(), target, name, command, { agent });
   });
   secret.hook("preSubcommand", (_secret, subcommand) => {

@@ -1,14 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { openDb } from '../src/db/connection.js';
+import { openDb, type Db } from '../src/db/connection.js';
 import { createToken, findActiveTokenByValue, touchToken, listTokens, revokeToken } from '../src/repos/tokens.js';
 import { writeAudit, listAudit } from '../src/repos/audit.js';
 import { createAdmin, getAdmin, getAdminByUsername, createSession, getSession, deleteSession, purgeExpiredSessions } from '../src/repos/admin.js';
 import { ConflictError } from '../src/errors.js';
 
+/** The owner of tokens made in this file: the first user, created on demand. */
+const uid = (db: Db): number => (getAdmin(db) ?? createAdmin(db, 'owner', 'hash')).id;
+
 describe('tokens repo', () => {
   it('creates, finds by value, and hides hash', () => {
     const db = openDb(':memory:');
-    const { token, row } = createToken(db, { name: 'cc', scopes: ['docs:read'], projectIds: [1, 2], expiresAt: null });
+    const { token, row } = createToken(db, { userId: uid(db), name: 'cc', scopes: ['docs:read'], projectIds: [1, 2], expiresAt: null });
     expect(token).toMatch(/^bk_/);
     expect(row).not.toHaveProperty('token_hash');
     expect(row.project_ids).toEqual([1, 2]);
@@ -20,10 +23,10 @@ describe('tokens repo', () => {
   });
   it('rejects expired and revoked tokens', () => {
     const db = openDb(':memory:');
-    const t1 = createToken(db, { name: 'a', scopes: ['admin'], projectIds: null, expiresAt: 1000 });
+    const t1 = createToken(db, { userId: uid(db), name: 'a', scopes: ['admin'], projectIds: null, expiresAt: 1000 });
     expect(findActiveTokenByValue(db, t1.token, 999)).not.toBeNull();
     expect(findActiveTokenByValue(db, t1.token, 1000)).toBeNull();
-    const t2 = createToken(db, { name: 'b', scopes: ['admin'], projectIds: null, expiresAt: null });
+    const t2 = createToken(db, { userId: uid(db), name: 'b', scopes: ['admin'], projectIds: null, expiresAt: null });
     expect(revokeToken(db, t2.row.id)).toBe(true);
     expect(revokeToken(db, t2.row.id)).toBe(false);
     expect(findActiveTokenByValue(db, t2.token)).toBeNull();
@@ -31,7 +34,7 @@ describe('tokens repo', () => {
   });
   it('touches last_used_at', () => {
     const db = openDb(':memory:');
-    const { row } = createToken(db, { name: 'a', scopes: ['admin'], projectIds: null, expiresAt: null });
+    const { row } = createToken(db, { userId: uid(db), name: 'a', scopes: ['admin'], projectIds: null, expiresAt: null });
     touchToken(db, row.id, 12345);
     expect(listTokens(db)[0]?.last_used_at).toBe(12345);
   });

@@ -12,6 +12,14 @@ export function actorOf(req: FastifyRequest): Actor {
   return { principal: principalOf(req), ip: req.ip, userAgent: req.headers['user-agent'] ?? '' };
 }
 
+/** The optional `?workspace=<slug>` of a global route; a repeated or non-string value is a validation error. */
+export function workspaceParam(req: FastifyRequest): string | undefined {
+  const v = (req.query as { workspace?: unknown } | undefined)?.workspace;
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string' || v.length === 0) throw new ValidationError([{ path: ['workspace'], message: 'must be a workspace slug' }]);
+  return v;
+}
+
 export function parseBody<T>(schema: ZodType<T>, value: unknown): T {
   const r = schema.safeParse(value ?? {});
   if (!r.success) throw new ValidationError(r.error.issues);

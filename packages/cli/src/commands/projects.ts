@@ -1,6 +1,6 @@
 import type { BlindkeyClient } from '../client.js';
 import { seg } from '../client.js';
-import type { ProjectDetail, PublicProject, SearchResult } from '../api-types.js';
+import type { ProjectDetail, PublicProject, PublicWorkspace, SearchResult } from '../api-types.js';
 import { fmtTime, table, type CommandResult } from '../output.js';
 import { CliError, EXIT_AUTH } from '../errors.js';
 
@@ -12,6 +12,14 @@ export async function runProjectsList(client: BlindkeyClient): Promise<CommandRe
       ['SLUG', 'NAME', 'STATUS', 'TAGS', 'UPDATED'],
       projects.map((p) => [p.slug, p.name, p.status, p.tags.join(','), fmtTime(p.updated_at)]),
     ),
+  };
+}
+
+export async function runWorkspaces(client: BlindkeyClient): Promise<CommandResult> {
+  const workspaces = await client.json<PublicWorkspace[]>('GET', '/api/v1/workspaces');
+  return {
+    json: workspaces,
+    text: table(['SLUG', 'NAME', 'ROLE'], workspaces.map((w) => [w.slug, w.name, w.role])),
   };
 }
 

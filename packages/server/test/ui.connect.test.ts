@@ -70,7 +70,7 @@ describe('ui connect: GET /connect requires an admin session and preserves next 
   it('with 2FA on, next survives through the /login/2fa challenge and back', async () => {
     const t = await makeTestApp();
     const admin = createAdmin(t.db, 'alex', await hashPassword('pw'));
-    const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null, agent: false }, ip: '', userAgent: '' };
+    const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null, agent: false, userId: admin.id, isSuper: true, impersonatorId: null }, ip: '', userAgent: '' };
     startEnrollment(t.ctx, admin.id);
     const secret = () => openTotpSecret(t.ring, getTotp(t.db, admin.id)!);
     await confirmEnrollment(t.ctx, actor, hotp(secret(), stepAt(Date.now())));

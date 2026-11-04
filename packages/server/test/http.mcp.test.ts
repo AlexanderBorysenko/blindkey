@@ -62,6 +62,7 @@ describe('mcp', () => {
       'list_documents',
       'list_projects',
       'list_secrets',
+      'list_workspaces',
       'read_document',
       'search',
       'secret_request_link',
@@ -278,7 +279,7 @@ describe('mcp', () => {
     expect(existingUrl.pathname).toBe('/p/alpha/secrets/ExistingSecret/edit');
     expect(existingUrl.searchParams.get('keys')).toBe('password');
 
-    createSecret(t.db, t.ring, { projectId: null, name: 'GlobalExisting', description: '', tags: [], fields: [{ key: 'username', value: 'u' }] });
+    createSecret(t.db, t.ring, { projectId: null, workspaceId: t.workspaceId, name: 'GlobalExisting', description: '', tags: [], fields: [{ key: 'username', value: 'u' }] });
     const globalExistingLink = JSON.parse(
       textOf(await client.callTool({ name: 'secret_request_link', arguments: { name: 'GlobalExisting', keys: [{ key: 'password', sensitive: true }] } })),
     );

@@ -58,6 +58,11 @@ describe('plugin/dist is up to date with the sources', () => {
     expect(readdirSync(fresh).sort()).toEqual([...BUNDLES].sort());
   });
 
+  it('keeps the hook bundle small (no zod pulled in via @blindkey/shared)', () => {
+    // runs on every Bash call and session start: ~70 KB; importing the zod schemas made it ~757 KB
+    expect(readFileSync(join(fresh, 'hook.mjs')).length).toBeLessThan(200_000);
+  });
+
   it('keeps @napi-rs/keyring external (installed at runtime into the data dir)', () => {
     for (const name of BUNDLES) {
       const text = readFileSync(join(dist, name), 'utf8');

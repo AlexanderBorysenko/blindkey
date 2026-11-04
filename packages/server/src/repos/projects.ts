@@ -1,6 +1,7 @@
 import type { ProjectInput, ProjectPatch, ProjectStatus } from '@blindkey/shared';
 import type { Db } from '../db/connection.js';
 import { ConflictError, NotFoundError } from '../errors.js';
+import { getWorkspaceById } from './workspaces.js';
 import { inList, isUniqueViolation, now, parseJsonArray } from './util.js';
 
 export interface ProjectRow {
@@ -10,6 +11,7 @@ export interface ProjectRow {
   status: ProjectStatus;
   tags: string[];
   summary: string;
+  workspace_id: number;
   created_at: number;
   updated_at: number;
 }
@@ -21,6 +23,7 @@ interface RawProject {
   status: string;
   tags: string;
   summary: string;
+  workspace_id: number;
   created_at: number;
   updated_at: number;
 }
@@ -29,7 +32,7 @@ function toRow(r: RawProject): ProjectRow {
   return { ...r, status: r.status as ProjectStatus, tags: parseJsonArray<string>(r.tags) };
 }
 
-const COLS = 'id, slug, name, status, tags, summary, created_at, updated_at';
+const COLS = 'id, slug, name, status, tags, summary, workspace_id, created_at, updated_at';
 
 export function getProjectById(db: Db, id: number): ProjectRow | null {
   const r = db.prepare(`SELECT ${COLS} FROM projects WHERE id = ?`).get(id) as RawProject | undefined;
@@ -41,17 +44,55 @@ export function getProjectBySlug(db: Db, slug: string): ProjectRow | null {
   return r ? toRow(r) : null;
 }
 
-export function createProject(db: Db, input: ProjectInput): ProjectRow {
+/**
+ * Workspace for a new secret/document: a project item inherits its project's workspace, a global
+ * item needs the workspace it lives in.
+ */
+export function itemWorkspaceId(db: Db, projectId: number | null, workspaceId: number | undefined): number {
+  if (projectId !== null) {
+    const p = getProjectById(db, projectId);
+    if (!p) throw new NotFoundError('project not found');
+    return p.workspace_id;
+  }
+  return requireWorkspaceId(workspaceId);
+}
+
+/** A global item is addressed by workspace; callers must always say which. */
+export function requireWorkspaceId(workspaceId: number | undefined): number {
+  if (workspaceId === undefined) throw new Error('workspaceId is required for global secrets and documents');
+  return workspaceId;
+}
+
+export function createProject(db: Db, input: ProjectInput, workspaceId: number): ProjectRow {
+  requireWorkspaceId(workspaceId);
   const ts = now();
   try {
     const info = db
-      .prepare(`INSERT INTO projects (slug, name, status, tags, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(input.slug, input.name, input.status, JSON.stringify(input.tags), input.summary, ts, ts);
+      .prepare(`INSERT INTO projects (slug, name, status, tags, summary, workspace_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(input.slug, input.name, input.status, JSON.stringify(input.tags), input.summary, workspaceId, ts, ts);
     return getProjectById(db, Number(info.lastInsertRowid))!;
   } catch (err) {
     if (isUniqueViolation(err)) throw new ConflictError(`project slug "${input.slug}" already exists`);
     throw err;
   }
+}
+
+export function listProjectsInWorkspace(db: Db, workspaceId: number): ProjectRow[] {
+  const rows = db.prepare(`SELECT ${COLS} FROM projects WHERE workspace_id = ? ORDER BY name COLLATE NOCASE`).all(workspaceId) as RawProject[];
+  return rows.map(toRow);
+}
+
+/** Moves a project and every secret/document inside it to another workspace (grants are kept). */
+export function moveProject(db: Db, projectId: number, workspaceId: number): ProjectRow {
+  return db.transaction(() => {
+    if (!getProjectById(db, projectId)) throw new NotFoundError('project not found');
+    if (!getWorkspaceById(db, workspaceId)) throw new NotFoundError('workspace not found');
+    const ts = now();
+    db.prepare(`UPDATE projects SET workspace_id = ?, updated_at = ? WHERE id = ?`).run(workspaceId, ts, projectId);
+    db.prepare(`UPDATE secrets SET workspace_id = ? WHERE project_id = ?`).run(workspaceId, projectId);
+    db.prepare(`UPDATE documents SET workspace_id = ? WHERE project_id = ?`).run(workspaceId, projectId);
+    return getProjectById(db, projectId)!;
+  })();
 }
 
 export function listProjects(db: Db, projectIds: number[] | null): ProjectRow[] {

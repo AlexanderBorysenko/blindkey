@@ -1,5 +1,5 @@
 import type { AppContext } from '../http/context.js';
-import type { Actor } from '../auth/principal.js';
+import type { Actor, Principal } from '../auth/principal.js';
 import { ConflictError } from '../errors.js';
 import { hashPassword, verifyPassword } from '../crypto/passwords.js';
 import {
@@ -11,7 +11,7 @@ import {
 } from '../repos/twofactor.js';
 import { writeAudit } from '../repos/audit.js';
 import { deleteOtherSessions } from '../repos/admin.js';
-import { auditAs } from './common.js';
+import { assertNotImpersonating, auditAs } from './common.js';
 
 export const CHALLENGE_TTL_MS = 300_000;
 export const MAX_CHALLENGE_ATTEMPTS = 5;
@@ -25,7 +25,9 @@ export function isTotpEnabled(ctx: AppContext, adminId: number): boolean {
   return getTotp(ctx.db, adminId)?.enabled_at != null;
 }
 
-export function startEnrollment(ctx: AppContext, adminId: number): void {
+/** `principal`, when the call comes from a request, is refused while impersonating. */
+export function startEnrollment(ctx: AppContext, adminId: number, principal?: Principal): void {
+  if (principal) assertNotImpersonating(principal);
   if (isTotpEnabled(ctx, adminId)) throw new ConflictError('two-factor authentication is already on');
   savePendingTotp(ctx.db, ctx.ring, adminId, generateTotpSecret());
 }
@@ -48,6 +50,7 @@ async function newRecoveryCodes(ctx: AppContext, adminId: number): Promise<strin
  * enrolled), every other session of the admin is signed out (spec §2.3).
  */
 export async function confirmEnrollment(ctx: AppContext, actor: Actor, code: string, keepSessionId?: string): Promise<string[] | null> {
+  assertNotImpersonating(actor.principal);
   const adminId = actor.principal.id;
   const row = getTotp(ctx.db, adminId);
   if (!row || row.enabled_at !== null) return null;
@@ -108,12 +111,14 @@ export async function verifySecondFactor(ctx: AppContext, adminId: number, input
 }
 
 export async function regenerateRecoveryCodes(ctx: AppContext, actor: Actor): Promise<string[]> {
+  assertNotImpersonating(actor.principal);
   const codes = await newRecoveryCodes(ctx, actor.principal.id);
   auditAs(ctx, actor, { action: 'auth.recovery_regenerated' });
   return codes;
 }
 
 export function disableTwoFactor(ctx: AppContext, actor: Actor): void {
+  assertNotImpersonating(actor.principal);
   deleteTwoFactor(ctx.db, actor.principal.id);
   auditAs(ctx, actor, { action: 'auth.totp_disabled' });
 }

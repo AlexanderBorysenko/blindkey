@@ -28,6 +28,13 @@ export class ForbiddenError extends AppError {
   }
 }
 
+/** Visible to the caller but a permission is missing (an invisible resource is a NotFoundError instead). */
+export class PermissionError extends AppError {
+  constructor(permission: string) {
+    super(403, 'forbidden', `missing permission ${permission}`, { permission });
+  }
+}
+
 export class ValidationError extends AppError {
   constructor(issues: unknown) {
     super(400, 'validation', 'validation failed', { issues });

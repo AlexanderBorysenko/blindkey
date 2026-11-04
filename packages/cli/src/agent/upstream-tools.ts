@@ -8,6 +8,15 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
 export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
   {
+    "name": "list_workspaces",
+    "description": "List the workspaces visible to this token (slug, name, role owner|member).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
     "name": "list_projects",
     "description": "List projects visible to this token (slug, name, status, tags, summary).",
     "inputSchema": {
@@ -35,11 +44,15 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
   },
   {
     "name": "list_documents",
-    "description": "List documents of a project (or global documents when project is omitted).",
+    "description": "List documents of a project (or global documents of a workspace when project is omitted).",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "workspace": {
           "type": "string",
           "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
         }
@@ -54,6 +67,10 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
       "type": "object",
       "properties": {
         "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "workspace": {
           "type": "string",
           "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
         },
@@ -75,6 +92,10 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
       "type": "object",
       "properties": {
         "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "workspace": {
           "type": "string",
           "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
         },
@@ -135,11 +156,15 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
   },
   {
     "name": "list_secrets",
-    "description": "List secret metadata for a project (or global when project omitted): name, description, tags, field keys and non-sensitive values.",
+    "description": "List secret metadata for a project (or the globals of a workspace when project omitted): name, description, tags, field keys and non-sensitive values.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "workspace": {
           "type": "string",
           "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
         }
@@ -192,10 +217,14 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
   },
   {
     "name": "create_project",
-    "description": "Create a project. Requires projects:create. The new project is added to this token's projects immediately, so you can write its documents and secrets straight away.",
+    "description": "Create a project. Requires projects:create and ownership of the workspace (omit workspace only if you own exactly one). The new project is added to this token's projects immediately, so you can write its documents and secrets straight away.",
     "inputSchema": {
       "type": "object",
       "properties": {
+        "workspace": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
         "slug": {
           "type": "string",
           "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
@@ -236,11 +265,15 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
   },
   {
     "name": "upsert_secret_meta",
-    "description": "Create a secret (project omitted for global) or patch an existing one's description/tags/fields, by name. Requires secrets:meta-write. Fields may only be non-sensitive both before and after: keys that are non-sensitive by default (host, port, url, username, database, public_key), or any other key passed with sensitive:false unless it looks like a credential (pass, secret, token, key, salt, auth, private, ...). Creating or touching a sensitive field is refused with a 403; use secret_request_link instead so the user types the value in.",
+    "description": "Create a secret (project omitted for a workspace global) or patch an existing one's description/tags/fields, by name. Requires secrets:meta-write. Fields may only be non-sensitive both before and after: keys that are non-sensitive by default (host, port, url, username, database, public_key), or any other key passed with sensitive:false unless it looks like a credential (pass, secret, token, key, salt, auth, private, ...). Creating or touching a sensitive field is refused with a 403; use secret_request_link instead so the user types the value in.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "workspace": {
           "type": "string",
           "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
         },
@@ -301,6 +334,10 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
       "type": "object",
       "properties": {
         "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "workspace": {
           "type": "string",
           "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
         },

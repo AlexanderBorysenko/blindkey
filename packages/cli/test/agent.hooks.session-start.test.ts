@@ -224,8 +224,8 @@ describe('sessionContext — server down / unreachable', () => {
         return new Promise(() => {}); // never resolves
       };
       const run = await settledFlag(sessionContext({ cwd, dataDir, store: slowStore, fetchImpl: hangingFetch, timeoutMs: 500 }));
-      await vi.advanceTimersByTimeAsync(300); // store.get resolves; the fetches (project + global docs/secrets) start with 200ms left
-      expect(events).toEqual(['store.get', 'fetch', 'fetch', 'fetch']);
+      await vi.advanceTimersByTimeAsync(300); // store.get resolves; the fetches (project + workspaces) start with 200ms left
+      expect(events).toEqual(['store.get', 'fetch', 'fetch']);
       await vi.advanceTimersByTimeAsync(199);
       expect(run.done()).toBe(false);
       // At 500ms total the shared budget is spent. (Separate budgets would wait until 800ms.)
@@ -362,5 +362,58 @@ describe('sessionContext — global (shared) docs and secrets', () => {
     await store.set('work', s.token(['projects:read', 'docs:read', 'secrets:meta']));
     const context = await sessionContext({ cwd, dataDir, store });
     expect(context).not.toContain('Global (shared');
+  });
+});
+
+describe('sessionContext — globals per workspace', () => {
+  function twoWorkspaces(): void {
+    s.workspace('second', 'Second');
+    s.project('acme');
+    s.project('beta', 'second');
+    s.doc(null, 'default-guide', '# h', 'default');
+    s.doc(null, 'second-guide', '# s', 'second');
+    s.secret(null, 'Default VPS', [{ key: 'host', value: 'h.example' }], 'default');
+    s.secret(null, 'Second VPS', [{ key: 'host', value: 's.example' }], 'second');
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+  }
+  const scopes = ['projects:read', 'docs:read', 'secrets:meta'] as const;
+
+  it('bound: shows only the bound project workspace globals, labelled with its name', async () => {
+    twoWorkspaces();
+    saveBindings(dataDir, { [cwd]: { profile: 'work', project: 'beta' } });
+    await store.set('work', s.token([...scopes]));
+    const context = await sessionContext({ cwd, dataDir, store });
+    expect(context).toContain('Workspace: second');
+    expect(context).toContain('Global (shared across all projects of workspace "Second" (second)');
+    expect(context).toContain('second-guide');
+    expect(context).toContain('Second VPS (host)');
+    expect(context).not.toContain('default-guide');
+    expect(context).not.toContain('Default VPS');
+    expectGoldenRules(context);
+  });
+
+  it('unbound with two workspaces: lists them instead of assuming one global set', async () => {
+    twoWorkspaces();
+    await store.set('work', s.token([...scopes]));
+    const context = await sessionContext({ cwd, dataDir, store });
+    expect(context).toContain('not bound to a Blindkey project');
+    expect(context).toContain('Several workspaces');
+    expect(context).toContain('default — Default (owner)');
+    expect(context).toContain('second — Second (owner)');
+    expect(context).toContain('global@<slug>');
+    expect(context).not.toContain('Global documents:');
+    expect(context).not.toContain('default-guide');
+    expect(context.length).toBeLessThanOrEqual(4096);
+    expectGoldenRules(context);
+  });
+
+  it('unbound with a single workspace: shows its globals, labelled', async () => {
+    s.doc(null, 'only-guide', '# o');
+    saveProfiles(dataDir, { default: 'work', profiles: { work: { url: s.url } } });
+    await store.set('work', s.token([...scopes]));
+    const context = await sessionContext({ cwd, dataDir, store });
+    expect(context).toContain('of workspace "Default" (default)');
+    expect(context).toContain('only-guide');
+    expect(context).not.toContain('Several workspaces');
   });
 });

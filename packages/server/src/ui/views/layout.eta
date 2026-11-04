@@ -39,6 +39,15 @@
         </details>
       </div>
       <main class="main">
+        <% if (it.impersonating) { %>
+        <div class="alert warn impersonation-banner" role="status">
+          <span>Acting as <strong><%= it.me ? it.me.username : '' %></strong></span>
+          <form method="post" action="/impersonate/stop">
+            <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+            <button class="btn sm" type="submit">Stop</button>
+          </form>
+        </div>
+        <% } %>
         <% if (it.totpEnabled === false) { %>
         <div class="alert warn" role="status">Two-factor authentication is off. <a href="/settings/2fa">Set it up →</a></div>
         <% } %>

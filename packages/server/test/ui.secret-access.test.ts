@@ -37,7 +37,7 @@ beforeAll(async () => {
     tags: [],
     fields: [{ key: 'password', value: 'other-secret-value' }],
   });
-  createSecret(t.db, t.ring, { projectId: null, name: 'CliRefTest', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+  createSecret(t.db, t.ring, { projectId: null, workspaceId: t.workspaceId, name: 'CliRefTest', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
   csrf = csrfOf((await page('/p/acme')).body);
 });
 afterAll(async () => {
@@ -67,7 +67,7 @@ describe('secret page: recent access panel', () => {
   });
 
   it('(c) listAuditForTarget respects limit and order', async () => {
-    const secret = createSecret(t.db, t.ring, { projectId: null, name: 'AuditTarget', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const secret = createSecret(t.db, t.ring, { projectId: null, workspaceId: t.workspaceId, name: 'AuditTarget', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     const ids: number[] = [];
     for (let i = 0; i < 7; i++) {
       ids.push(writeAudit(t.db, { actor_type: 'admin', actor_id: 1, action: 'secret.reveal', target_type: 'secret', target_id: secret.id, field_key: 'k' }, 1_000 + i));
@@ -77,7 +77,7 @@ describe('secret page: recent access panel', () => {
   });
 
   it('(d) a token principal lacking admin scope is forbidden from recentSecretAccessFor', () => {
-    const principal: Principal = { kind: 'token', id: 1, scopes: ['secrets:meta'], projectIds: null, agent: false };
+    const principal: Principal = { kind: 'token', id: 1, userId: t.owner().id, isSuper: true, impersonatorId: null, scopes: ['secrets:meta'], projectIds: null, agent: false };
     expect(() => recentSecretAccessFor(t.ctx, principal, 'acme', 'DB')).toThrow(ForbiddenError);
   });
 
@@ -116,24 +116,26 @@ describe('secret page: recent access panel', () => {
     expect(appJs.body).toContain("querySelector('.field-value')");
   });
 
-  it('(i) cliRef is a runnable, POSIX single-quoted blindkey secret env command', async () => {
-    const projectPage = await page('/p/acme/secrets/DB');
-    expect(projectPage.body).toContain('blindkey secret env acme &#39;DB&#39; --out .env');
-
-    const globalPage = await page('/global/secrets/CliRefTest');
-    expect(globalPage.body).toContain('blindkey secret env global &#39;CliRefTest&#39; --out .env');
+  it('(i) the secret page no longer has the "Use without revealing" panel, but keeps recent access', async () => {
+    for (const url of ['/p/acme/secrets/DB', '/global/secrets/CliRefTest']) {
+      const res = await page(url);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).not.toContain('Use without revealing');
+      expect(res.body).not.toContain('blindkey secret env');
+      expect(res.body).toContain('Recent access');
+    }
   });
 
   it('(j) recent access is bound by the secret\'s created_at, so a reused row id does not show a deleted secret\'s history', () => {
     const nameA = 'ReuseA';
-    const secretA = createSecret(t.db, t.ring, { projectId: null, name: nameA, description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const secretA = createSecret(t.db, t.ring, { projectId: null, workspaceId: t.workspaceId, name: nameA, description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     // Written well before B can possibly exist, so a millisecond-resolution tie between A's
     // audit row and B's created_at can never make this row look "since" B's creation.
     writeAudit(t.db, { actor_type: 'admin', actor_id: 1, action: 'secret.reveal', target_type: 'secret', target_id: secretA.id, field_key: 'k' }, secretA.created_at - 5000);
-    deleteSecret(t.db, null, nameA);
+    deleteSecret(t.db, null, nameA, t.workspaceId);
 
     const nameB = 'ReuseB';
-    const secretB = createSecret(t.db, t.ring, { projectId: null, name: nameB, description: '', tags: [], fields: [{ key: 'k', value: 'v2' }] });
+    const secretB = createSecret(t.db, t.ring, { projectId: null, workspaceId: t.workspaceId, name: nameB, description: '', tags: [], fields: [{ key: 'k', value: 'v2' }] });
     if (secretB.id === secretA.id) {
       // secrets.id has no AUTOINCREMENT: deleting the newest row let the next insert reuse its id.
       expect(secretB.id).toBe(secretA.id);
@@ -143,7 +145,7 @@ describe('secret page: recent access panel', () => {
       writeAudit(t.db, { actor_type: 'admin', actor_id: 1, action: 'secret.reveal', target_type: 'secret', target_id: secretB.id, field_key: 'k' }, secretB.created_at - 1000);
     }
 
-    const principal: Principal = { kind: 'admin', id: 1, scopes: ['admin'], projectIds: null, agent: false };
+    const principal: Principal = { kind: 'admin', id: 1, userId: t.owner().id, isSuper: true, impersonatorId: null, scopes: ['admin'], projectIds: null, agent: false };
     const access = recentSecretAccessFor(t.ctx, principal, null, nameB);
     expect(access.length).toBe(0);
   });

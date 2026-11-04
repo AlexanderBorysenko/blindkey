@@ -27,7 +27,7 @@ beforeAll(async () => {
     tags: ['prod'],
     fields: [{ key: 'host', value: 'db.internal' }, { key: 'password', value: 'hunter2hunter2' }],
   });
-  createSecret(t.db, t.ring, { projectId: null, name: 'Cloudflare', description: '', tags: [], fields: [{ key: 'api_key', value: 'cf-key-value' }] });
+  createSecret(t.db, t.ring, { projectId: null, workspaceId: t.workspaceId, name: 'Cloudflare', description: '', tags: [], fields: [{ key: 'api_key', value: 'cf-key-value' }] });
   csrf = csrfOf((await page('/p/acme')).body);
 });
 afterAll(async () => {
@@ -46,7 +46,7 @@ describe('ui secret page', () => {
 
   it('lists global secrets and opens one without values', async () => {
     const list = await page('/global/secrets');
-    expect(list.body).toContain('href="/global/secrets/Cloudflare"');
+    expect(list.body).toContain('href="/global/secrets/Cloudflare?workspace=default"');
     const one = await page('/global/secrets/Cloudflare');
     expect(one.statusCode).toBe(200);
     expect(one.body).not.toContain('cf-key-value');

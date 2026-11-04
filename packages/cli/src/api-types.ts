@@ -2,6 +2,7 @@ import type { DocCategory, ProjectStatus, Scope } from '@blindkey/shared';
 
 export interface PublicProject {
   slug: string;
+  workspace?: string;
   name: string;
   status: ProjectStatus;
   tags: string[];
@@ -73,4 +74,10 @@ export interface SearchResult {
   projects?: PublicProject[];
   documents?: { project: string | null; slug: string; title: string; category: string; snippet: string }[];
   secrets?: { project: string | null; name: string; tags: string[] }[];
+}
+
+export interface PublicWorkspace {
+  slug: string;
+  name: string;
+  role: 'owner' | 'member';
 }

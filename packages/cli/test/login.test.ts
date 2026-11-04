@@ -107,7 +107,7 @@ describe('with 2FA', () => {
     await s2.admin('jo', 'correct horse battery');
     adminId = (s2.db.prepare('SELECT id FROM admin WHERE username = ?').get('jo') as { id: number }).id;
     const ctx: AppContext = { db: s2.db, ring: s2.ring };
-    const actor: Actor = { principal: { kind: 'admin', id: adminId, scopes: ['admin'], projectIds: null }, ip: '1.1.1.1', userAgent: 't' };
+    const actor: Actor = { principal: { kind: 'admin', id: adminId, userId: adminId, isSuper: true, impersonatorId: null, scopes: ['admin'], projectIds: null, agent: false }, ip: '1.1.1.1', userAgent: 't' };
     startEnrollment(ctx, adminId);
     const secret = openTotpSecret(s2.ring, getTotp(s2.db, adminId)!);
     await confirmEnrollment(ctx, actor, hotp(secret, stepAt(Date.now())));

@@ -11,13 +11,16 @@
     </div>
   </div>
   <div class="actions">
-    <button class="btn primary" type="button" data-open-dialog="edit-project">Edit project</button>
+    <% if (it.canEdit) { %><button class="btn primary" type="button" data-open-dialog="edit-project">Edit project</button><% } %>
+    <% if (it.canDelete || it.moveTargets.length) { %>
     <details class="menu">
       <summary class="btn ghost" aria-label="More actions">⋯</summary>
       <div class="menu-list">
-        <button class="btn ghost danger" type="button" data-open-dialog="delete-project">Delete project…</button>
+        <% if (it.moveTargets.length) { %><button class="btn ghost" type="button" data-open-dialog="move-item">Move to workspace…</button><% } %>
+        <% if (it.canDelete) { %><button class="btn ghost danger" type="button" data-open-dialog="delete-project">Delete project…</button><% } %>
       </div>
     </details>
+    <% } %>
   </div>
 </div>
 
@@ -27,12 +30,12 @@
 <% if (it.project.documents.length === 0) { %>
 <div class="empty">
   <p>No documents yet.</p>
-  <a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/new/edit">New document</a>
+  <% if (it.canCreateDoc) { %><a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/new/edit">New document</a><% } %>
 </div>
 <% } else { %>
 <div class="toolbar">
   <span></span>
-  <a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/new/edit"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New document</a>
+  <% if (it.canCreateDoc) { %><a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/docs/new/edit"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New document</a><% } %>
 </div>
 <div class="table-wrap">
   <table>
@@ -56,12 +59,12 @@
 <% if (it.project.secrets.length === 0) { %>
 <div class="empty">
   <p>No secrets yet.</p>
-  <a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/new">New secret</a>
+  <% if (it.canCreateSecret) { %><a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/new">New secret</a><% } %>
 </div>
 <% } else { %>
 <div class="toolbar">
   <span class="note"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg> Locked fields stay hidden until revealed; every reveal is audited.</span>
-  <a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/new"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New secret</a>
+  <% if (it.canCreateSecret) { %><a class="btn primary" href="/p/<%= encodeURIComponent(it.project.slug) %>/secrets/new"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New secret</a><% } %>
 </div>
 <div class="table-wrap">
   <table>
@@ -89,6 +92,7 @@
 <% } %>
 <% } %>
 
+<% if (it.canEdit) { %>
 <dialog class="confirm" id="edit-project">
   <h2>Edit project</h2>
   <form method="post" action="/p/<%= encodeURIComponent(it.project.slug) %>" class="form-grid">
@@ -109,7 +113,9 @@
     </div>
   </form>
 </dialog>
+<% } %>
 
+<% if (it.canDelete) { %>
 <dialog class="confirm" id="delete-project">
   <h2>Delete project</h2>
   <p>Delete <%= it.project.slug %>, its documents and its secrets? This cannot be undone.</p>
@@ -121,3 +127,6 @@
     </div>
   </form>
 </dialog>
+<% } %>
+
+<%~ include('partials/move-dialog', { targets: it.moveTargets, action: '/p/' + encodeURIComponent(it.project.slug) + '/move', csrf: it.csrf, ws: null, what: it.project.slug }) %>

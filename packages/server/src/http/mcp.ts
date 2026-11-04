@@ -2,16 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { DOC_CATEGORIES, PROJECT_STATUSES, projectInputSchema, secretRequestPath, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@blindkey/shared';
+import { DOC_CATEGORIES, PROJECT_STATUSES, projectCreateSchema, secretRequestPath, secretInputSchema, secretKeySchema, secretNameSchema, secretPatchSchema, slugSchema, tagsSchema, type Scope } from '@blindkey/shared';
 import type { AppContext } from './context.js';
 import { actorOf, originOf, parseBody } from './helpers.js';
 import { hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { AppError } from '../errors.js';
-import { createProjectFor, getProjectDetailFor, listProjectsFor, updateProjectFor } from '../services/projects.js';
+import { createProjectFor, getProjectDetailFor, listProjectsFor, listWorkspacesFor, updateProjectFor } from '../services/projects.js';
 import { listDocumentsFor, readDocumentFor, writeDocumentFor } from '../services/documents.js';
-import { createSecretFor, listSecretsFor, updateSecretFor } from '../services/secrets.js';
+import { createSecretFor, findVisibleSecretFor, listSecretsFor, resolveGlobalWorkspaceSlug, updateSecretFor } from '../services/secrets.js';
 import { loadProjectFor } from '../services/common.js';
-import { getSecretMeta } from '../repos/secrets.js';
 import { searchFor } from '../services/search.js';
 
 const INSTRUCTIONS = `blindkey stores project documentation and named secrets.
@@ -20,8 +19,10 @@ Values are consumed ONLY via the Blindkey CLI — never any other way:
   blindkey secret exec <project|global> "<name>" -- <command>   # fields injected as BLINDKEY_<KEY> env vars
   blindkey secret write <project|global> "<name>" <field> --out <path> --mode 600
   blindkey secret env <project|global> "<name>" --out .env
+Everything lives in a workspace. Tools that take "project" address the globals of a workspace when it is omitted; pass
+"workspace" (a slug from list_workspaces) to pick one — it may be left out when you can see only one.
 Documents reference secrets with {{secret:Name}}, {{secret:global/Name}} or {{secret:<project-slug>/Name}}. Never paste secret values into documents.
-create_project creates a project (needs projects:create); it is added to your own token's projects at once.
+create_project creates a project (needs projects:create and ownership of the workspace; pass "workspace" unless you own just one); it is added to your own token's projects at once.
 update_project changes name/status/tags/summary (needs projects:write). upsert_secret_meta creates or patches a
 secret's non-sensitive fields (needs secrets:meta-write); a field may be declared sensitive:false unless its key
 looks like a credential — anything sensitive is refused. To get a sensitive value
@@ -62,6 +63,12 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
   const p = actor.principal;
 
   server.registerTool(
+    'list_workspaces',
+    { description: 'List the workspaces visible to this token (slug, name, role owner|member).', inputSchema: {} },
+    async () => run(() => listWorkspacesFor(ctx, p)),
+  );
+
+  server.registerTool(
     'list_projects',
     { description: 'List projects visible to this token (slug, name, status, tags, summary).', inputSchema: {} },
     async () => run(() => listProjectsFor(ctx, p)),
@@ -75,17 +82,20 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
 
   server.registerTool(
     'list_documents',
-    { description: 'List documents of a project (or global documents when project is omitted).', inputSchema: { project: slugSchema.optional() } },
-    async ({ project }) => run(() => listDocumentsFor(ctx, p, project ?? null)),
+    {
+      description: 'List documents of a project (or global documents of a workspace when project is omitted).',
+      inputSchema: { project: slugSchema.optional(), workspace: slugSchema.optional() },
+    },
+    async ({ project, workspace }) => run(() => listDocumentsFor(ctx, p, project ?? null, workspace)),
   );
 
   server.registerTool(
     'read_document',
     {
       description: 'Read a Markdown document. Omit project for global documents (e.g. "guidelines"). Includes resolved secret refs (keys only).',
-      inputSchema: { project: slugSchema.optional(), slug: slugSchema },
+      inputSchema: { project: slugSchema.optional(), workspace: slugSchema.optional(), slug: slugSchema },
     },
-    async ({ project, slug }) => run(() => readDocumentFor(ctx, p, project ?? null, slug, true)),
+    async ({ project, workspace, slug }) => run(() => readDocumentFor(ctx, p, project ?? null, slug, true, workspace)),
   );
 
   server.registerTool(
@@ -94,6 +104,7 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
       description: 'Create or update a Markdown document. Rejected if it looks like it contains secret values or references unknown secrets; pass force=true to override.',
       inputSchema: {
         project: slugSchema.optional(),
+        workspace: slugSchema.optional(),
         slug: slugSchema,
         title: z.string().min(1).max(300),
         category: z.enum(DOC_CATEGORIES),
@@ -101,8 +112,8 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
         force: z.boolean().optional(),
       },
     },
-    async ({ project, slug, title, category, body_md, force }) =>
-      run(() => writeDocumentFor(ctx, actor, project ?? null, slug, { title, category, body_md, force: force ?? false })),
+    async ({ project, workspace, slug, title, category, body_md, force }) =>
+      run(() => writeDocumentFor(ctx, actor, project ?? null, slug, { title, category, body_md, force: force ?? false }, workspace)),
   );
 
   server.registerTool(
@@ -114,10 +125,10 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
   server.registerTool(
     'list_secrets',
     {
-      description: 'List secret metadata for a project (or global when project omitted): name, description, tags, field keys and non-sensitive values.',
-      inputSchema: { project: slugSchema.optional() },
+      description: 'List secret metadata for a project (or the globals of a workspace when project omitted): name, description, tags, field keys and non-sensitive values.',
+      inputSchema: { project: slugSchema.optional(), workspace: slugSchema.optional() },
     },
-    async ({ project }) => run(() => listSecretsFor(ctx, p, project ?? null)),
+    async ({ project, workspace }) => run(() => listSecretsFor(ctx, p, project ?? null, workspace)),
   );
 
   server.registerTool(
@@ -139,9 +150,10 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
     'create_project',
     {
       description:
-        'Create a project. Requires projects:create. The new project is added to this token\'s projects immediately, ' +
-        'so you can write its documents and secrets straight away.',
+        'Create a project. Requires projects:create and ownership of the workspace (omit workspace only if you own exactly one). ' +
+        'The new project is added to this token\'s projects immediately, so you can write its documents and secrets straight away.',
       inputSchema: {
+        workspace: slugSchema.optional(),
         slug: slugSchema,
         name: z.string().min(1).max(200),
         status: z.enum(PROJECT_STATUSES).optional(),
@@ -149,21 +161,22 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
         summary: z.string().max(5000).optional(),
       },
     },
-    async ({ slug, name, status, tags, summary }) =>
-      run(() => createProjectFor(ctx, actor, parseBody(projectInputSchema, { slug, name, status, tags, summary }))),
+    async ({ workspace, slug, name, status, tags, summary }) =>
+      run(() => createProjectFor(ctx, actor, parseBody(projectCreateSchema, { workspace, slug, name, status, tags, summary }))),
   );
 
   server.registerTool(
     'upsert_secret_meta',
     {
       description:
-        'Create a secret (project omitted for global) or patch an existing one\'s description/tags/fields, by name. ' +
+        'Create a secret (project omitted for a workspace global) or patch an existing one\'s description/tags/fields, by name. ' +
         'Requires secrets:meta-write. Fields may only be non-sensitive both before and after: keys that are non-sensitive ' +
         'by default (host, port, url, username, database, public_key), or any other key passed with sensitive:false ' +
         'unless it looks like a credential (pass, secret, token, key, salt, auth, private, ...). Creating or touching a ' +
         'sensitive field is refused with a 403; use secret_request_link instead so the user types the value in.',
       inputSchema: {
         project: slugSchema.optional(),
+        workspace: slugSchema.optional(),
         name: secretNameSchema,
         description: z.string().max(5000).optional(),
         tags: tagsSchema.optional(),
@@ -173,23 +186,23 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
           .optional(),
       },
     },
-    async ({ project, name, description, tags, fields }) =>
+    async ({ project, workspace, name, description, tags, fields }) =>
       run(() => {
-        const projectRow = project ? loadProjectFor(ctx, p, project) : null;
-        const existing = getSecretMeta(ctx.db, ctx.ring, projectRow?.id ?? null, name);
+        // A secret the caller cannot see counts as missing, so create-vs-update never reveals it.
+        const existing = findVisibleSecretFor(ctx, p, project ?? null, name, workspace);
         const fieldInputs = (fields ?? []).map((f) => ({ key: f.key, value: f.value, ...(f.sensitive === false ? { sensitive: false } : {}) }));
         if (!existing) {
           // Validated the same way the UI's create form is (min 1 field, unique keys, size caps):
           // a duplicate key or an empty field list comes back as a validation error, not "internal error".
           const input = parseBody(secretInputSchema, { name, description: description ?? '', tags: tags ?? [], fields: fieldInputs });
-          return createSecretFor(ctx, actor, project ?? null, input);
+          return createSecretFor(ctx, actor, project ?? null, input, workspace);
         }
         const patch = parseBody(secretPatchSchema, {
           ...(description !== undefined ? { description } : {}),
           ...(tags !== undefined ? { tags } : {}),
           ...(fieldInputs.length ? { fields: fieldInputs } : {}),
         });
-        return updateSecretFor(ctx, actor, project ?? null, name, patch);
+        return updateSecretFor(ctx, actor, project ?? null, name, patch, workspace);
       }),
   );
 
@@ -205,6 +218,7 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
         'Works with any secrets scope. Never returns or asks for a value.',
       inputSchema: {
         project: slugSchema.optional(),
+        workspace: slugSchema.optional(),
         name: secretNameSchema,
         description: z.string().max(5000).optional(),
         tags: tagsSchema.optional(),
@@ -214,12 +228,14 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
           .max(200),
       },
     },
-    async ({ project, name, description, tags, keys }) =>
+    async ({ project, workspace, name, description, tags, keys }) =>
       run(() => {
         assertAnySecretsScope(p);
-        const projectRow = project ? loadProjectFor(ctx, p, project) : null;
-        const existing = getSecretMeta(ctx.db, ctx.ring, projectRow?.id ?? null, name);
-        return { url: `${origin}${secretRequestPath({ project: project ?? null, name, exists: Boolean(existing), description, tags, keys })}` };
+        if (project) loadProjectFor(ctx, p, project);
+        const existing = findVisibleSecretFor(ctx, p, project ?? null, name, workspace);
+        // A global secret's link carries its workspace so the user lands in the right one.
+        const ws = project ? undefined : resolveGlobalWorkspaceSlug(ctx, p, workspace);
+        return { url: `${origin}${secretRequestPath({ project: project ?? null, workspace: ws, name, exists: Boolean(existing), description, tags, keys })}` };
       }),
   );
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ApiError, BlindkeyClient, scopedPath } from '../src/client.js';
+import { slugSchema } from '@blindkey/shared';
+import { ApiError, BlindkeyClient, SLUG_RE, scopedPath } from '../src/client.js';
 import type { PublicProject } from '../src/api-types.js';
 import { makeServer, type ServerFixture } from './helpers.js';
 
@@ -114,5 +115,12 @@ describe('BlindkeyClient', () => {
     const c = client(s.token(['docs:write']));
     await c.json('PUT', '/api/v1/docs/tmp-doc', { body: { title: 'T', category: 'notes', body_md: 'hi' } });
     await expect(c.empty('DELETE', '/api/v1/docs/tmp-doc')).resolves.toBeUndefined();
+  });
+});
+
+describe('SLUG_RE (zod-free copy of slugSchema, keeps the plugin hook small)', () => {
+  it('accepts and rejects exactly what the shared slugSchema does', () => {
+    const samples = ['a', 'a1', 'a-b', 'abc-123', 'x'.repeat(63), 'x'.repeat(64), '', '-a', 'a-', 'A', 'a_b', 'a b', 'ä', 'a--b', '0', 'default'];
+    for (const v of samples) expect(SLUG_RE.test(v), JSON.stringify(v)).toBe(slugSchema.safeParse(v).success);
   });
 });

@@ -4,15 +4,17 @@
   <div>
     <h1>Documents</h1>
   </div>
+  <% if (it.canCreateDoc) { %>
   <div class="actions">
-    <a class="btn primary" href="/global/docs/new/edit"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New document</a>
+    <a class="btn primary" href="/global/docs/new/edit<%= it.wsq %>"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg> New document</a>
   </div>
+  <% } %>
 </div>
 
 <% if (it.documents.length === 0) { %>
 <div class="empty">
   <p>No documents yet.</p>
-  <a class="btn primary" href="/global/docs/new/edit">New document</a>
+  <% if (it.canCreateDoc) { %><a class="btn primary" href="/global/docs/new/edit<%= it.wsq %>">New document</a><% } %>
 </div>
 <% } else { %>
 <div class="table-wrap">
@@ -22,7 +24,7 @@
       <% it.documents.forEach(function (d) { %>
       <tr>
         <td>
-          <a href="/global/docs/<%= encodeURIComponent(d.slug) %>"><%= d.title %></a><br />
+          <a href="/global/docs/<%= encodeURIComponent(d.slug) %><%= it.wsq %>"><%= d.title %></a><br />
           <small class="mono"><%= d.slug %></small>
         </td>
         <td><span class="tag"><%= d.category %></span></td>

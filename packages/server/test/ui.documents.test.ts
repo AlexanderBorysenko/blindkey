@@ -28,7 +28,7 @@ beforeAll(async () => {
     category: 'deploy',
     body_md: '# Deploy\n\nCredentials live in {{secret:DB}}.\n\n<img src=x onerror=alert(1)>\n',
   });
-  upsertDocument(t.db, { projectId: null, slug: 'guidelines', title: 'Guidelines', category: 'guidelines', body_md: '# Guidelines\n' });
+  upsertDocument(t.db, { projectId: null, workspaceId: t.workspaceId, slug: 'guidelines', title: 'Guidelines', category: 'guidelines', body_md: '# Guidelines\n' });
   upsertDocument(t.db, { projectId: id, slug: 'doomed', title: 'Doomed', category: 'notes', body_md: 'bye\n' });
   upsertDocument(t.db, {
     projectId: id,
@@ -105,7 +105,7 @@ describe('ui document view', () => {
   it('lists global documents and opens one', async () => {
     const list = await page('/global/docs');
     expect(list.statusCode).toBe(200);
-    expect(list.body).toContain('href="/global/docs/guidelines"');
+    expect(list.body).toContain('href="/global/docs/guidelines?workspace=default"');
     const doc = await page('/global/docs/guidelines');
     expect(doc.statusCode).toBe(200);
     expect(doc.body).toContain('<h1>Guidelines</h1>');

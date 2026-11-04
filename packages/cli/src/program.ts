@@ -10,7 +10,7 @@ import { loadConfig, normalizeUrl } from './config.js';
 import { CliError, EXIT_NOT_FOUND, EXIT_REFUSED } from './errors.js';
 import { emit, table } from './output.js';
 import { runLogin } from './commands/login.js';
-import { runProjectsGet, runProjectsList, runSearch } from './commands/projects.js';
+import { runProjectsGet, runProjectsList, runSearch, runWorkspaces } from './commands/projects.js';
 import { resolveDocTarget, runDocsGet, runDocsList, runDocsPut } from './commands/docs.js';
 import { runSecretGet, runSecretSet, runSecretsList } from './commands/secrets.js';
 import { runSecretExec } from './commands/exec.js';
@@ -28,6 +28,9 @@ export function clientFrom(env: NodeJS.ProcessEnv = process.env): BlindkeyClient
 }
 
 /** Not available to the Claude agent (spec §2.3): `login`, `secret get`, `secret set`, `token *`. */
+const TARGET_HELP = 'project slug, "global" (the bound project\'s workspace, else the only one you can see) or "global@<workspace-slug>"';
+const DOC_TARGET_HELP = `${TARGET_HELP}; or, alone, the document slug for a global document`;
+
 const AGENT_REFUSED_MESSAGE = 'not available to the Claude agent — ask the user';
 
 export interface ProgramOptions {
@@ -51,7 +54,20 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   const client = async (): Promise<BlindkeyClient> => {
     if (!agent) return clientFrom(env);
     const cfg = await resolveAgentConfig({ cwd, env, store, dataDir });
-    return new BlindkeyClient({ url: cfg.url, token: cfg.token });
+    const bound = cfg.project;
+    if (!bound) return new BlindkeyClient({ url: cfg.url, token: cfg.token });
+    // A bare `global` means the globals of the bound project's workspace. Looked up once, lazily; if the
+    // lookup fails the server decides (and says "workspace required" when that is ambiguous).
+    const base = new BlindkeyClient({ url: cfg.url, token: cfg.token });
+    let inferred: Promise<string | undefined> | undefined;
+    const defaultWorkspace = (): Promise<string | undefined> => {
+      inferred ??= base
+        .json<{ workspace?: string }>('GET', `/api/v1/projects/${encodeURIComponent(bound)}`)
+        .then((p) => (typeof p.workspace === 'string' ? p.workspace : undefined))
+        .catch(() => undefined);
+      return inferred;
+    };
+    return new BlindkeyClient({ url: cfg.url, token: cfg.token }, fetch, { defaultWorkspace });
   };
 
   const refuseInAgentMode = (): void => {
@@ -107,10 +123,19 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     .requiredOption('--name <name>', 'display name')
     .option('--summary <text>', 'one-paragraph summary')
     .option('--tags <tags>', 'comma-separated tags')
+    .option('--workspace <slug>', 'workspace to create it in (needed only if you own several)')
     .option('--json', 'raw JSON output')
     .description('Create a project (admin or projects:create; an agent token gets it added to its projects)')
-    .action(async (slug: string, opts: { name: string; summary?: string; tags?: string; json?: boolean }) => {
+    .action(async (slug: string, opts: { name: string; summary?: string; tags?: string; workspace?: string; json?: boolean }) => {
       emit(await runProjectsCreate(await client(), slug, opts), opts.json === true);
+    });
+
+  program
+    .command('workspaces')
+    .option('--json', 'raw JSON output')
+    .description('List the workspaces you can see (slug, name, role); use a slug as `global@<slug>`')
+    .action(async (opts: { json?: boolean }) => {
+      emit(await runWorkspaces(await client()), opts.json === true);
     });
 
   // Read-only and useful for the agent (spec §2.3 ruling), so available in both modes.
@@ -126,14 +151,14 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   const docs = program.command('docs').description('Documents (Markdown)');
   docs
     .command('list')
-    .argument('[target]', 'project slug or "global"', 'global')
+    .argument('[target]', TARGET_HELP, 'global')
     .option('--json', 'raw JSON output')
     .action(async (target: string, opts: { json?: boolean }) => {
       emit(await runDocsList(await client(), target), opts.json === true);
     });
   docs
     .command('get')
-    .argument('<target>', 'project slug, or the document slug for a global document')
+    .argument('<target>', DOC_TARGET_HELP)
     .argument('[doc]', 'document slug')
     .option('--refs', 'resolve {{secret:...}} references')
     .option('--json', 'raw JSON output')
@@ -143,7 +168,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     });
   docs
     .command('put')
-    .argument('<target>', 'project slug, or the document slug for a global document')
+    .argument('<target>', DOC_TARGET_HELP)
     .argument('[doc]', 'document slug')
     .requiredOption('--file <path>', 'Markdown file to upload')
     .requiredOption('--title <title>', 'document title')
@@ -163,7 +188,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
 
   docs
     .command('delete')
-    .argument('<target>', 'project slug, or the document slug for a global document')
+    .argument('<target>', DOC_TARGET_HELP)
     .argument('[doc]', 'document slug')
     .option('--json', 'raw JSON output')
     .action(async (a: string, b: string | undefined, opts: { json?: boolean }) => {
@@ -174,7 +199,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   const secrets = program.command('secrets').description('Secret metadata (never values)');
   secrets
     .command('list', { isDefault: true })
-    .argument('[target]', 'project slug or "global"', 'global')
+    .argument('[target]', TARGET_HELP, 'global')
     .option('--json', 'raw JSON output')
     .action(async (target: string, opts: { json?: boolean }) => {
       emit(await runSecretsList(await client(), target), opts.json === true);
@@ -182,7 +207,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   const collect = (v: string, prev: string[] = []) => [...prev, v];
   secrets
     .command('meta')
-    .argument('<target>', 'project slug or "global"')
+    .argument('<target>', TARGET_HELP)
     .argument('<name>', 'secret name')
     .option('--field <key=value>', 'non-sensitive field (repeatable); credential-looking keys are refused', collect)
     .option('--description <text>')
@@ -194,7 +219,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     });
   secrets
     .command('request')
-    .argument('<target>', 'project slug or "global"')
+    .argument('<target>', TARGET_HELP)
     .argument('<name>', 'secret name')
     .option('--key <key>', 'sensitive key the user fills in (repeatable)', collect)
     .option('--plain-key <key>', 'non-sensitive key the user fills in (repeatable)', collect)
@@ -209,7 +234,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
   const secret = program.command('secret').description('Consume a single secret');
   secret
     .command('get', { hidden: agent })
-    .argument('<target>', 'project slug or "global"')
+    .argument('<target>', TARGET_HELP)
     .argument('<name>', 'secret name')
     .argument('<field>', 'field key')
     .option('--print', 'print the value to stdout (refused without this flag)')
@@ -220,7 +245,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     });
   secret
     .command('set', { hidden: agent })
-    .argument('<target>', 'project slug or "global"')
+    .argument('<target>', TARGET_HELP)
     .argument('<name>', 'secret name')
     .argument('<field>', 'field key')
     .option('--from-file <path>', 'read the value from a file instead of stdin')
@@ -241,7 +266,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     );
   secret
     .command('write')
-    .argument('<target>', 'project slug or "global"')
+    .argument('<target>', TARGET_HELP)
     .argument('<name>', 'secret name')
     .argument('<field>', 'field key')
     .requiredOption('--out <path>', 'destination file')
@@ -256,7 +281,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     );
   secret
     .command('env')
-    .argument('<target>', 'project slug or "global"')
+    .argument('<target>', TARGET_HELP)
     .argument('<name>', 'secret name')
     .requiredOption('--out <path>', 'destination file')
     .option('--mode <mode>', 'octal file mode', '600')
@@ -268,7 +293,7 @@ export function buildProgram(opts: ProgramOptions = {}): Command {
     });
   secret
     .command('exec')
-    .argument('<target>', 'project slug or "global"')
+    .argument('<target>', TARGET_HELP)
     .argument('<name>', 'secret name')
     .argument('<command...>', 'command to run after --')
     .description('Run a command with the secret fields injected as BLINDKEY_<KEY> environment variables')

@@ -1,33 +1,71 @@
-import { defaultSensitive, secretLookingKey, urlWithPassword, type SecretInput, type SecretPatch } from '@blindkey/shared';
+import { defaultSensitive, PERMS, secretLookingKey, urlWithPassword, type Perm, type SecretInput, type SecretPatch } from '@blindkey/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
-import { AppError, ForbiddenError, NotFoundError } from '../errors.js';
-import type { ProjectRow } from '../repos/projects.js';
+import { accessFor, hasPerm, type Access } from '../auth/access.js';
+import { AppError, ForbiddenError, NotFoundError, PermissionError } from '../errors.js';
+import { getProjectBySlug, type ProjectRow } from '../repos/projects.js';
 import { createSecret, deleteSecret, getSecretMeta, listSecrets, revealAllFields, revealField, updateSecret, type SecretMeta } from '../repos/secrets.js';
 import { listAuditForTarget, type AuditRow } from '../repos/audit.js';
 import { publicSecret, type PublicSecret } from '../http/serialize.js';
-import { auditAs, loadProjectFor } from './common.js';
+import { auditAs } from './common.js';
 
-function scopeProject(ctx: AppContext, principal: Principal, projectSlug: string | null): ProjectRow | null {
-  return projectSlug === null ? null : loadProjectFor(ctx, principal, projectSlug);
+/** Where a call points: a project, or the globals of one workspace. Invisible projects/workspaces are a 404. */
+interface Target {
+  project: ProjectRow | null;
+  workspaceId: number;
 }
 
-function mustGet(ctx: AppContext, projectId: number | null, name: string): SecretMeta {
-  const s = getSecretMeta(ctx.db, ctx.ring, projectId, name);
-  if (!s) throw new NotFoundError('secret not found');
-  return s;
+function targetOf(ctx: AppContext, access: Access, projectSlug: string | null, workspaceSlug: string | null | undefined): Target {
+  if (projectSlug !== null) {
+    const project = access.project(getProjectBySlug(ctx.db, projectSlug));
+    return { project, workspaceId: project.workspace_id };
+  }
+  return { project: null, workspaceId: access.resolveGlobalWorkspace(workspaceSlug).id };
 }
 
-export function listSecretsFor(ctx: AppContext, principal: Principal, projectSlug: string | null): PublicSecret[] {
+function lookup(ctx: AppContext, t: Target, name: string): SecretMeta | null {
+  return getSecretMeta(ctx.db, ctx.ring, t.project?.id ?? null, name, t.workspaceId);
+}
+
+/** The secret and the caller's effective perms on it; missing and invisible are the same 404. */
+function mustGet(ctx: AppContext, access: Access, t: Target, name: string): { secret: SecretMeta; perms: Perm[] } {
+  const secret = lookup(ctx, t, name);
+  if (!secret) throw new NotFoundError('secret not found');
+  return { secret, perms: access.secret(secret) };
+}
+
+/** Non-sensitive values show only with `public.read` and a token scope that reads secrets at all. */
+function showValues(principal: Principal, perms: readonly Perm[]): boolean {
+  return hasPerm(perms, 'public.read') && (hasScope(principal, 'secrets:meta') || hasScope(principal, 'secrets:reveal'));
+}
+
+/** Slug of the workspace a project-less call addresses (explicit, else inferred; 400 when ambiguous). */
+export function resolveGlobalWorkspaceSlug(ctx: AppContext, principal: Principal, workspaceSlug?: string | null): string {
+  return accessFor(ctx.db, principal).resolveGlobalWorkspace(workspaceSlug).slug;
+}
+
+/** The secret if it exists AND the caller may see it (else null) — callers must not tell the two apart. */
+export function findVisibleSecretFor(ctx: AppContext, principal: Principal, projectSlug: string | null, name: string, workspaceSlug?: string | null): SecretMeta | null {
+  const access = accessFor(ctx.db, principal);
+  const t = targetOf(ctx, access, projectSlug, workspaceSlug);
+  const secret = lookup(ctx, t, name);
+  return secret && access.secretVisible(secret) ? secret : null;
+}
+
+export function listSecretsFor(ctx: AppContext, principal: Principal, projectSlug: string | null, workspaceSlug?: string | null): PublicSecret[] {
   assertScope(principal, 'secrets:meta');
-  const project = scopeProject(ctx, principal, projectSlug);
-  return listSecrets(ctx.db, ctx.ring, project?.id ?? null).map(publicSecret);
+  const access = accessFor(ctx.db, principal);
+  const t = targetOf(ctx, access, projectSlug, workspaceSlug);
+  return listSecrets(ctx.db, ctx.ring, t.project?.id ?? null, t.workspaceId)
+    .filter((s) => access.secretVisible(s))
+    .map((s) => publicSecret(s, showValues(principal, access.secretPerms(s))));
 }
 
-export function getSecretFor(ctx: AppContext, principal: Principal, projectSlug: string | null, name: string): PublicSecret {
+export function getSecretFor(ctx: AppContext, principal: Principal, projectSlug: string | null, name: string, workspaceSlug?: string | null): PublicSecret {
   assertScope(principal, 'secrets:meta');
-  const project = scopeProject(ctx, principal, projectSlug);
-  return publicSecret(mustGet(ctx, project?.id ?? null, name));
+  const access = accessFor(ctx.db, principal);
+  const { secret, perms } = mustGet(ctx, access, targetOf(ctx, access, projectSlug, workspaceSlug), name);
+  return publicSecret(secret, showValues(principal, perms));
 }
 
 /**
@@ -40,37 +78,45 @@ export function getSecretFor(ctx: AppContext, principal: Principal, projectSlug:
  * secret's id can be reused by a later one, and without this bound the newer secret's page would
  * show its predecessor's audit rows (a history leak across reused ids).
  */
-export function recentSecretAccessFor(ctx: AppContext, principal: Principal, projectSlug: string | null, name: string, limit = 5): AuditRow[] {
+export function recentSecretAccessFor(ctx: AppContext, principal: Principal, projectSlug: string | null, name: string, limit = 5, workspaceSlug?: string | null): AuditRow[] {
   assertScope(principal, 'secrets:meta');
-  const project = scopeProject(ctx, principal, projectSlug);
-  const secret = mustGet(ctx, project?.id ?? null, name);
+  const access = accessFor(ctx.db, principal);
+  const { secret } = mustGet(ctx, access, targetOf(ctx, access, projectSlug, workspaceSlug), name);
   assertScope(principal, 'admin');
-  return listAuditForTarget(ctx.db, 'secret', secret.id, limit, secret.created_at);
+  // Super users see every row; everyone else only their own actions and those of workspaces they own.
+  const visibleTo = principal.isSuper ? undefined : { userId: principal.userId, ownedWorkspaceIds: access.ownedWorkspaceIds() };
+  return listAuditForTarget(ctx.db, 'secret', secret.id, limit, secret.created_at, visibleTo);
 }
 
-export function revealFieldFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, key: string): string {
+export function revealFieldFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, key: string, workspaceSlug?: string | null): string {
   if (!hasScope(actor.principal, 'secrets:meta') && !hasScope(actor.principal, 'secrets:reveal')) {
     throw new ForbiddenError('secrets:meta');
   }
-  const project = scopeProject(ctx, actor.principal, projectSlug);
-  const secret = mustGet(ctx, project?.id ?? null, name);
+  const access = accessFor(ctx.db, actor.principal);
+  const { secret, perms } = mustGet(ctx, access, targetOf(ctx, access, projectSlug, workspaceSlug), name);
   const field = secret.fields.find((f) => f.key === key);
   if (!field) throw new NotFoundError('field not found');
   assertScope(actor.principal, field.sensitive ? 'secrets:reveal' : 'secrets:meta');
+  const needed: Perm = field.sensitive ? 'protected.read' : 'public.read';
+  if (!hasPerm(perms, needed)) throw new PermissionError(needed);
   const value = revealField(ctx.db, ctx.ring, secret.id, key);
   if (value === null) throw new NotFoundError('field not found');
-  if (field.sensitive) auditAs(ctx, actor, { action: 'secret.reveal', target_type: 'secret', target_id: secret.id, field_key: key });
+  if (field.sensitive) auditAs(ctx, actor, { action: 'secret.reveal', target_type: 'secret', target_id: secret.id, workspace_id: secret.workspace_id, field_key: key });
   return value;
 }
 
-export function revealAllFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string): { name: string; fields: Record<string, string> } {
+export function revealAllFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, workspaceSlug?: string | null): { name: string; fields: Record<string, string> } {
   assertScope(actor.principal, 'secrets:reveal');
-  const project = scopeProject(ctx, actor.principal, projectSlug);
-  const secret = mustGet(ctx, project?.id ?? null, name);
+  const access = accessFor(ctx.db, actor.principal);
+  const { secret, perms } = mustGet(ctx, access, targetOf(ctx, access, projectSlug, workspaceSlug), name);
+  // Every field comes back, so both halves of the read permission are needed.
+  for (const needed of ['protected.read', 'public.read'] as const) {
+    if (!hasPerm(perms, needed)) throw new PermissionError(needed);
+  }
   const fields: Record<string, string> = {};
   for (const f of revealAllFields(ctx.db, ctx.ring, secret.id)) {
     fields[f.key] = f.value;
-    if (f.sensitive) auditAs(ctx, actor, { action: 'secret.reveal', target_type: 'secret', target_id: secret.id, field_key: f.key });
+    if (f.sensitive) auditAs(ctx, actor, { action: 'secret.reveal', target_type: 'secret', target_id: secret.id, workspace_id: secret.workspace_id, field_key: f.key });
   }
   return { name: secret.name, fields };
 }
@@ -80,7 +126,8 @@ export function revealAllFor(ctx: AppContext, actor: Actor, projectSlug: string 
  * to the caller (unlike `secrets:meta`), but only for `secrets:use` or `secrets:reveal` — an agent
  * token can hold `secrets:use` but never `secrets:reveal`, so this is the only way it ever sees a
  * value, and only for immediate substitution (exec/write/env), never surfaced via the reveal
- * endpoints (Review Focus 1: those still require `secrets:reveal`).
+ * endpoints (Review Focus 1: those still require `secrets:reveal`). The user behind the token
+ * needs the `cli` permission on the secret (or full read: protected.read + public.read).
  *
  * Audits one `secret.used` row per call with `{ purpose, fields: [keys], agent }` — never values.
  */
@@ -91,12 +138,14 @@ export function useSecretFor(
   name: string,
   purpose: 'exec' | 'write' | 'env',
   fields?: string[],
+  workspaceSlug?: string | null,
 ): { name: string; fields: Record<string, string>; sensitive: string[] } {
   if (!hasScope(actor.principal, 'secrets:use') && !hasScope(actor.principal, 'secrets:reveal')) {
     throw new ForbiddenError('secrets:use');
   }
-  const project = scopeProject(ctx, actor.principal, projectSlug);
-  const secret = mustGet(ctx, project?.id ?? null, name);
+  const access = accessFor(ctx.db, actor.principal);
+  const { secret, perms } = mustGet(ctx, access, targetOf(ctx, access, projectSlug, workspaceSlug), name);
+  if (!hasPerm(perms, 'cli') && !(hasPerm(perms, 'protected.read') && hasPerm(perms, 'public.read'))) throw new PermissionError('cli');
   const knownKeys = new Set(secret.fields.map((f) => f.key));
   const wanted = fields ?? secret.fields.map((f) => f.key);
   for (const key of wanted) {
@@ -105,7 +154,7 @@ export function useSecretFor(
   const values = new Map(revealAllFields(ctx.db, ctx.ring, secret.id).map((f) => [f.key, f.value]));
   const result: Record<string, string> = {};
   for (const key of wanted) result[key] = values.get(key)!;
-  auditAs(ctx, actor, { action: 'secret.used', target_type: 'secret', target_id: secret.id, meta: { purpose, fields: wanted, agent: actor.principal.agent } });
+  auditAs(ctx, actor, { action: 'secret.used', target_type: 'secret', target_id: secret.id, workspace_id: secret.workspace_id, meta: { purpose, fields: wanted, agent: actor.principal.agent } });
   // Which of the returned keys are sensitive, so a client redacts only those from command output.
   const sensitive = secret.fields.filter((f) => f.sensitive && wanted.includes(f.key)).map((f) => f.key);
   return { name: secret.name, fields: result, sensitive };
@@ -174,38 +223,57 @@ function assertMetaWritePatchAllowed(existing: SecretMeta, patch: SecretPatch): 
   }
 }
 
-export function createSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, input: SecretInput): PublicSecret {
-  const metaOnly = !hasScope(actor.principal, 'secrets:write');
-  if (metaOnly) {
-    assertScope(actor.principal, 'secrets:meta-write');
-    assertMetaWriteCreateAllowed(input);
-  }
-  const project = scopeProject(ctx, actor.principal, projectSlug);
-  const s = createSecret(ctx.db, ctx.ring, { ...input, projectId: project?.id ?? null });
-  auditAs(ctx, actor, { action: 'secret.create', target_type: 'secret', target_id: s.id, meta: { name: s.name, keys: s.fields.map((f) => f.key) } });
-  return publicSecret(s);
+/**
+ * How a write may proceed. Full (any field, sensitive included) needs the `secrets:write` scope AND
+ * `protected.write`; otherwise it is a meta write — scope `secrets:meta-write` (or `secrets:write`)
+ * plus `public.write` — and the sensitive-field guards above apply.
+ */
+function writeMode(principal: Principal, perms: readonly Perm[]): 'full' | 'meta' {
+  if (hasScope(principal, 'secrets:write') && hasPerm(perms, 'protected.write')) return 'full';
+  if (!hasScope(principal, 'secrets:meta-write') && !hasScope(principal, 'secrets:write')) throw new ForbiddenError('secrets:meta-write');
+  if (!hasPerm(perms, 'public.write')) throw new PermissionError('public.write');
+  return 'meta';
 }
 
-export function updateSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, patch: SecretPatch): PublicSecret {
-  const metaOnly = !hasScope(actor.principal, 'secrets:write');
-  if (metaOnly) assertScope(actor.principal, 'secrets:meta-write');
-  const project = scopeProject(ctx, actor.principal, projectSlug);
-  const existing = mustGet(ctx, project?.id ?? null, name);
-  if (metaOnly) assertMetaWritePatchAllowed(existing, patch);
+/** The scope half of a write, checked before anything is looked up (so a scope error never depends on the data). */
+function assertWriteScope(principal: Principal): void {
+  if (!hasScope(principal, 'secrets:meta-write') && !hasScope(principal, 'secrets:write')) throw new ForbiddenError('secrets:meta-write');
+}
+
+export function createSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, input: SecretInput, workspaceSlug?: string | null): PublicSecret {
+  assertWriteScope(actor.principal);
+  const access = accessFor(ctx.db, actor.principal);
+  const t = targetOf(ctx, access, projectSlug, workspaceSlug);
+  // A project secret needs a project-level grant; globals are created by workspace owners only.
+  const perms = t.project ? access.projectPerms(t.project) : access.owns(t.workspaceId) ? [...PERMS] : [];
+  if (writeMode(actor.principal, perms) === 'meta') assertMetaWriteCreateAllowed(input);
+  const s = createSecret(ctx.db, ctx.ring, { ...input, projectId: t.project?.id ?? null, workspaceId: t.workspaceId });
+  auditAs(ctx, actor, { action: 'secret.create', target_type: 'secret', target_id: s.id, workspace_id: s.workspace_id, meta: { name: s.name, keys: s.fields.map((f) => f.key) } });
+  return publicSecret(s, showValues(actor.principal, access.secretPerms(s)));
+}
+
+export function updateSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, patch: SecretPatch, workspaceSlug?: string | null): PublicSecret {
+  assertWriteScope(actor.principal);
+  const access = accessFor(ctx.db, actor.principal);
+  const { secret: existing, perms } = mustGet(ctx, access, targetOf(ctx, access, projectSlug, workspaceSlug), name);
+  if (writeMode(actor.principal, perms) === 'meta') assertMetaWritePatchAllowed(existing, patch);
   const s = updateSecret(ctx.db, ctx.ring, existing.id, patch);
   auditAs(ctx, actor, {
     action: 'secret.update',
     target_type: 'secret',
     target_id: s.id,
+    workspace_id: s.workspace_id,
     meta: { fields: patch.fields?.map((f) => f.key) ?? [], removed: patch.removeFields ?? [], meta: Object.keys(patch).filter((k) => k !== 'fields' && k !== 'removeFields') },
   });
-  return publicSecret(s);
+  return publicSecret(s, showValues(actor.principal, perms));
 }
 
-export function deleteSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string): void {
+export function deleteSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, workspaceSlug?: string | null): void {
   assertScope(actor.principal, 'secrets:write');
-  const project = scopeProject(ctx, actor.principal, projectSlug);
-  const existing = mustGet(ctx, project?.id ?? null, name);
-  deleteSecret(ctx.db, project?.id ?? null, name);
-  auditAs(ctx, actor, { action: 'secret.delete', target_type: 'secret', target_id: existing.id, meta: { name } });
+  const access = accessFor(ctx.db, actor.principal);
+  const t = targetOf(ctx, access, projectSlug, workspaceSlug);
+  const { secret: existing, perms } = mustGet(ctx, access, t, name);
+  if (!hasPerm(perms, 'protected.write')) throw new PermissionError('protected.write');
+  deleteSecret(ctx.db, t.project?.id ?? null, name, t.workspaceId);
+  auditAs(ctx, actor, { action: 'secret.delete', target_type: 'secret', target_id: existing.id, workspace_id: existing.workspace_id, meta: { name } });
 }

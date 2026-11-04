@@ -11,7 +11,8 @@ import { createToken } from '../../server/src/repos/tokens.js';
 import { createProject, getProjectBySlug } from '../../server/src/repos/projects.js';
 import { createSecret } from '../../server/src/repos/secrets.js';
 import { upsertDocument } from '../../server/src/repos/documents.js';
-import { createAdmin } from '../../server/src/repos/admin.js';
+import { createAdmin, getAdmin, setAdminPasswordHash } from '../../server/src/repos/admin.js';
+import { addOwner, createWorkspace, getWorkspaceBySlug } from '../../server/src/repos/workspaces.js';
 import { hashPassword } from '../../server/src/crypto/passwords.js';
 
 export interface ServerFixture {
@@ -19,10 +20,15 @@ export interface ServerFixture {
   db: Db;
   ring: KeyRing;
   token: (scopes: Scope[], projects?: string[] | null) => string;
-  project: (slug: string) => void;
-  secret: (project: string | null, name: string, fields: { key: string; value: string; sensitive?: boolean }[]) => void;
-  doc: (project: string | null, slug: string, body_md: string) => void;
+  /** Adds a workspace (the fixture owner owns it). Pass its slug as the trailing `workspace` argument below. */
+  workspace: (slug: string, name: string) => void;
+  /** `workspace` defaults to `default`; it only matters for projects and for globals (project = null). */
+  project: (slug: string, workspace?: string) => void;
+  secret: (project: string | null, name: string, fields: { key: string; value: string; sensitive?: boolean }[], workspace?: string) => void;
+  doc: (project: string | null, slug: string, body_md: string, workspace?: string) => void;
   admin: (username: string, password: string) => Promise<void>;
+  /** Id of the owner user (created on demand): tokens and approvals act as them. */
+  userId: () => number;
   close: () => Promise<void>;
 }
 
@@ -32,6 +38,10 @@ export async function makeServer(): Promise<ServerFixture> {
   const app = await buildApp({ db, ring, logLevel: 'silent' });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const { port } = app.server.address() as AddressInfo;
+  const workspaceId = getWorkspaceBySlug(db, 'default')!.id;
+  const owner = () => getAdmin(db) ?? createAdmin(db, 'fixture-owner', 'hash');
+  const wsId = (slug: string | undefined) => (slug === undefined ? workspaceId : getWorkspaceBySlug(db, slug)!.id);
+  const workspaceOf = (slug: string) => getProjectBySlug(db, slug)!.workspace_id;
   const idOf = (slug: string | null) => (slug === null ? null : getProjectBySlug(db, slug)!.id);
   return {
     url: `http://127.0.0.1:${port}`,
@@ -39,23 +49,36 @@ export async function makeServer(): Promise<ServerFixture> {
     ring,
     token: (scopes, projects = null) =>
       createToken(db, {
+        userId: owner().id,
         name: 'test',
         scopes,
         projectIds: projects === null ? null : projects.map((s) => getProjectBySlug(db, s)!.id),
         expiresAt: null,
       }).token,
-    project: (slug) => {
-      createProject(db, { slug, name: slug.toUpperCase(), status: 'active', tags: [], summary: '' });
+    workspace: (slug, name) => {
+      addOwner(db, createWorkspace(db, { slug, name }).id, owner().id);
     },
-    secret: (project, name, fields) => {
-      createSecret(db, ring, { projectId: idOf(project), name, description: '', tags: [], fields });
+    project: (slug, workspace) => {
+      createProject(db, { slug, name: slug.toUpperCase(), status: 'active', tags: [], summary: '' }, wsId(workspace));
     },
-    doc: (project, slug, body_md) => {
-      upsertDocument(db, { projectId: idOf(project), slug, title: slug, category: 'notes', body_md });
+    secret: (project, name, fields, workspace) => {
+      createSecret(db, ring, { projectId: idOf(project), workspaceId: project === null ? wsId(workspace) : workspaceOf(project), name, description: '', tags: [], fields });
+    },
+    doc: (project, slug, body_md, workspace) => {
+      upsertDocument(db, { projectId: idOf(project), workspaceId: project === null ? wsId(workspace) : workspaceOf(project), slug, title: slug, category: 'notes', body_md });
     },
     admin: async (username, password) => {
-      createAdmin(db, username, await hashPassword(password));
+      const hash = await hashPassword(password);
+      const existing = getAdmin(db);
+      if (!existing) {
+        createAdmin(db, username, hash);
+        return;
+      }
+      // A token fixture already created the owner: it becomes this admin (its tokens stay valid).
+      db.prepare(`UPDATE admin SET username = ? WHERE id = ?`).run(username, existing.id);
+      setAdminPasswordHash(db, existing.id, hash);
     },
+    userId: () => owner().id,
     close: async () => {
       await app.close();
     },

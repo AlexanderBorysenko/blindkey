@@ -107,6 +107,10 @@ export const projectInputSchema = z.strictObject({
 });
 export type ProjectInput = z.infer<typeof projectInputSchema>;
 
+/** Create body: the project plus the workspace it goes into (optional only when the caller owns exactly one). */
+export const projectCreateSchema = projectInputSchema.extend({ workspace: slugSchema.optional() });
+export type ProjectCreate = z.infer<typeof projectCreateSchema>;
+
 export const projectPatchSchema = z.strictObject({
   slug: slugSchema.optional(),
   name: z.string().min(1).max(200).optional(),

@@ -41,7 +41,7 @@ Blindkey also stores each project's documentation (architecture notes, runbooks,
 ```
 
 1. **Context.** At session start the Claude Code plugin loads the bound project's summary, document index and secret names into the session. Over MCP the agent can read and write docs and secret *metadata*.
-2. **Use by substitution.** `blindkey secret exec <project> "<name>" -- <cmd>` exposes each field as `BLINDKEY_<KEY>` to the child process only. `secret write` and `secret env` write a file (an SSH key, a `.env`) that the agent is then blocked from reading.
+2. **Use by substitution.** `blindkey secret exec <project|global|global@workspace> "<name>" -- <cmd>` exposes each field as `BLINDKEY_<KEY>` to the child process only. `secret write` and `secret env` write a file (an SSH key, a `.env`) that the agent is then blocked from reading.
 3. **Missing secrets.** When the agent needs a secret that doesn't exist, it sends you a prefilled link to the admin UI. You type the value there, never in chat.
 4. **Login.** An agent gets a token only after you approve it in the browser, and only for the projects you tick.
 
@@ -167,6 +167,17 @@ blindkey docs get acme deploy --refs          # shows which secrets the doc refe
 blindkey docs put acme deploy --file deploy.md --title "Deploy" --category deploy
 blindkey secrets list acme                    # names, field keys, sensitivity — never values
 blindkey search "staging database"
+blindkey workspaces                           # slug, name, role of every workspace you can see
+blindkey projects create acme --name "Acme" --workspace team-a   # --workspace only if you own several
+```
+
+Every command that takes a `<target>` accepts a project slug, `global`, or `global@<workspace-slug>`. Globals (shared docs and secrets) belong to a workspace: `global@team-a` addresses those of workspace `team-a`; a bare `global` means the bound project's workspace (agent mode, once the repo is bound), else the only workspace you can see. If several workspaces are visible and none can be inferred, the server answers `workspace required` and the CLI tells you to use `global@<workspace-slug>`.
+
+```bash
+blindkey docs list global@team-a
+blindkey docs get global@team-a guidelines
+blindkey secrets list global@team-a
+blindkey secret exec global@team-a "VPS" -- ssh "$BLINDKEY_HOST"
 ```
 
 Consuming secret values — none of these print the value:
@@ -307,6 +318,7 @@ Claude Code caches an installed plugin by its `version` (`plugin/.claude-plugin/
    - The CLI receives the token and stores it in the OS keychain. Claude never sees it.
    - Connecting again later widens the token's projects or renews it. It replaces the previous agent token with the same name.
 3. **Bind.** `/blindkey:bind acme` binds this repo (its git top level) to project `acme`. The next session starts with acme's context.
+   The session context also shows the globals of that project's workspace, labelled with the workspace name. A repo that isn't bound gets the list of visible workspaces instead; Claude picks one with the `workspace` argument of the MCP tools (`list_workspaces`) or the `global@<workspace>` CLI target.
 4. **Missing secrets.** When Claude needs a secret that doesn't exist, it gives you a prefilled link to the admin UI's secret form (`secret_request_link`). You type the values there, and Claude confirms with `list_secrets` and uses the secret via `blindkey secret exec`.
 
 `/blindkey:status` shows the profile, server, bound project and token state at any time.

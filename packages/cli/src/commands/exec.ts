@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess, type StdioOptions } from 'node:child_process';
-import { scopedPath, seg, type BlindkeyClient } from '../client.js';
+import { scopedFor, seg, type BlindkeyClient } from '../client.js';
 import type { RevealedFields } from '../api-types.js';
 import { CliError } from '../errors.js';
 import { createRedactor } from '../agent/redact.js';
@@ -85,10 +85,10 @@ export async function runSecretExec(
   if (!bin) throw new CliError('no command given — usage: blindkey secret exec <target> "<name>" -- <command...>');
 
   const revealed = opts.agent
-    ? await client.json<RevealedFields>('POST', scopedPath(target, 'secrets', `/${seg(name)}/use`), {
+    ? await client.json<RevealedFields>('POST', await scopedFor(client, target, 'secrets', `/${seg(name)}/use`), {
         body: { purpose: 'exec' },
       })
-    : await client.json<RevealedFields>('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields`));
+    : await client.json<RevealedFields>('GET', await scopedFor(client, target, 'secrets', `/${seg(name)}/fields`));
   const env = buildEnv(revealed.fields, process.env, opts.agent === true);
 
   if (!opts.agent) {

@@ -301,6 +301,7 @@ describe('device flow: approve then poll issues a token (spec §1.3)', () => {
     const t = await makeTestApp();
     const { session, csrf, userCode, deviceCode } = await setupApprovedPoll(t);
     const { row: oldAgent } = createToken(t.db, {
+      userId: t.owner().id,
       name: 'claude-prod@laptop',
       scopes: ['projects:read'],
       projectIds: null,
@@ -308,6 +309,7 @@ describe('device flow: approve then poll issues a token (spec §1.3)', () => {
       kind: 'agent',
     });
     const { row: userToken } = createToken(t.db, {
+      userId: t.owner().id,
       name: 'claude-prod@laptop',
       scopes: ['projects:read'],
       projectIds: null,

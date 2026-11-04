@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db/connection.js';
 import { createProject } from '../src/repos/projects.js';
 import { upsertDocument, getDocument, listDocuments, deleteDocument, searchDocuments, toFtsQuery } from '../src/repos/documents.js';
+import { homeId } from './helpers.js';
 
 function setup() {
   const db = openDb(':memory:');
-  const p = createProject(db, { slug: 'alpha', name: 'A', status: 'active', tags: [], summary: '' });
-  const q = createProject(db, { slug: 'beta', name: 'B', status: 'active', tags: [], summary: '' });
+  const p = createProject(db, { slug: 'alpha', name: 'A', status: 'active', tags: [], summary: '' }, homeId(db));
+  const q = createProject(db, { slug: 'beta', name: 'B', status: 'active', tags: [], summary: '' }, homeId(db));
   return { db, p, q };
 }
 
@@ -19,8 +20,8 @@ describe('documents repo', () => {
     expect(u.created).toBe(false);
     expect(u.doc.id).toBe(c.doc.id);
     expect(getDocument(db, p.id, 'context')?.body_md).toBe('v2');
-    upsertDocument(db, { projectId: null, slug: 'guidelines', title: 'G', category: 'guidelines', body_md: 'global' });
-    expect(getDocument(db, null, 'guidelines')?.body_md).toBe('global');
+    upsertDocument(db, { projectId: null, workspaceId: homeId(db), slug: 'guidelines', title: 'G', category: 'guidelines', body_md: 'global' });
+    expect(getDocument(db, null, 'guidelines', homeId(db))?.body_md).toBe('global');
     expect(getDocument(db, p.id, 'guidelines')).toBeNull();
   });
   it('lists summaries without body', () => {
@@ -40,7 +41,7 @@ describe('documents repo', () => {
     const { db, p, q } = setup();
     upsertDocument(db, { projectId: p.id, slug: 'a', title: 'Deploy', category: 'deploy', body_md: 'uses caddy for tls' });
     upsertDocument(db, { projectId: q.id, slug: 'b', title: 'Deploy', category: 'deploy', body_md: 'uses caddy too' });
-    upsertDocument(db, { projectId: null, slug: 'g', title: 'Guide', category: 'guidelines', body_md: 'caddy is the proxy' });
+    upsertDocument(db, { projectId: null, workspaceId: homeId(db), slug: 'g', title: 'Guide', category: 'guidelines', body_md: 'caddy is the proxy' });
     expect(searchDocuments(db, 'caddy', null)).toHaveLength(3);
     const scoped = searchDocuments(db, 'caddy', [p.id]);
     expect(scoped.map((h) => h.project_id).sort()).toEqual([null, p.id].sort());

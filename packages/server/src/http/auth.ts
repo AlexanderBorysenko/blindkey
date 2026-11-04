@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { AppError, UnauthorizedError } from '../errors.js';
 import type { Principal } from '../auth/principal.js';
 import { lookupTokenByValue, touchToken } from '../repos/tokens.js';
+import { getUserById } from '../repos/admin.js';
 import { writeAudit } from '../repos/audit.js';
 import { parseTokenPrefix } from '../crypto/tokens.js';
 import type { AppContext } from './context.js';
@@ -113,7 +114,19 @@ export function registerAuth(app: FastifyInstance, ctx: AppContext): void {
       throw new UnauthorizedError();
     }
     const row = found.row;
+    // A token acts as its owner: one whose owner is gone or disabled stops working at once.
+    const owner = row.user_id === null ? null : getUserById(ctx.db, row.user_id);
+    if (!owner || owner.disabled_at !== null) throw new UnauthorizedError();
     touchToken(ctx.db, row.id);
-    req.principal = { kind: 'token', id: row.id, scopes: row.scopes, projectIds: row.project_ids, agent: row.kind === 'agent' };
+    req.principal = {
+      kind: 'token',
+      id: row.id,
+      userId: owner.id,
+      isSuper: owner.is_super,
+      impersonatorId: null,
+      scopes: row.scopes,
+      projectIds: row.project_ids,
+      agent: row.kind === 'agent',
+    };
   });
 }

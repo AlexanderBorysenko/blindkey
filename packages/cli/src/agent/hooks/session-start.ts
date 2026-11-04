@@ -29,9 +29,9 @@ const MAX_LIST_ITEMS = 20;
 
 const GOLDEN_RULES = [
   'Never ask the user to paste a secret or token into chat; never print, echo, log, cat or base64 a secret.',
-  'Use values only via `blindkey secret exec <target> "<name>" -- <cmd>` (env BLINDKEY_<KEY>), or `blindkey secret write|env --out <file>` for tools that need files; never read those files back.',
+  'Use values only via `blindkey secret exec <target> "<name>" -- <cmd>` (env BLINDKEY_<KEY>; target = project slug, `global` or `global@<workspace>`), or `blindkey secret write|env --out <file>` for tools that need files; never read those files back.',
   'Missing secret → call `secret_request_link` and give the user the link; wait; verify with `list_secrets`.',
-  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted; update project summary/tags with `update_project`; non-secret facts go into non-sensitive fields via `upsert_secret_meta` (host, port, url, username, database, public_key, or any non-credential key with `sensitive: false`); credentials → `secret_request_link`; a new project → `create_project`.',
+  'Keep project docs current with `write_document` (architecture, runbooks, decisions — the project "memory"); shared infrastructure memory (servers, conventions) lives in global docs — read/write them with `project` omitted (plus `workspace` when several are visible — `list_workspaces`); update project summary/tags with `update_project`; non-secret facts go into non-sensitive fields via `upsert_secret_meta` (host, port, url, username, database, public_key, or any non-credential key with `sensitive: false`); credentials → `secret_request_link`; a new project → `create_project`.',
   '401/expired → run `blindkey connect` (the user approves in the browser); 403 on a project → `blindkey connect` to widen.',
   'Never use curl against the Blindkey server; use MCP tools / the CLI.',
 ] as const;
@@ -50,8 +50,14 @@ interface RemoteSecretSummary {
   name: string;
   fields: RemoteSecretField[];
 }
+interface RemoteWorkspace {
+  slug: string;
+  name: string;
+  role: string;
+}
 interface RemoteProjectDetail {
   slug: string;
+  workspace?: string;
   summary: string;
   tags: string[];
   documents: RemoteDocSummary[];
@@ -92,7 +98,13 @@ interface GlobalListing {
 }
 
 /** Global docs + secrets (shared across projects); a list that can't be fetched in time (or lacks scope) is empty. */
-async function fetchGlobals(url: string, token: string, deps: SessionStartDeps, deadline: number): Promise<GlobalListing> {
+async function fetchGlobals(
+  url: string,
+  token: string,
+  workspace: string | null,
+  deps: SessionStartDeps,
+  deadline: number,
+): Promise<GlobalListing> {
   const client = new BlindkeyClient({ url, token }, deps.fetchImpl ?? fetch);
   // Each list on its own: a token without secrets:meta still gets the global documents.
   const list = async <T>(path: string): Promise<T[]> => {
@@ -103,7 +115,11 @@ async function fetchGlobals(url: string, token: string, deps: SessionStartDeps, 
       return [];
     }
   };
-  const [docs, secrets] = await Promise.all([list<RemoteDocSummary>('/api/v1/docs'), list<RemoteSecretSummary>('/api/v1/secrets')]);
+  const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+  const [docs, secrets] = await Promise.all([
+    list<RemoteDocSummary>(`/api/v1/docs${qs}`),
+    list<RemoteSecretSummary>(`/api/v1/secrets${qs}`),
+  ]);
   return { docs, secrets };
 }
 
@@ -111,12 +127,41 @@ function secretLine(s: RemoteSecretSummary): string {
   return `${s.name} (${s.fields.map((f) => (f.sensitive ? `${f.key}*` : f.key)).join(', ') || 'no fields'})`;
 }
 
-function globalLines(g: GlobalListing): string[] {
+/** Visible workspaces; empty when the token lacks projects:read or the server doesn't answer in time. */
+async function fetchWorkspaces(url: string, token: string, deps: SessionStartDeps, deadline: number): Promise<RemoteWorkspace[]> {
+  try {
+    const client = new BlindkeyClient({ url, token }, deps.fetchImpl ?? fetch);
+    const v = await withDeadline(client.json<RemoteWorkspace[]>('GET', '/api/v1/workspaces'), deadline);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+function globalLines(g: GlobalListing, workspace: RemoteWorkspace | string | null): string[] {
   if (g.docs.length === 0 && g.secrets.length === 0) return [];
-  const lines = ['', 'Global (shared across all projects — servers, conventions; use tools with `project` omitted):'];
+  const label =
+    workspace === null
+      ? ''
+      : typeof workspace === 'string'
+        ? ` of workspace "${workspace}"`
+        : ` of workspace "${workspace.name}" (${workspace.slug})`;
+  const slug = workspace === null ? null : typeof workspace === 'string' ? workspace : workspace.slug;
+  const lines = [
+    '',
+    `Global (shared across all projects${label} — servers, conventions; use tools with \`project\` omitted${slug ? ` (workspace "${slug}")` : ''}):`,
+  ];
   if (g.docs.length > 0) lines.push('Global documents:', ...bulletedList(g.docs.map((d) => `${d.slug} — ${d.title}`), MAX_LIST_ITEMS));
   if (g.secrets.length > 0) lines.push('Global secrets:', ...bulletedList(g.secrets.map(secretLine), MAX_LIST_ITEMS));
   return lines;
+}
+
+function workspaceChoiceLines(workspaces: RemoteWorkspace[]): string[] {
+  return [
+    '',
+    'Several workspaces, each with its own global docs and secrets — pick one: pass `workspace: "<slug>"` to the MCP tools (`list_workspaces`) or use the target `global@<slug>` in the CLI:',
+    ...bulletedList(workspaces.map((w) => `${w.slug} — ${w.name} (${w.role})`), MAX_LIST_ITEMS),
+  ];
 }
 
 /** Rejects once `deadline` (an absolute `Date.now()`-scale timestamp) passes, whatever's left of it. */
@@ -166,11 +211,31 @@ async function buildBody(deps: SessionStartDeps, deadline: number): Promise<stri
   }
   lines.push('Connected.');
 
-  // Globals are fetched alongside the project and shown whether or not the repo is bound.
-  const globals = fetchGlobals(profile.url, token, deps, deadline);
-  lines.push(...(await projectSection(profile.url, token, binding?.project, deps, deadline)));
-  lines.push(...globalLines(await globals));
+  // Globals live in a workspace: the bound project's, else the only visible one; with several visible
+  // workspaces and no binding we list them instead of guessing.
+  const workspaces = fetchWorkspaces(profile.url, token, deps, deadline);
+  const section = await projectSection(profile.url, token, binding?.project, deps, deadline);
+  lines.push(...section.lines);
+  const all = await workspaces;
+  if (Date.now() >= deadline) return lines; // budget spent: no more fetches
+  const bound = section.workspace === null ? undefined : all.find((w) => w.slug === section.workspace);
+  if (section.workspace !== null) {
+    const g = await fetchGlobals(profile.url, token, section.workspace, deps, deadline);
+    lines.push(...globalLines(g, bound ?? section.workspace));
+  } else if (all.length > 1) {
+    lines.push(...workspaceChoiceLines(all));
+  } else {
+    const only = all[0];
+    const g = await fetchGlobals(profile.url, token, only?.slug ?? null, deps, deadline);
+    lines.push(...globalLines(g, only ?? null));
+  }
   return lines;
+}
+
+interface ProjectSection {
+  lines: string[];
+  /** Workspace slug of the bound project, when it could be read. */
+  workspace: string | null;
 }
 
 async function projectSection(
@@ -179,35 +244,37 @@ async function projectSection(
   project: string | undefined,
   deps: SessionStartDeps,
   deadline: number,
-): Promise<string[]> {
+): Promise<ProjectSection> {
   const lines: string[] = [];
+  const none = (): ProjectSection => ({ lines, workspace: null });
   if (!project) {
     lines.push('This repo is not bound to a Blindkey project — call `blindkey_bind` or ask the user which project this is.');
-    return lines;
+    return none();
   }
   lines.push(`Bound project: ${project}`);
 
   const detail = await fetchProjectDetail(url, token, project, deps, deadline);
   if (detail === 'down') {
     lines.push(`blindkey server (${url}) is unreachable right now — project details unavailable this session.`);
-    return lines;
+    return none();
   }
   if (detail === 401) {
     lines.push('blindkey: token expired or revoked — run `blindkey connect`.');
-    return lines;
+    return none();
   }
   if (detail === 403) {
     lines.push(`blindkey: the token lacks access to project "${project}" — run \`blindkey connect\` to widen.`);
-    return lines;
+    return none();
   }
   if (detail === 404) {
     // The server answers 404 both for a missing slug and for one this token wasn't approved for.
     lines.push(
       `Project "${project}" not found or not approved for this token — run \`blindkey connect\` to approve it, or \`blindkey bind\` another.`,
     );
-    return lines;
+    return none();
   }
 
+  if (detail.workspace) lines.push(`Workspace: ${detail.workspace}`);
   if (detail.summary) lines.push(`Summary: ${detail.summary}`);
   if (detail.tags.length > 0) lines.push(`Tags: ${detail.tags.join(', ')}`);
 
@@ -229,7 +296,7 @@ async function projectSection(
     lines.push('Secrets: none yet.');
   }
 
-  return lines;
+  return { lines, workspace: detail.workspace ?? null };
 }
 
 /**

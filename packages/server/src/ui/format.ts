@@ -33,6 +33,9 @@ export const FLASH_MESSAGES = {
   revoked: 'Token revoked',
   approved: 'Approved',
   denied: 'Denied',
+  moved: 'Moved',
+  added: 'Added',
+  removed: 'Removed',
 } as const;
 
 export function flashFor(raw: unknown): string | null {

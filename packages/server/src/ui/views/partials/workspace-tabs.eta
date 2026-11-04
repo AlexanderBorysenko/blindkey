@@ -1,0 +1,4 @@
+<nav class="tabs">
+  <a href="/w/<%= encodeURIComponent(it.slug) %>/members" aria-current="<%~ it.tab === 'members' ? 'page' : 'false' %>">Members</a>
+  <a href="/w/<%= encodeURIComponent(it.slug) %>/settings" aria-current="<%~ it.tab === 'settings' ? 'page' : 'false' %>">Settings</a>
+</nav>

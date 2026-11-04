@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../http/context.js';
-import { changePassword } from '../../services/password.js';
-import { adminActor, uiSessionId } from '../session.js';
+import { changePassword, mustChangePassword } from '../../services/password.js';
+import { adminActor, requireAdmin, uiSessionId } from '../session.js';
 import { assertCsrf } from '../csrf.js';
 import { body, pageContext, str } from '../forms.js';
 import { renderPage } from '../render.js';
@@ -11,7 +11,7 @@ export function registerPasswordRoutes(app: FastifyInstance, ctx: AppContext): v
   const limited = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
   app.get('/settings/password', async (req, reply) =>
-    reply.status(200).type('text/html').send(renderPage('settings-password', { ...pageContext(ctx, req, 'Password'), error: null })));
+    reply.status(200).type('text/html').send(renderPage('settings-password', { ...pageContext(ctx, req, 'Password'), error: null, mustChange: mustChangePassword(ctx, requireAdmin(req).userId) })));
 
   app.post('/settings/password', limited, async (req, reply) => {
     assertCsrf(ctx, req);
@@ -26,7 +26,7 @@ export function registerPasswordRoutes(app: FastifyInstance, ctx: AppContext): v
       return reply
         .status(result.status)
         .type('text/html')
-        .send(renderPage('settings-password', { ...pageContext(ctx, req, 'Password'), error: result.error }));
+        .send(renderPage('settings-password', { ...pageContext(ctx, req, 'Password'), error: result.error, mustChange: mustChangePassword(ctx, requireAdmin(req).userId) }));
     }
     return reply.redirect('/settings/password?done=saved', 303);
   });

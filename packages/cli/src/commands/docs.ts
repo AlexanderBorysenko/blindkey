@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { DOC_CATEGORIES, type DocCategory } from '@blindkey/shared';
-import { scopedPath, seg, type BlindkeyClient } from '../client.js';
+import { scopedFor, seg, type BlindkeyClient } from '../client.js';
 import type { PublicDoc, PublicDocSummary } from '../api-types.js';
 import { CliError } from '../errors.js';
 import { fmtTime, table, type CommandResult } from '../output.js';
@@ -18,7 +18,7 @@ export function resolveDocTarget(a: string, b?: string): { target: string; doc: 
 }
 
 export async function runDocsList(client: BlindkeyClient, target: string): Promise<CommandResult> {
-  const docs = await client.json<PublicDocSummary[]>('GET', scopedPath(target, 'docs'));
+  const docs = await client.json<PublicDocSummary[]>('GET', await scopedFor(client, target, 'docs'));
   return {
     json: docs,
     text: table(['SLUG', 'TITLE', 'CATEGORY', 'UPDATED'], docs.map((d) => [d.slug, d.title, d.category, fmtTime(d.updated_at)])),
@@ -31,7 +31,7 @@ export async function runDocsGet(
   doc: string,
   opts: { refs?: boolean },
 ): Promise<CommandResult> {
-  const result = await client.json<PublicDoc>('GET', scopedPath(target, 'docs', `/${seg(doc)}`), {
+  const result = await client.json<PublicDoc>('GET', await scopedFor(client, target, 'docs', `/${seg(doc)}`), {
     query: { resolve: opts.refs ? 'meta' : undefined },
   });
   let text = result.body_md;
@@ -70,7 +70,7 @@ export async function runDocsPut(
   } catch (err) {
     throw new CliError(`cannot read ${opts.file}: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const { status, data: saved } = await client.jsonStatus<PublicDoc>('PUT', scopedPath(target, 'docs', `/${seg(doc)}`), {
+  const { status, data: saved } = await client.jsonStatus<PublicDoc>('PUT', await scopedFor(client, target, 'docs', `/${seg(doc)}`), {
     body: { title: opts.title, category: opts.category as DocCategory, body_md, force: opts.force === true },
   });
   const created = status === 201; // the server answers 201 on create, 200 on update

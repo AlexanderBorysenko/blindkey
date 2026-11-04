@@ -1,0 +1,104 @@
+<div class="page-head">
+  <div>
+    <h1>Users</h1>
+    <p class="lede">Create accounts, reset access and act as another user.</p>
+  </div>
+</div>
+
+<% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+
+<% if (it.created) { %>
+<div class="panel lock">
+  <% if (it.created.password !== null) { %>
+  <h3>Password for <%= it.created.username %> — shown once</h3>
+  <div class="kv">
+    <div class="kv-row">
+      <div class="mono field-key">Temporary password</div>
+      <div><span class="field-value" id="new-user-password"><%= it.created.password %></span></div>
+    </div>
+  </div>
+  <p class="note">Copy it now and pass it on securely: it is not stored or logged and cannot be shown again. They must choose a new password at their first login.</p>
+  <% } else { %>
+  <h3><%= it.created.reset ? 'Password reset' : 'User created' %>: <%= it.created.username %></h3>
+  <p class="note">They must choose a new password at their next login.</p>
+  <% } %>
+</div>
+<% } %>
+
+<% if (it.confirmDelete) { %>
+<div class="panel">
+  <h3>Delete <%= it.confirmDelete.username %>?</h3>
+  <p class="note">This removes the account with its sessions, API tokens and grants. It cannot be undone.</p>
+  <form method="post" action="/admin/users/<%= it.confirmDelete.id %>/delete" class="row-actions">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <input type="hidden" name="confirmed" value="1" />
+    <button class="btn danger solid" type="submit">Delete user</button>
+    <a class="btn" href="/admin/users">Cancel</a>
+  </form>
+</div>
+<% } %>
+
+<div class="panel">
+  <h3>New user</h3>
+  <form method="post" action="/admin/users" class="form-grid">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <label>Username <input name="username" required maxlength="64" autocomplete="off" /></label>
+    <label>Temporary password <input type="password" name="password" autocomplete="new-password" /></label>
+    <label class="check"><input type="checkbox" name="generate" /> Generate a password instead (shown once)</label>
+    <button class="btn primary" type="submit">Create user</button>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Username</th><th>Super</th><th>Status</th><th>2FA</th><th>Must change password</th><th>Created</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% it.users.forEach(function (u) { %>
+      <tr>
+        <td><strong><%= u.username %></strong><% if (u.id === it.selfId) { %> <span class="tag">you</span><% } %></td>
+        <td><%= u.is_super ? 'yes' : 'no' %></td>
+        <td><%= u.disabled ? 'disabled' : 'active' %></td>
+        <td><%= u.twofactor ? 'on' : 'off' %></td>
+        <td><%= u.must_change_password ? 'yes' : 'no' %></td>
+        <td><time datetime="<%= it.fmt.iso(u.created_at) %>" title="<%= it.fmt.iso(u.created_at) %>"><%= it.fmt.ago(u.created_at) %></time></td>
+        <td>
+          <details class="user-manage">
+            <summary>Manage <%= u.username %></summary>
+            <div class="row-actions">
+              <% if (u.id !== it.selfId && !u.is_super && !u.disabled) { %>
+              <form method="post" action="/admin/users/<%= u.id %>/impersonate">
+                <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+                <button class="btn sm" type="submit">Impersonate</button>
+              </form>
+              <% } %>
+              <form method="post" action="/admin/users/<%= u.id %>/<%= u.disabled ? 'enable' : 'disable' %>">
+                <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+                <button class="btn sm" type="submit"><%= u.disabled ? 'Enable' : 'Disable' %></button>
+              </form>
+              <form method="post" action="/admin/users/<%= u.id %>/<%= u.is_super ? 'demote' : 'promote' %>">
+                <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+                <button class="btn sm" type="submit"><%= u.is_super ? 'Remove super' : 'Make super' %></button>
+              </form>
+              <form method="post" action="/admin/users/<%= u.id %>/reset-2fa">
+                <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+                <button class="btn sm" type="submit">Reset 2FA</button>
+              </form>
+              <form method="post" action="/admin/users/<%= u.id %>/delete">
+                <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+                <button class="btn sm danger" type="submit">Delete</button>
+              </form>
+            </div>
+            <form method="post" action="/admin/users/<%= u.id %>/reset-password" class="form-grid">
+              <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+              <label>New temporary password <input type="password" name="password" autocomplete="new-password" /></label>
+              <label class="check"><input type="checkbox" name="generate" /> Generate instead (shown once)</label>
+              <label class="check"><input type="checkbox" name="revoke_tokens" checked /> Also revoke all API and agent tokens</label>
+              <button class="btn sm" type="submit">Reset password</button>
+            </form>
+          </details>
+        </td>
+      </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>

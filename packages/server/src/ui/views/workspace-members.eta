@@ -1,0 +1,71 @@
+<% var base = '/w/' + encodeURIComponent(it.workspace.slug); %>
+<p class="crumbs"><%= it.workspace.name %> / <span class="current">Members</span></p>
+<div class="page-head">
+  <div>
+    <h1>Members</h1>
+    <p class="lede">Owners have full access to <%= it.workspace.name %>. Other people only see what you grant them.</p>
+  </div>
+</div>
+<%~ include('partials/workspace-tabs', { slug: it.workspace.slug, tab: 'members' }) %>
+<% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+
+<div class="panel">
+  <h3>Owners</h3>
+  <ul class="plain">
+    <% it.owners.forEach(function (o) { %>
+    <li class="row-actions">
+      <strong><%= o %></strong>
+      <form method="post" action="<%= base %>/owners/<%= encodeURIComponent(o) %>/remove">
+        <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+        <button class="btn sm danger" type="submit">Remove owner <%= o %></button>
+      </form>
+    </li>
+    <% }); %>
+  </ul>
+  <form method="post" action="<%= base %>/owners" class="row-actions">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <label>Add owner by username <input name="username" required maxlength="64" autocomplete="off" /></label>
+    <button class="btn sm" type="submit">Add owner</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h3>Add user</h3>
+  <form method="post" action="<%= base %>/members" class="row-actions">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <label>Exact username <input name="username" required maxlength="64" autocomplete="off" /></label>
+    <button class="btn sm primary" type="submit">Add user</button>
+  </form>
+  <p class="note">You are taken to the access editor to choose what they can see.</p>
+</div>
+
+<% if (it.members.length === 0) { %>
+<div class="empty"><p>No members besides the owners.</p></div>
+<% } else { %>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Member</th><th>Access</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% it.members.forEach(function (m) { %>
+      <tr>
+        <td><strong><%= m.username %></strong><% if (m.disabled) { %> <span class="tag">disabled</span><% } %></td>
+        <td>
+          <ul class="member-grants">
+            <% m.grants.forEach(function (g) { %><li><%= g.label %>: <span class="mono"><%= g.summary %></span></li><% }); %>
+          </ul>
+        </td>
+        <td>
+          <div class="row-actions">
+            <% if (!m.disabled) { %><a class="btn sm" href="<%= base %>/members/<%= encodeURIComponent(m.username) %>">Edit access<span class="sr-only"> for <%= m.username %></span></a><% } %>
+            <form method="post" action="<%= base %>/members/<%= encodeURIComponent(m.username) %>/remove">
+              <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+              <button class="btn sm danger" type="submit">Remove <%= m.username %></button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      <% }); %>
+    </tbody>
+  </table>
+</div>
+<% } %>

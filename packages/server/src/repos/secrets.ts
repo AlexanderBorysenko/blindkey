@@ -4,7 +4,9 @@ import type { KeyRing } from '../config.js';
 import { decryptField, encryptField, generateDek, unwrapDek, wrapDek } from '../crypto/envelope.js';
 import { ConflictError, CryptoError, NotFoundError } from '../errors.js';
 import { keyVersionReport, probeCurrentVersion, type KeyVersionStatus } from './keyversions.js';
-import { inList, isUniqueViolation, now, parseJsonArray } from './util.js';
+import { itemWorkspaceId, requireWorkspaceId } from './projects.js';
+import { getWorkspaceById } from './workspaces.js';
+import { inList, isUniqueViolation, now, parseJsonArray, visibilitySql, type ItemVisibility } from './util.js';
 
 export type { KeyVersionStatus };
 
@@ -16,6 +18,7 @@ export interface SecretFieldMeta {
 export interface SecretMeta {
   id: number;
   project_id: number | null;
+  workspace_id: number;
   name: string;
   description: string;
   tags: string[];
@@ -32,6 +35,7 @@ export interface RevealedField {
 interface RawSecret {
   id: number;
   project_id: number | null;
+  workspace_id: number;
   name: string;
   description: string;
   tags: string;
@@ -46,7 +50,7 @@ interface RawField {
   is_sensitive: number;
 }
 
-const COLS = 'id, project_id, name, description, tags, dek_wrapped, key_version, created_at, updated_at';
+const COLS = 'id, project_id, workspace_id, name, description, tags, dek_wrapped, key_version, created_at, updated_at';
 
 function masterKey(ring: KeyRing, version: number): Buffer {
   const k = ring.keys.get(version);
@@ -83,6 +87,7 @@ function toMeta(db: Db, ring: KeyRing, row: RawSecret): SecretMeta {
     return {
       id: row.id,
       project_id: row.project_id,
+      workspace_id: row.workspace_id,
       name: row.name,
       description: row.description,
       tags: parseJsonArray<string>(row.tags),
@@ -102,26 +107,36 @@ export function getSecretMetaById(db: Db, ring: KeyRing, id: number): SecretMeta
   return row ? toMeta(db, ring, row) : null;
 }
 
-export function getSecretMeta(db: Db, ring: KeyRing, projectId: number | null, name: string): SecretMeta | null {
-  const row = db.prepare(`SELECT ${COLS} FROM secrets WHERE project_id IS ? AND name = ?`).get(projectId, name) as RawSecret | undefined;
+/**
+ * Globals (projectId null) are scoped to a workspace (required). `workspaceId` is ignored for project items.
+ */
+export function getSecretMeta(db: Db, ring: KeyRing, projectId: number | null, name: string, workspaceId?: number): SecretMeta | null {
+  const row =
+    projectId === null
+      ? (db.prepare(`SELECT ${COLS} FROM secrets WHERE project_id IS NULL AND workspace_id = ? AND name = ?`).get(requireWorkspaceId(workspaceId), name) as RawSecret | undefined)
+      : (db.prepare(`SELECT ${COLS} FROM secrets WHERE project_id = ? AND name = ?`).get(projectId, name) as RawSecret | undefined);
   return row ? toMeta(db, ring, row) : null;
 }
 
-export function listSecrets(db: Db, ring: KeyRing, projectId: number | null): SecretMeta[] {
-  const rows = db.prepare(`SELECT ${COLS} FROM secrets WHERE project_id IS ? ORDER BY name COLLATE NOCASE`).all(projectId) as RawSecret[];
+export function listSecrets(db: Db, ring: KeyRing, projectId: number | null, workspaceId?: number): SecretMeta[] {
+  const rows =
+    projectId === null
+      ? (db.prepare(`SELECT ${COLS} FROM secrets WHERE project_id IS NULL AND workspace_id = ? ORDER BY name COLLATE NOCASE`).all(requireWorkspaceId(workspaceId)) as RawSecret[])
+      : (db.prepare(`SELECT ${COLS} FROM secrets WHERE project_id = ? ORDER BY name COLLATE NOCASE`).all(projectId) as RawSecret[]);
   return rows.map((r) => toMeta(db, ring, r));
 }
 
-export function createSecret(db: Db, ring: KeyRing, input: SecretInput & { projectId: number | null }): SecretMeta {
+export function createSecret(db: Db, ring: KeyRing, input: SecretInput & { projectId: number | null; workspaceId?: number }): SecretMeta {
   const dek = generateDek();
   const wrapped = wrapDek(masterKey(ring, ring.current), dek);
   const ts = now();
   return db.transaction(() => {
+    const workspaceId = itemWorkspaceId(db, input.projectId, input.workspaceId);
     let id: number;
     try {
       const info = db
-        .prepare(`INSERT INTO secrets (project_id, name, description, tags, dek_wrapped, key_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(input.projectId, input.name, input.description, JSON.stringify(input.tags), wrapped, ring.current, ts, ts);
+        .prepare(`INSERT INTO secrets (project_id, workspace_id, name, description, tags, dek_wrapped, key_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(input.projectId, workspaceId, input.name, input.description, JSON.stringify(input.tags), wrapped, ring.current, ts, ts);
       id = Number(info.lastInsertRowid);
     } catch (err) {
       if (isUniqueViolation(err)) throw new ConflictError(`secret "${input.name}" already exists`);
@@ -205,25 +220,46 @@ export function updateSecret(db: Db, ring: KeyRing, id: number, patch: SecretPat
   })();
 }
 
-export function deleteSecret(db: Db, projectId: number | null, name: string): boolean {
-  return db.prepare(`DELETE FROM secrets WHERE project_id IS ? AND name = ?`).run(projectId, name).changes > 0;
+export function deleteSecret(db: Db, projectId: number | null, name: string, workspaceId?: number): boolean {
+  if (projectId === null) {
+    return db.prepare(`DELETE FROM secrets WHERE project_id IS NULL AND workspace_id = ? AND name = ?`).run(requireWorkspaceId(workspaceId), name).changes > 0;
+  }
+  return db.prepare(`DELETE FROM secrets WHERE project_id = ? AND name = ?`).run(projectId, name).changes > 0;
+}
+
+/** Moves a global secret to another workspace (grants are kept); 409 when the name is taken there. */
+export function moveGlobalSecret(db: Db, ring: KeyRing, id: number, workspaceId: number): SecretMeta {
+  const row = rawById(db, id);
+  if (!row) throw new NotFoundError('secret not found');
+  if (row.project_id !== null) throw new ConflictError('project secrets move with their project');
+  if (!getWorkspaceById(db, workspaceId)) throw new NotFoundError('workspace not found');
+  try {
+    db.prepare(`UPDATE secrets SET workspace_id = ?, updated_at = ? WHERE id = ?`).run(workspaceId, now(), id);
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new ConflictError(`secret "${row.name}" already exists in the target workspace`);
+    throw err;
+  }
+  return getSecretMetaById(db, ring, id)!;
 }
 
 export interface SecretNameHit {
   id: number;
   project_id: number | null;
+  workspace_id: number;
   name: string;
   tags: string[];
 }
 
-export function searchSecretNames(db: Db, q: string, projectIds: number[] | null, limit = 20): SecretNameHit[] {
+/** `visible`, when given, limits hits to what one user may see (SQL-side, so `limit` counts visible hits only). */
+export function searchSecretNames(db: Db, q: string, projectIds: number[] | null, limit = 20, visible?: ItemVisibility): SecretNameHit[] {
   const term = q.trim();
   if (!term) return [];
   const like = `%${term.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
   const scope = projectIds === null ? '1=1' : projectIds.length === 0 ? 'project_id IS NULL' : `(project_id IS NULL OR project_id IN (${inList(projectIds)}))`;
+  const vis = visible ? visibilitySql(visible) : null;
   const rows = db
-    .prepare(`SELECT id, project_id, name, tags FROM secrets WHERE name LIKE ? ESCAPE '\\' AND ${scope} ORDER BY name COLLATE NOCASE LIMIT ?`)
-    .all(like, ...(projectIds ?? []), limit) as { id: number; project_id: number | null; name: string; tags: string }[];
+    .prepare(`SELECT id, project_id, workspace_id, name, tags FROM secrets WHERE name LIKE ? ESCAPE '\\' AND ${scope}${vis ? ` AND ${vis.sql}` : ''} ORDER BY name COLLATE NOCASE LIMIT ?`)
+    .all(like, ...(projectIds ?? []), ...(vis?.params ?? []), limit) as { id: number; project_id: number | null; workspace_id: number; name: string; tags: string }[];
   return rows.map((r) => ({ ...r, tags: parseJsonArray<string>(r.tags) }));
 }
 

@@ -1,0 +1,22 @@
+<% if (it.targets && it.targets.length) { %>
+<dialog class="confirm" id="move-item">
+  <h2>Move to workspace</h2>
+  <p>Move <%= it.what %> to another workspace you own. Existing grants are kept; a name already used there blocks the move.</p>
+  <p class="note">References to global items ({{secret:global/…}}, bare <code>global</code> in CLI) will resolve in the new workspace.</p>
+  <form method="post" action="<%= it.action %>" class="form-grid">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <% if (it.ws) { %><input type="hidden" name="workspace" value="<%= it.ws %>" /><% } %>
+    <label>Target workspace
+      <select name="target" required>
+        <% it.targets.forEach(function (w) { %>
+        <option value="<%= w.slug %>"><%= w.name %></option>
+        <% }); %>
+      </select>
+    </label>
+    <div class="actions">
+      <button class="btn" type="button" data-close-dialog>Cancel</button>
+      <button class="btn primary" type="submit">Move</button>
+    </div>
+  </form>
+</dialog>
+<% } %>

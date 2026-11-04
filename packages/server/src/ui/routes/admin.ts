@@ -8,6 +8,7 @@ import { adminActor, requireAdmin } from '../session.js';
 import { assertCsrf } from '../csrf.js';
 import { body, bool, errorText, list, pageContext, parseTags, str } from '../forms.js';
 import { renderPage } from '../render.js';
+import { labelActors } from '../actors.js';
 import { DAY_MS } from '../../repos/tokens.js';
 
 export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -136,7 +137,7 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
     return reply.type('text/html').send(
       renderPage('audit', {
         ...pageContext(ctx, req, 'Audit log'),
-        rows,
+        rows: labelActors(ctx, rows),
         limit,
         action,
         actor,

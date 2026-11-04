@@ -8,6 +8,8 @@ export interface AuditEntry {
   target_type?: string | null;
   target_id?: number | null;
   field_key?: string | null;
+  /** The workspace the event concerns, when known (drives who may see the row). */
+  workspace_id?: number | null;
   ip?: string;
   user_agent?: string;
   meta?: Record<string, unknown> | null;
@@ -22,6 +24,7 @@ export interface AuditRow {
   target_type: string | null;
   target_id: number | null;
   field_key: string | null;
+  workspace_id: number | null;
   ip: string;
   user_agent: string;
   meta: Record<string, unknown> | null;
@@ -30,10 +33,10 @@ export interface AuditRow {
 export function writeAudit(db: Db, e: AuditEntry, ts: number = now()): number {
   const info = db
     .prepare(
-      `INSERT INTO audit_log (ts, actor_type, actor_id, action, target_type, target_id, field_key, ip, user_agent, meta)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO audit_log (ts, actor_type, actor_id, action, target_type, target_id, field_key, workspace_id, ip, user_agent, meta)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(ts, e.actor_type, e.actor_id, e.action, e.target_type ?? null, e.target_id ?? null, e.field_key ?? null, e.ip ?? '', e.user_agent ?? '', e.meta ? JSON.stringify(e.meta) : null);
+    .run(ts, e.actor_type, e.actor_id, e.action, e.target_type ?? null, e.target_id ?? null, e.field_key ?? null, e.workspace_id ?? null, e.ip ?? '', e.user_agent ?? '', e.meta ? JSON.stringify(e.meta) : null);
   return Number(info.lastInsertRowid);
 }
 
@@ -43,6 +46,20 @@ export interface AuditQuery {
   before?: number;
   action?: string;
   actorType?: string;
+  /** Limits rows to what one user may see: their own actions (and their tokens') and rows of workspaces they own. Omit for everything. */
+  visibleTo?: { userId: number; ownedWorkspaceIds: number[] };
+}
+
+/** SQL fragment + params for `AuditQuery.visibleTo`. */
+function visibleToClause(v: { userId: number; ownedWorkspaceIds: number[] }): { sql: string; params: unknown[] } {
+  const ws = v.ownedWorkspaceIds.length ? ` OR workspace_id IN (${v.ownedWorkspaceIds.map(() => '?').join(',')})` : '';
+  return {
+    // User and token ids are reused after a delete (no AUTOINCREMENT), so a row only counts as "theirs"
+    // when it is not older than the user (or the token) it names: no inheriting a predecessor's history.
+    sql: `((actor_type = 'admin' AND actor_id = ? AND ts >= (SELECT created_at FROM admin WHERE id = ?))
+      OR (actor_type = 'token' AND EXISTS (SELECT 1 FROM api_tokens t WHERE t.id = audit_log.actor_id AND t.user_id = ? AND audit_log.ts >= t.created_at))${ws})`,
+    params: [v.userId, v.userId, v.userId, ...v.ownedWorkspaceIds],
+  };
 }
 
 type RawAuditRow = Omit<AuditRow, 'meta'> & { meta: string | null };
@@ -57,8 +74,13 @@ export function listAudit(db: Db, q: AuditQuery): AuditRow[] {
   if (q.before !== undefined) { where.push('id < ?'); params.push(q.before); }
   if (q.action) { where.push('action = ?'); params.push(q.action); }
   if (q.actorType) { where.push('actor_type = ?'); params.push(q.actorType); }
+  if (q.visibleTo) {
+    const c = visibleToClause(q.visibleTo);
+    where.push(c.sql);
+    params.push(...c.params);
+  }
   const limit = Math.min(Math.max(q.limit ?? 100, 1), 1000);
-  const sql = `SELECT id, ts, actor_type, actor_id, action, target_type, target_id, field_key, ip, user_agent, meta FROM audit_log
+  const sql = `SELECT id, ts, actor_type, actor_id, action, target_type, target_id, field_key, workspace_id, ip, user_agent, meta FROM audit_log
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ts DESC, id DESC LIMIT ?`;
   const rows = db.prepare(sql).all(...params, limit) as RawAuditRow[];
   return rows.map(mapAuditRow);
@@ -73,7 +95,14 @@ export function listAudit(db: Db, q: AuditQuery): AuditRow[] {
  * so a deleted secret's id can be reused by a later one), so a caller that can be reused this way
  * must bound the query by its own creation time to avoid showing a predecessor's audit history.
  */
-export function listAuditForTarget(db: Db, targetType: string, targetId: number, limit = 5, sinceTs?: number): AuditRow[] {
+export function listAuditForTarget(
+  db: Db,
+  targetType: string,
+  targetId: number,
+  limit = 5,
+  sinceTs?: number,
+  visibleTo?: { userId: number; ownedWorkspaceIds: number[] },
+): AuditRow[] {
   const lim = Math.min(Math.max(limit, 1), 50);
   const where = ['target_type = ?', 'target_id = ?'];
   const params: unknown[] = [targetType, targetId];
@@ -81,9 +110,14 @@ export function listAuditForTarget(db: Db, targetType: string, targetId: number,
     where.push('ts >= ?');
     params.push(sinceTs);
   }
+  if (visibleTo) {
+    const c = visibleToClause(visibleTo);
+    where.push(c.sql);
+    params.push(...c.params);
+  }
   const rows = db
     .prepare(
-      `SELECT id, ts, actor_type, actor_id, action, target_type, target_id, field_key, ip, user_agent, meta
+      `SELECT id, ts, actor_type, actor_id, action, target_type, target_id, field_key, workspace_id, ip, user_agent, meta
        FROM audit_log WHERE ${where.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`,
     )
     .all(...params, lim) as RawAuditRow[];

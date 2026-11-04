@@ -71,7 +71,7 @@ describe('documents routes', () => {
     const p = t.project('alpha');
     t.project('beta');
     createSecret(t.db, t.ring, { projectId: p.id, name: 'Staging server', description: '', tags: [], fields: [{ key: 'host', value: 'h' }, { key: 'password', value: 'p' }] });
-    createSecret(t.db, t.ring, { projectId: null, name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
+    createSecret(t.db, t.ring, { projectId: null, workspaceId: t.workspaceId, name: 'GitHub PAT', description: '', tags: [], fields: [{ key: 'token', value: 't' }] });
     const tok = auth(t.token(['docs:read', 'docs:write', 'secrets:meta'], ['alpha']));
     const bad = await t.app.inject({ method: 'PUT', url: '/api/v1/projects/alpha/docs/x', headers: tok, payload: doc('{{secret:Nope}} {{secret:beta/X}}') });
     expect(bad.statusCode).toBe(422);

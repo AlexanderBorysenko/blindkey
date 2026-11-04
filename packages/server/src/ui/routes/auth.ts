@@ -47,7 +47,8 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
       const ua = req.headers['user-agent'] ?? '';
       const admin = username ? getAdminByUsername(ctx.db, username) : null;
       const ok = admin ? await verifyPassword(admin.password_hash, password) : false;
-      if (!admin || !ok) {
+      // A disabled user is refused like a wrong password (no hint that the account exists).
+      if (!admin || !ok || admin.disabled_at !== null) {
         writeAudit(ctx.db, {
           actor_type: 'admin',
           actor_id: admin?.id ?? null,

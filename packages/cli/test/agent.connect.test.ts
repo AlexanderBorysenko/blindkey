@@ -60,7 +60,7 @@ function approveByLine(line: string, scopes: string[], projects: string[], expir
   const row = getConnectRequestByUserCode(s.db, userCodeFrom(line));
   if (!row) throw new Error(`no connect request for ${line}`);
   const projectIds = projects.map((slug) => getProjectBySlug(s.db, slug)!.id);
-  approveConnectRequest(s.db, row.id, { scopes: scopes as never, projectIds, expiresDays });
+  approveConnectRequest(s.db, row.id, { userId: s.userId(), scopes: scopes as never, projectIds, expiresDays });
 }
 
 function denyByLine(line: string): void {
@@ -128,6 +128,7 @@ describe('runConnect: happy path', () => {
     const row = getConnectRequestByUserCode(s.db, userCodeFrom(line))!;
     expect(row.scopes.sort()).toEqual([...AGENT_SCOPES].sort());
     approveConnectRequest(s.db, row.id, {
+      userId: s.userId(),
       scopes: ['projects:read'] as never,
       projectIds: [getProjectBySlug(s.db, 'acme')!.id],
       expiresDays: 90,
@@ -147,7 +148,7 @@ describe('runConnect: happy path', () => {
     const line = await waitForLine(out);
     const row = getConnectRequestByUserCode(s.db, userCodeFrom(line))!;
     expect(row.projects).toEqual(['acme']);
-    approveConnectRequest(s.db, row.id, { scopes: ['projects:read'] as never, projectIds: [getProjectBySlug(s.db, 'acme')!.id], expiresDays: 90 });
+    approveConnectRequest(s.db, row.id, { userId: s.userId(), scopes: ['projects:read'] as never, projectIds: [getProjectBySlug(s.db, 'acme')!.id], expiresDays: 90 });
     await connectPromise;
   });
 

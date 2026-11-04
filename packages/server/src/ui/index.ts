@@ -12,6 +12,8 @@ import { registerDocumentRoutes } from './routes/documents.js';
 import { registerPasswordRoutes } from './routes/password.js';
 import { registerProjectRoutes } from './routes/projects.js';
 import { registerSecretRoutes } from './routes/secrets.js';
+import { registerForcedPasswordChange, registerUserRoutes } from './routes/users.js';
+import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerTwoFactorRoutes } from './routes/twofactor.js';
 
 const require = createRequire(import.meta.url);
@@ -82,6 +84,7 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
     setHeaders: (reply) => reply.header('x-content-type-options', 'nosniff'),
   });
 
+  registerForcedPasswordChange(app, ctx);
   registerAuthRoutes(app, ctx);
   registerConnectRoutes(app, ctx);
   registerProjectRoutes(app, ctx);
@@ -90,4 +93,6 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
   registerAdminRoutes(app, ctx);
   registerTwoFactorRoutes(app, ctx);
   registerPasswordRoutes(app, ctx);
+  registerWorkspaceRoutes(app, ctx);
+  registerUserRoutes(app, ctx);
 }

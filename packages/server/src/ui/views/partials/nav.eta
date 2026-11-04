@@ -5,8 +5,46 @@
   <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
   <input type="search" name="q" placeholder="Search" aria-label="Search" />
 </form>
+<% var ws = it.nav.active; var wsEnc = ws ? encodeURIComponent(ws.slug) : ''; %>
+<div class="navgroup workspace-group">
+  <h4>Workspace</h4>
+  <% if (it.nav.workspaces.length > 0) { %>
+  <form class="ws-switch" method="post" action="/workspace/switch">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <input type="hidden" name="next" value="<%= it.switchNext %>" />
+    <select name="workspace" aria-label="Workspace" data-autosubmit>
+      <% it.nav.workspaces.forEach(function(w){ %>
+      <option value="<%= w.slug %>"<%~ ws && ws.slug === w.slug ? ' selected' : '' %>><%= w.name %></option>
+      <% }); %>
+    </select>
+    <button class="btn sm" type="submit" data-js-hide>Switch</button>
+  </form>
+  <% } %>
+  <% if (ws && ws.owner) { %>
+  <a href="/w/<%= wsEnc %>/members" <%~ it.path.startsWith('/w/' + wsEnc + '/members') ? 'aria-current="page"' : '' %>>
+    <span>Members</span>
+  </a>
+  <a href="/w/<%= wsEnc %>/settings" <%~ it.path === '/w/' + wsEnc + '/settings' ? 'aria-current="page"' : '' %>>
+    <span>Workspace settings</span>
+  </a>
+  <% } %>
+  <a href="/workspaces/new" <%~ it.path === '/workspaces/new' ? 'aria-current="page"' : '' %>>
+    <span>New workspace</span>
+  </a>
+</div>
+<% if (ws) { %>
 <div class="navgroup">
-  <h4>Projects</h4>
+  <div class="navgroup-head">
+    <h4>Projects</h4>
+    <% if (ws.owner) { %>
+    <a class="nav-add" href="/?new=project&amp;workspace=<%= wsEnc %>" title="New project" aria-label="New project">
+      <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>
+    </a>
+    <% } %>
+    <% if (it.nav.projectTotal > 0) { %>
+    <a class="nav-all" href="/?workspace=<%= wsEnc %>">Show all</a>
+    <% } %>
+  </div>
   <% if (it.nav.projects.length === 0) { %>
   <p class="note">No projects yet</p>
   <% } %>
@@ -20,15 +58,16 @@
 </div>
 <div class="navgroup">
   <h4>Global</h4>
-  <a href="/global/docs" <%~ it.path === '/global/docs' ? 'aria-current="page"' : '' %>>
+  <a href="/global/docs?workspace=<%= wsEnc %>" <%~ it.path === '/global/docs' ? 'aria-current="page"' : '' %>>
     <span>Documents</span>
     <span class="count"><%= it.nav.globalDocs %></span>
   </a>
-  <a href="/global/secrets" <%~ it.path === '/global/secrets' ? 'aria-current="page"' : '' %>>
+  <a href="/global/secrets?workspace=<%= wsEnc %>" <%~ it.path === '/global/secrets' ? 'aria-current="page"' : '' %>>
     <span>Secrets</span>
     <span class="count"><%= it.nav.globalSecrets %></span>
   </a>
 </div>
+<% } %>
 <div class="navgroup">
   <h4>Admin</h4>
   <a href="/tokens" <%~ it.path === '/tokens' ? 'aria-current="page"' : '' %>>
@@ -44,9 +83,14 @@
   <a href="/settings/password" <%~ it.path === '/settings/password' ? 'aria-current="page"' : '' %>>
     <span>Password</span>
   </a>
+  <% if (it.me && it.me.isSuper) { %>
+  <a href="/admin/users" <%~ it.path.startsWith('/admin/users') ? 'aria-current="page"' : '' %>>
+    <span>Users</span>
+  </a>
+  <% } %>
 </div>
 <div class="side-foot">
-  <span class="tag">admin</span>
+  <span><span class="tag"><%= it.me ? it.me.username : '' %></span><% if (it.me && it.me.isSuper) { %> <span class="tag">super</span><% } %></span>
   <form method="post" action="/logout">
     <input type="hidden" name="csrf" value="<%= it.csrf %>" />
     <button class="btn ghost sm" type="submit">Log out</button>

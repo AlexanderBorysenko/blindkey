@@ -33,7 +33,7 @@
       <tr<%~ actClass ? ' class="' + actClass + '"' : '' %>>
         <td><%= r.id %></td>
         <td><time datetime="<%= it.fmt.iso(r.ts) %>" title="<%= it.fmt.iso(r.ts) %>"><%= it.fmt.ago(r.ts) %></time></td>
-        <td><%= r.actor_type %><%= r.actor_id === null ? '' : ' #' + r.actor_id %></td>
+        <td><%= r.actor_label %></td>
         <td><%= r.action %></td>
         <td class="mono"><%= r.target_type === null ? '' : r.target_type + ' #' + r.target_id %></td>
         <td><%= r.field_key === null ? '' : r.field_key %></td>

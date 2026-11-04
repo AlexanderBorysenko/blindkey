@@ -1,7 +1,7 @@
 import { chmodSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { scopedPath, seg, type BlindkeyClient } from '../client.js';
+import { scopedFor, seg, type BlindkeyClient } from '../client.js';
 import type { RevealedFields } from '../api-types.js';
 import { CliError, EXIT_REFUSED } from '../errors.js';
 import type { CommandResult } from '../output.js';
@@ -72,7 +72,7 @@ export async function runSecretWrite(
   const absOut = guardAgentOut(opts.out, opts);
   let value: string;
   if (opts.agent) {
-    const revealed = await client.json<RevealedFields>('POST', scopedPath(target, 'secrets', `/${seg(name)}/use`), {
+    const revealed = await client.json<RevealedFields>('POST', await scopedFor(client, target, 'secrets', `/${seg(name)}/use`), {
       body: { purpose: 'write', fields: [field] },
     });
     const fieldValue = revealed.fields[field];
@@ -81,7 +81,7 @@ export async function runSecretWrite(
     }
     value = fieldValue;
   } else {
-    value = await client.text('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields/${seg(field)}`));
+    value = await client.text('GET', await scopedFor(client, target, 'secrets', `/${seg(name)}/fields/${seg(field)}`));
   }
   writeSecretFile(opts.out, value, mode, opts.force === true);
   if (opts.agent && opts.dataDir) recordWritten(opts.dataDir, absOut);
@@ -100,8 +100,8 @@ export async function runSecretEnv(
   const mode = parseMode(opts.mode);
   const absOut = guardAgentOut(opts.out, opts);
   const revealed = opts.agent
-    ? await client.json<RevealedFields>('POST', scopedPath(target, 'secrets', `/${seg(name)}/use`), { body: { purpose: 'env' } })
-    : await client.json<RevealedFields>('GET', scopedPath(target, 'secrets', `/${seg(name)}/fields`));
+    ? await client.json<RevealedFields>('POST', await scopedFor(client, target, 'secrets', `/${seg(name)}/use`), { body: { purpose: 'env' } })
+    : await client.json<RevealedFields>('GET', await scopedFor(client, target, 'secrets', `/${seg(name)}/fields`));
   const lines: string[] = [];
   for (const [key, value] of Object.entries(revealed.fields)) {
     if (value.includes('\n')) {

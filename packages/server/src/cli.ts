@@ -168,8 +168,9 @@ program
 
 program
   .command('passwd')
-  .description('Change the admin password (emergency recovery: signs out every session)')
-  .action(async () => {
+  .description('Change a user password (emergency recovery: signs out every session); default: the oldest super user')
+  .option('--user <username>', 'the user to reset instead of the oldest super user')
+  .action(async (opts: { user?: string }) => {
     try {
       const config = loadConfig();
       const db = openExistingDb(config);
@@ -183,7 +184,7 @@ program
           if (repeat !== password) throw new Error('passwords do not match');
         }
       }
-      const r = await runPasswordReset(db, password);
+      const r = await runPasswordReset(db, password, opts.user);
       console.log(`password changed for ${r.username}; signed out ${r.sessions} sessions`);
       db.close();
     } catch (err) {
@@ -194,12 +195,13 @@ program
 const twoFactor = program.command('2fa').description('Two-factor authentication (shell-only recovery)');
 twoFactor
   .command('reset')
-  .description('Turn off two-factor authentication for the admin (emergency recovery)')
-  .action(() => {
+  .description('Turn off two-factor authentication for a user (emergency recovery); default: the oldest super user')
+  .option('--user <username>', 'the user to reset instead of the oldest super user')
+  .action((opts: { user?: string }) => {
     try {
       const config = loadConfig();
       const db = openExistingDb(config);
-      console.log(`two-factor disabled for ${runTotpReset(db)}`);
+      console.log(`two-factor disabled for ${runTotpReset(db, opts.user)}`);
       db.close();
     } catch (err) {
       fatal(err);

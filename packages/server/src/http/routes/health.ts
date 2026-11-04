@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { principalOf } from '../helpers.js';
-import { listProjects } from '../../repos/projects.js';
+import { accessFor } from '../../auth/access.js';
 
 export function registerHealthRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get('/health', { config: { public: true } }, async () => ({ ok: true }));
@@ -11,7 +11,7 @@ export function registerHealthRoutes(app: FastifyInstance, ctx: AppContext): voi
     return {
       kind: p.kind,
       scopes: p.scopes,
-      projects: p.projectIds === null ? null : listProjects(ctx.db, p.projectIds).map((x) => x.slug),
+      projects: p.projectIds === null ? null : accessFor(ctx.db, p).visibleProjects().map((x) => x.slug),
     };
   });
 }

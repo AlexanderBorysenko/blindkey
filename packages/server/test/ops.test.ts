@@ -8,13 +8,14 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { openDb } from '../src/db/connection.js';
 import { runInit, runRotateKey, runKeyVersions, runBackup, runTotpReset, runPasswordReset } from '../src/ops.js';
-import { getAdmin, createAdmin, createSession } from '../src/repos/admin.js';
+import { getAdmin, createAdmin, createSession, createUser, getUserById, setUserSuper } from '../src/repos/admin.js';
 import { getDocument } from '../src/repos/documents.js';
 import { createSecret, revealField } from '../src/repos/secrets.js';
 import { savePendingTotp, getTotp, createChallenge, getChallenge, factorLockedUntil } from '../src/repos/twofactor.js';
 import { listAudit } from '../src/repos/audit.js';
-import { verifyPassword } from '../src/crypto/passwords.js';
+import { hashPassword, verifyPassword } from '../src/crypto/passwords.js';
 import type { KeyRing } from '../src/config.js';
+import { homeId } from './helpers.js';
 
 describe('ops', () => {
   it('init creates admin and seeds guidelines once', async () => {
@@ -22,7 +23,7 @@ describe('ops', () => {
     const first = await runInit(db, { username: 'alex', password: 'first-password!' });
     expect(first).toEqual({ adminCreated: true, guidelinesSeeded: true });
     expect(await verifyPassword(getAdmin(db)!.password_hash, 'first-password!')).toBe(true);
-    expect(getDocument(db, null, 'guidelines')?.category).toBe('guidelines');
+    expect(getDocument(db, null, 'guidelines', homeId(db))?.category).toBe('guidelines');
     // The admin already exists, so this is a no-op — a short password here must not throw
     // (F1: the validator only runs when an admin is actually being created).
     const second = await runInit(db, { username: 'other', password: 'x' });
@@ -39,7 +40,7 @@ describe('ops', () => {
   it('rotate-key rewraps secrets', () => {
     const db = openDb(':memory:');
     const ring1: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
-    const s = createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const s = createSecret(db, ring1, { projectId: null, workspaceId: homeId(db), name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     const ring2: KeyRing = { current: 2, keys: new Map([[1, ring1.keys.get(1)!], [2, randomBytes(32)]]) };
     expect(runRotateKey(db, ring2)).toEqual({ secrets: 1, totp: 0 });
     expect(revealField(db, { current: 2, keys: new Map([[2, ring2.keys.get(2)!]]) }, s.id, 'k')).toBe('v');
@@ -47,7 +48,7 @@ describe('ops', () => {
   it('rotate-key is all-or-nothing: a failed 2FA rewrap leaves the secrets table on the old key version', () => {
     const db = openDb(':memory:');
     const ring1: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
-    const s = createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const s = createSecret(db, ring1, { projectId: null, workspaceId: homeId(db), name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     const admin = createAdmin(db, 'alex', 'hash');
     savePendingTotp(db, ring1, admin.id, randomBytes(20));
     // Corrupt the 2FA row so its rewrap throws (no key for version 99 in any ring below).
@@ -63,7 +64,7 @@ describe('ops', () => {
     const db = openDb(':memory:');
     const keyA = randomBytes(32);
     const ringA: KeyRing = { current: 2, keys: new Map([[2, keyA]]) };
-    const s = createSecret(db, ringA, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    const s = createSecret(db, ringA, { projectId: null, workspaceId: homeId(db), name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
 
     const keyB = randomBytes(32);
     const wrongRing: KeyRing = { current: 2, keys: new Map([[2, keyB]]) };
@@ -85,7 +86,7 @@ describe('ops', () => {
     const k1 = randomBytes(32);
     const k2 = randomBytes(32);
     const ring1: KeyRing = { current: 1, keys: new Map([[1, k1]]) };
-    createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    createSecret(db, ring1, { projectId: null, workspaceId: homeId(db), name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     const admin = createAdmin(db, 'alex', 'hash');
     savePendingTotp(db, ring1, admin.id, randomBytes(20));
 
@@ -99,7 +100,7 @@ describe('ops', () => {
     const db = openDb(':memory:');
     const k1 = randomBytes(32);
     const ring1: KeyRing = { current: 1, keys: new Map([[1, k1]]) };
-    createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    createSecret(db, ring1, { projectId: null, workspaceId: homeId(db), name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     const ring2: KeyRing = { current: 2, keys: new Map([[2, randomBytes(32)]]) };
     expect(runKeyVersions(db, ring2)).toEqual({
       lines: ['secrets v1: 1 rows, no key configured'],
@@ -110,7 +111,7 @@ describe('ops', () => {
     const db = openDb(':memory:');
     const k1 = randomBytes(32);
     const ring1: KeyRing = { current: 1, keys: new Map([[1, k1]]) };
-    createSecret(db, ring1, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    createSecret(db, ring1, { projectId: null, workspaceId: homeId(db), name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     const wrongRing: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
     expect(runKeyVersions(db, wrongRing)).toEqual({
       lines: ['secrets v1: 1 rows, WRONG KEY (1 of 1 fail)'],
@@ -163,6 +164,35 @@ describe('ops', () => {
     const db = openDb(':memory:');
     await runInit(db, { username: 'alex', password: 'old-password!!' });
     await expect(runPasswordReset(db, 'short')).rejects.toThrow('Password must be at least 12 characters.');
+  });
+  it('passwd and 2fa reset accept a username; the default stays the oldest super; an unknown user is a clear error', async () => {
+    const db = openDb(':memory:');
+    await runInit(db, { username: 'alex', password: 'old-password!!' });
+    const alex = getAdmin(db)!;
+    const bob = createUser(db, { username: 'bob', passwordHash: await hashPassword('bob-old-password') });
+    createSession(db, alex.id, 60_000, '', '');
+    createSession(db, bob.id, 60_000, '', '');
+    const ring: KeyRing = { current: 1, keys: new Map([[1, randomBytes(32)]]) };
+    savePendingTotp(db, ring, alex.id, randomBytes(20));
+    savePendingTotp(db, ring, bob.id, randomBytes(20));
+
+    expect(await runPasswordReset(db, 'bobs-new-password', 'bob')).toEqual({ username: 'bob', sessions: 1 });
+    expect(await verifyPassword(getUserById(db, bob.id)!.password_hash, 'bobs-new-password')).toBe(true);
+    expect(await verifyPassword(getUserById(db, alex.id)!.password_hash, 'old-password!!')).toBe(true);
+    expect(runTotpReset(db, 'bob')).toBe('bob');
+    expect(getTotp(db, bob.id)).toBeNull();
+    expect(getTotp(db, alex.id)).not.toBeNull();
+    expect(listAudit(db, { action: 'auth.totp_reset' })[0]).toMatchObject({ actor_id: bob.id });
+
+    await expect(runPasswordReset(db, 'whatever-password-1', 'nobody')).rejects.toThrow('no such user "nobody"');
+    expect(() => runTotpReset(db, 'nobody')).toThrow('no such user "nobody"');
+    expect(await verifyPassword(getUserById(db, alex.id)!.password_hash, 'old-password!!')).toBe(true);
+
+    // no --user: the oldest super user, even when an older non-super user exists
+    setUserSuper(db, alex.id, false);
+    setUserSuper(db, bob.id, true);
+    expect(runTotpReset(db)).toBe('bob');
+    expect((await runPasswordReset(db, 'default-target-pass')).username).toBe('bob');
   });
   it('backup writes a consistent copy and prunes old ones', () => {
     const dir = mkdtempSync(join(tmpdir(), 'blindkey-backup-'));
@@ -247,7 +277,7 @@ describe('blindkey-server cli', () => {
 
     const db = openDb(dbPath);
     const ring: KeyRing = { current: 1, keys: new Map([[1, keyBuf]]) };
-    createSecret(db, ring, { projectId: null, name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
+    createSecret(db, ring, { projectId: null, workspaceId: homeId(db), name: 'A', description: '', tags: [], fields: [{ key: 'k', value: 'v' }] });
     db.close();
 
     const tsx = join(root, 'node_modules/.bin/tsx');
@@ -280,5 +310,37 @@ describe('blindkey-server cli', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(`error: no database at ${dbPath} — run init first (or check BLINDKEY_DATA_DIR / the restore)`);
     expect(existsSync(dbPath)).toBe(false);
+  });
+  it('passwd/2fa reset --user (spawned): resets the named user, exits 1 with a clear message for an unknown one', async () => {
+    const root = fileURLToPath(new URL('../../..', import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), 'blindkey-recovery-'));
+    const dbPath = join(dir, 'blindkey.sqlite');
+    const db = openDb(dbPath);
+    await runInit(db, { username: 'alex', password: 'old-password!!' });
+    const bob = createUser(db, { username: 'bob', passwordHash: await hashPassword('bob-old-password') });
+    db.close();
+    const tsx = join(root, 'node_modules/.bin/tsx');
+    const cli = join(root, 'packages/server/src/cli.ts');
+    const env = {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? '',
+      BLINDKEY_DATA_DIR: dir,
+      BLINDKEY_DB_PATH: dbPath,
+      BLINDKEY_MASTER_KEY: randomBytes(32).toString('base64'),
+      BLINDKEY_ADMIN_PASSWORD: 'recovered-password-1',
+    };
+    const ok = spawnSync(tsx, [cli, 'passwd', '--user', 'bob'], { env, encoding: 'utf8' });
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toContain('password changed for bob');
+    const bad = spawnSync(tsx, [cli, 'passwd', '--user', 'nobody'], { env, encoding: 'utf8' });
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain('error: no such user "nobody"');
+    const bad2 = spawnSync(tsx, [cli, '2fa', 'reset', '--user', 'nobody'], { env, encoding: 'utf8' });
+    expect(bad2.status).toBe(1);
+    expect(bad2.stderr).toContain('error: no such user "nobody"');
+    const after = openDb(dbPath);
+    expect(await verifyPassword(getUserById(after, bob.id)!.password_hash, 'recovered-password-1')).toBe(true);
+    expect(await verifyPassword(getAdmin(after)!.password_hash, 'old-password!!')).toBe(true);
+    after.close();
   });
 });

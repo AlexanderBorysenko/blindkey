@@ -1,17 +1,22 @@
 import type { AppContext } from '../http/context.js';
 import type { Actor } from '../auth/principal.js';
-import { getAdminById, setAdminPasswordHash, deleteOtherSessions } from '../repos/admin.js';
+import { getAdminById, setAdminPasswordHash, deleteOtherSessions, setUserMustChangePassword } from '../repos/admin.js';
 import { hashPassword, verifyPassword } from '../crypto/passwords.js';
 import { isSecondFactorLocked, isTotpEnabled, verifySecondFactor, type SecondFactor } from './twofactor.js';
 import { deleteChallengesFor } from '../repos/twofactor.js';
 import { factorLockedMessage } from '../ui/routes/auth.js';
-import { auditAs } from './common.js';
+import { assertNotImpersonating, auditAs } from './common.js';
 
 /** Shared by the UI form and the `passwd` shell command (spec §1.1). */
 export function validateNewPassword(pw: string): string | null {
   if (pw.length < 12) return 'Password must be at least 12 characters.';
   if (pw.length > 1024) return 'Password must be at most 1024 characters.';
   return null;
+}
+
+/** True while the user must pick a new password before doing anything else (temporary / reset password). */
+export function mustChangePassword(ctx: AppContext, userId: number): boolean {
+  return getAdminById(ctx.db, userId)?.must_change_password === true;
 }
 
 export interface ChangePasswordInput {
@@ -49,6 +54,7 @@ export async function changePassword(
   input: ChangePasswordInput,
   keepSessionId: string,
 ): Promise<ChangePasswordResult> {
+  assertNotImpersonating(actor.principal);
   const adminId = actor.principal.id;
   const admin = getAdminById(ctx.db, adminId);
   if (!admin) throw new Error('admin not found');
@@ -75,6 +81,7 @@ export async function changePassword(
   const hash = await hashPassword(input.next);
   const sessionsRevoked = ctx.db.transaction(() => {
     setAdminPasswordHash(ctx.db, adminId, hash);
+    setUserMustChangePassword(ctx.db, adminId, false);
     const revoked = deleteOtherSessions(ctx.db, adminId, keepSessionId);
     deleteChallengesFor(ctx.db, adminId);
     if (usedFactor === 'recovery') auditAs(ctx, actor, { action: 'auth.recovery_used', meta: { via: 'password_change' } });

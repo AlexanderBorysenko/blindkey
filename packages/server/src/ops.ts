@@ -4,8 +4,9 @@ import Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { openDb, type Db } from './db/connection.js';
 import type { KeyRing, Config } from './config.js';
-import { createAdmin, deleteAllSessions, getAdmin, setAdminPasswordHash } from './repos/admin.js';
+import { createAdmin, deleteAllSessions, getAdmin, getAdminByUsername, getOldestSuper, setAdminPasswordHash, type AdminRow } from './repos/admin.js';
 import { getDocument, upsertDocument } from './repos/documents.js';
+import { getDefaultWorkspace } from './repos/workspaces.js';
 import { rewrapAllSecrets, secretKeyVersionReport } from './repos/secrets.js';
 import { deleteChallengesFor, deleteTwoFactor, resetFactorFailures, rewrapTotpSecrets, totpKeyVersionReport } from './repos/twofactor.js';
 import { writeAudit } from './repos/audit.js';
@@ -25,8 +26,10 @@ export async function runInit(db: Db, opts: { username: string; password: string
     adminCreated = true;
   }
   let guidelinesSeeded = false;
-  if (!getDocument(db, null, 'guidelines')) {
-    upsertDocument(db, { projectId: null, slug: 'guidelines', title: 'Documentation guidelines', category: 'guidelines', body_md: GUIDELINES_MD });
+  // The global guidelines document lives in the first workspace.
+  const home = getDefaultWorkspace(db);
+  if (home && !getDocument(db, null, 'guidelines', home.id)) {
+    upsertDocument(db, { projectId: null, workspaceId: home.id, slug: 'guidelines', title: 'Documentation guidelines', category: 'guidelines', body_md: GUIDELINES_MD });
     guidelinesSeeded = true;
   }
   return { adminCreated, guidelinesSeeded };
@@ -56,9 +59,20 @@ export function runKeyVersions(db: Db, ring: KeyRing): { lines: string[]; ok: bo
   return { lines, ok };
 }
 
-export function runTotpReset(db: Db): string {
-  const admin = getAdmin(db);
+/** The user a shell recovery command acts on: the named one, else the oldest super user. */
+function recoveryTarget(db: Db, username?: string): AdminRow {
+  if (username !== undefined) {
+    const user = getAdminByUsername(db, username);
+    if (!user) throw new Error(`no such user "${username}"`);
+    return user;
+  }
+  const admin = getOldestSuper(db);
   if (!admin) throw new Error('no admin user — run init first');
+  return admin;
+}
+
+export function runTotpReset(db: Db, username?: string): string {
+  const admin = recoveryTarget(db, username);
   deleteTwoFactor(db, admin.id);
   writeAudit(db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_reset', meta: { via: 'shell' } });
   return admin.username;
@@ -73,9 +87,8 @@ export function runTotpReset(db: Db): string {
  * `hashPassword` is async, so the hash is computed before the transaction opens — better-sqlite3
  * transactions must run synchronously.
  */
-export async function runPasswordReset(db: Db, password: string): Promise<{ username: string; sessions: number }> {
-  const admin = getAdmin(db);
-  if (!admin) throw new Error('no admin user — run init first');
+export async function runPasswordReset(db: Db, password: string, username?: string): Promise<{ username: string; sessions: number }> {
+  const admin = recoveryTarget(db, username);
   const error = validateNewPassword(password);
   if (error) throw new Error(error);
   const hash = await hashPassword(password);

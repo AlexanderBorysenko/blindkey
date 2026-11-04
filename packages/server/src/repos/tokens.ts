@@ -16,6 +16,8 @@ export interface TokenRow {
   revoked_at: number | null;
   created_at: number;
   kind: TokenKind;
+  /** The user the token acts as; null only for rows orphaned by a deleted user (they never authenticate). */
+  user_id: number | null;
   /** Admin-chosen display name (e.g. "Acme Shop · home PC"); `name` stays the machine identity. */
   label: string | null;
 }
@@ -27,7 +29,7 @@ interface RawToken extends Omit<TokenRow, 'scopes' | 'project_ids' | 'kind'> {
   kind: string;
 }
 
-const COLS = 'id, name, prefix, token_hash, scopes, project_ids, expires_at, last_used_at, revoked_at, created_at, kind, label';
+const COLS = 'id, name, prefix, token_hash, scopes, project_ids, expires_at, last_used_at, revoked_at, created_at, kind, label, user_id';
 
 function toRow(r: RawToken): TokenRow {
   const { token_hash: _hash, ...rest } = r;
@@ -41,11 +43,11 @@ function toRow(r: RawToken): TokenRow {
 
 export function createToken(
   db: Db,
-  input: { name: string; scopes: Scope[]; projectIds: number[] | null; expiresAt: number | null; kind?: TokenKind; label?: string | null },
+  input: { userId: number; name: string; scopes: Scope[]; projectIds: number[] | null; expiresAt: number | null; kind?: TokenKind; label?: string | null },
 ): { token: string; row: TokenRow } {
   const t = generateToken();
   const info = db
-    .prepare(`INSERT INTO api_tokens (name, prefix, token_hash, scopes, project_ids, expires_at, created_at, kind, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .prepare(`INSERT INTO api_tokens (name, prefix, token_hash, scopes, project_ids, expires_at, created_at, kind, label, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(
       input.name,
       t.prefix,
@@ -56,6 +58,7 @@ export function createToken(
       now(),
       input.kind ?? 'user',
       input.label ?? null,
+      input.userId,
     );
   const row = db.prepare(`SELECT ${COLS} FROM api_tokens WHERE id = ?`).get(Number(info.lastInsertRowid)) as RawToken;
   return { token: t.token, row: toRow(row) };
@@ -89,23 +92,39 @@ export function touchToken(db: Db, id: number, ts: number = now()): void {
   db.prepare(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`).run(ts, id);
 }
 
+/** Every token of every user (tests and tooling only — the services list per user). */
 export function listTokens(db: Db): TokenRow[] {
   return (db.prepare(`SELECT ${COLS} FROM api_tokens ORDER BY id`).all() as RawToken[]).map(toRow);
+}
+
+export function getTokenById(db: Db, id: number): TokenRow | null {
+  const r = db.prepare(`SELECT ${COLS} FROM api_tokens WHERE id = ?`).get(id) as RawToken | undefined;
+  return r ? toRow(r) : null;
+}
+
+/** The tokens one user owns; nobody ever lists another user's tokens. */
+export function listTokensForUser(db: Db, userId: number): TokenRow[] {
+  return (db.prepare(`SELECT ${COLS} FROM api_tokens WHERE user_id = ? ORDER BY id`).all(userId) as RawToken[]).map(toRow);
 }
 
 export function revokeToken(db: Db, id: number, ts: number = now()): boolean {
   return db.prepare(`UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`).run(ts, id).changes > 0;
 }
 
+/** Revokes every still-active token of a user (API and agent tokens alike). Returns how many were revoked. */
+export function revokeTokensForUser(db: Db, userId: number, ts: number = now()): number {
+  return db.prepare(`UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`).run(ts, userId).changes;
+}
+
 /**
- * Revokes every still-active `kind='agent'` token with this exact name (spec §1.3): a device-flow
+ * Revokes every still-active `kind='agent'` token of this user with this exact name (spec §1.3): a device-flow
  * approval for a name that already has a live agent token supersedes it, rather than piling up
  * agent tokens under the same name every time `blindkey connect` is re-run.
  */
-export function revokeAgentTokensByName(db: Db, name: string, ts: number = now()): number {
+export function revokeAgentTokensByName(db: Db, userId: number, name: string, ts: number = now()): number {
   return db
-    .prepare(`UPDATE api_tokens SET revoked_at = ? WHERE name = ? AND kind = 'agent' AND revoked_at IS NULL`)
-    .run(ts, name).changes;
+    .prepare(`UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND name = ? AND kind = 'agent' AND revoked_at IS NULL`)
+    .run(ts, userId, name).changes;
 }
 
 /** Adds one project to a project-scoped token (no-op for an all-projects token or one that already has it). */
@@ -132,9 +151,9 @@ export function setTokenLabel(db: Db, id: number, label: string | null): boolean
 }
 
 /** The label of the newest agent token with this name — carried over when a reconnect supersedes it. */
-export function latestAgentLabel(db: Db, name: string): string | null {
+export function latestAgentLabel(db: Db, userId: number, name: string): string | null {
   const r = db
-    .prepare(`SELECT label FROM api_tokens WHERE name = ? AND kind = 'agent' AND label IS NOT NULL ORDER BY id DESC LIMIT 1`)
-    .get(name) as { label: string } | undefined;
+    .prepare(`SELECT label FROM api_tokens WHERE user_id = ? AND name = ? AND kind = 'agent' AND label IS NOT NULL ORDER BY id DESC LIMIT 1`)
+    .get(userId, name) as { label: string } | undefined;
   return r?.label ?? null;
 }

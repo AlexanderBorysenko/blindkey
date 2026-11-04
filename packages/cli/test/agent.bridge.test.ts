@@ -22,6 +22,7 @@ const UPSTREAM_TOOL_NAMES = [
   'list_documents',
   'list_projects',
   'list_secrets',
+  'list_workspaces',
   'read_document',
   'search',
   'secret_request_link',
@@ -106,7 +107,7 @@ describe('MCP bridge (spec §2.4)', () => {
     expect(names).toEqual([...UPSTREAM_TOOL_NAMES, ...LOCAL_TOOL_NAMES].sort());
   });
 
-  it('not connected: tools/list still lists all 11 allowlisted upstream tools, from the static descriptors (F2)', async () => {
+  it('not connected: tools/list still lists all 12 allowlisted upstream tools, from the static descriptors (F2)', async () => {
     // No profile configured at all.
     const client = await connectBridge();
     const tools = (await client.listTools()).tools;
@@ -238,6 +239,35 @@ describe('MCP bridge (spec §2.4)', () => {
     expect(text).not.toMatch(/widen/);
   });
 
+  it('list_workspaces is allowed and `workspace` passes through the global tools (incl. the request link)', async () => {
+    s.workspace('second', 'Second');
+    s.doc(null, 'second-guide', '# s', 'second');
+    s.secret(null, 'Second VPS', [{ key: 'host', value: 's.example' }], 'second');
+    connectedProfile(['projects:read', 'docs:read', 'secrets:meta']);
+    const client = await connectBridge();
+
+    const ws = (await client.callTool({ name: 'list_workspaces', arguments: {} })) as CallToolResult;
+    expect(ws.isError).not.toBe(true);
+    expect((JSON.parse(textOf(ws)) as { slug: string }[]).map((w) => w.slug).sort()).toEqual(['default', 'second']);
+
+    const ambiguous = (await client.callTool({ name: 'list_documents', arguments: {} })) as CallToolResult;
+    expect(ambiguous.isError).toBe(true);
+    expect(textOf(ambiguous)).toContain('workspace required');
+
+    const docs = (await client.callTool({ name: 'list_documents', arguments: { workspace: 'second' } })) as CallToolResult;
+    expect(textOf(docs)).toContain('second-guide');
+    const secrets = (await client.callTool({ name: 'list_secrets', arguments: { workspace: 'second' } })) as CallToolResult;
+    expect(textOf(secrets)).toContain('Second VPS');
+
+    const link = (await client.callTool({
+      name: 'secret_request_link',
+      arguments: { workspace: 'second', name: 'Second VPS', keys: [{ key: 'password', sensitive: true }] },
+    })) as CallToolResult;
+    const url = (JSON.parse(textOf(link)) as { url: string }).url;
+    expect(url).toContain('/global/secrets/Second%20VPS/edit?');
+    expect(url).toContain('workspace=second');
+  });
+
   it('project not found (missing OR not approved for this token) gets a connect-to-widen hint naming both possibilities', async () => {
     connectedProfile(['projects:read']);
     const client = await connectBridge();
@@ -333,7 +363,7 @@ describe('MCP bridge (spec §2.4)', () => {
     try {
       const client = await connectBridge();
       const names = (await client.listTools()).tools.map((t) => t.name).sort();
-      // Exactly the 10 allowed upstream tools + the 3 local tools — `reveal_secret` is dropped, and
+      // Exactly the allowed upstream tools + the 3 local tools — `reveal_secret` is dropped, and
       // the upstream's own (trivial) `blindkey_status` never shadows the real local one.
       expect(names).toEqual([...UPSTREAM_TOOL_NAMES, ...LOCAL_TOOL_NAMES].sort());
       const status = (await client.callTool({ name: 'blindkey_status', arguments: {} })) as CallToolResult;

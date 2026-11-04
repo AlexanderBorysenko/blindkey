@@ -11,7 +11,7 @@ describe('agent token kind (spec §1.1)', () => {
     const t = await makeTestApp();
     const row = t.db.prepare(`SELECT kind FROM api_tokens LIMIT 0`).columns();
     expect(row.some((c) => c.name === 'kind')).toBe(true);
-    const { row: created } = createToken(t.db, { name: 'plain', scopes: ['docs:read'], projectIds: null, expiresAt: null });
+    const { row: created } = createToken(t.db, { userId: t.owner().id, name: 'plain', scopes: ['docs:read'], projectIds: null, expiresAt: null });
     expect(created.kind).toBe('user');
     const raw = t.db.prepare(`SELECT kind FROM api_tokens WHERE id = ?`).get(created.id) as { kind: string };
     expect(raw.kind).toBe('user');
@@ -19,14 +19,14 @@ describe('agent token kind (spec §1.1)', () => {
 
   it('createToken accepts an explicit agent kind', async () => {
     const t = await makeTestApp();
-    const { row } = createToken(t.db, { name: 'agent-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
+    const { row } = createToken(t.db, { userId: t.owner().id, name: 'agent-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
     expect(row.kind).toBe('agent');
   });
 
   it('a bearer request from an agent-kind token sets principal.agent = true; a user-kind token sets it false', async () => {
     const t = await makeTestApp();
-    const { token: agentToken } = createToken(t.db, { name: 'agent', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
-    const { token: userToken } = createToken(t.db, { name: 'user', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'user' });
+    const { token: agentToken } = createToken(t.db, { userId: t.owner().id, name: 'agent', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
+    const { token: userToken } = createToken(t.db, { userId: t.owner().id, name: 'user', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'user' });
 
     const app = Fastify();
     registerAuth(app, t.ctx);
@@ -65,8 +65,8 @@ describe('agent token kind (spec §1.1)', () => {
     createAdmin(t.db, 'alex', await hashPassword('pw'));
     const session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
       .cookies.find((c) => c.name === 'blindkey_session')!.value;
-    createToken(t.db, { name: 'the-agent-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
-    createToken(t.db, { name: 'the-user-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'user' });
+    createToken(t.db, { userId: t.owner().id, name: 'the-agent-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
+    createToken(t.db, { userId: t.owner().id, name: 'the-user-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'user' });
     const res = await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } });
     expect(res.statusCode).toBe(200);
     const body = res.body;

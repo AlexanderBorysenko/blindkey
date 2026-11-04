@@ -1,13 +1,18 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Principal } from '../../auth/principal.js';
 import type { AppContext } from '../../http/context.js';
+import { labelActors } from '../actors.js';
 import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretKeySchema, secretPatchSchema } from '@blindkey/shared';
-import { createSecretFor, deleteSecretFor, getSecretFor, listSecretsFor, recentSecretAccessFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
-import { ConflictError } from '../../errors.js';
+import { deleteSecretFor, getSecretFor, listSecretsFor, recentSecretAccessFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
+import { ConflictError, PermissionError } from '../../errors.js';
+import { createSecretWithAccess } from '../../services/create-with-access.js';
 import { adminActor, requireAdmin } from '../session.js';
+import { accessEntries, globalMoveTargets, scopeAccessField } from '../workspace-ui.js';
+import { createCaps, secretCaps } from '../caps.js';
 import { assertCsrf } from '../csrf.js';
-import { body, list, parseTags, pageContext, str } from '../forms.js';
+import { activeWorkspace, body, list, parseTags, pageContext, str, wsParam } from '../forms.js';
 import { renderPage, renderPartial } from '../render.js';
-import { scopeOf } from './documents.js';
+import { scopeOf, type UiScope } from './documents.js';
 
 type SecretParams = { Params: { slug?: string; name: string } };
 /** `GET .../secrets/new` and `.../secrets/:name/edit` (spec §1.4): a prefill link, so the query is untyped and permissive. */
@@ -18,11 +23,6 @@ interface FieldRow {
   key: string;
   value: string;
   sensitive: boolean;
-}
-
-/** POSIX single-quote a string for safe use in a shell command line (each `'` becomes `'\''`). */
-function shQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
@@ -90,22 +90,40 @@ function prefillRowsForNew(raw: string): FieldRow[] {
   return rows.length > 0 ? rows : [{ key: '', value: '', sensitive: true }];
 }
 
+/** The secret page; `moveError` shows an inline message when a move from it was refused. */
+export function secretPage(ctx: AppContext, req: FastifyRequest, principal: Principal, scope: UiScope, name: string, moveError: string | null): string {
+  const secret = getSecretFor(ctx, principal, scope.projectSlug, name);
+  return renderPage('secret', {
+    ...pageContext(ctx, req, secret.name),
+    prefix: scope.prefix,
+    scopeLabel: scope.projectSlug ?? 'global',
+    secret,
+    access: labelActors(ctx, recentSecretAccessFor(ctx, principal, scope.projectSlug, secret.name)),
+    ...secretCaps(ctx, principal, scope.projectSlug, secret.name),
+    moveTargets: scope.projectSlug === null ? globalMoveTargets(ctx, principal) : [],
+    moveError,
+  });
+}
+
 export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get('/global/secrets', async (req, reply) => {
     const principal = requireAdmin(req);
+    if (activeWorkspace(ctx, principal) === null) return reply.type('text/html').send(renderPage('no-workspace', { ...pageContext(ctx, req, 'Global secrets') }));
     return reply.type('text/html').send(
       renderPage('secrets', {
         ...pageContext(ctx, req, 'Global secrets'),
         prefix: '/global',
         secrets: listSecretsFor(ctx, principal, null),
+        ...createCaps(ctx, principal, null),
       }),
     );
   });
 
   for (const base of ['/p/:slug/secrets', '/global/secrets']) {
     app.get<SecretNewParams>(`${base}/new`, async (req, reply) => {
-      requireAdmin(req);
+      const principal = requireAdmin(req);
       const scope = scopeOf(req.params);
+      if (!createCaps(ctx, principal, scope.projectSlug).canCreateSecret) throw new PermissionError('public.write');
       // Prefill only: name/description/tags/keys, never a value (spec §1.4 — `value*` query
       // params are simply never read here, whatever a caller sends).
       const q = req.query;
@@ -118,6 +136,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
           originalName: null,
           action: `${scope.prefix}/secrets`,
           hintKeys: NON_SENSITIVE_KEYS,
+          access: scopeAccessField(ctx, principal, scope.projectSlug, 'secret'),
           error: null,
           form: {
             name: str(q, 'name'),
@@ -131,7 +150,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
 
     app.post<SecretParams>(base, async (req, reply) => {
       assertCsrf(ctx, req);
-      requireAdmin(req);
+      const principal = requireAdmin(req);
       const scope = scopeOf(req.params);
       const b = body(req);
       const rows = fieldRows(b);
@@ -151,6 +170,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
             originalName: null,
             action: `${scope.prefix}/secrets`,
             hintKeys: NON_SENSITIVE_KEYS,
+            access: scopeAccessField(ctx, principal, scope.projectSlug, 'secret'),
             error: parsed.error.issues.map((i) => `${i.path.join('.') || 'form'}: ${i.message}`).join('; '),
             form: { name: str(b, 'name'), description: str(b, 'description'), tags: str(b, 'tags'), rows },
           }),
@@ -158,7 +178,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
       }
       let created;
       try {
-        created = createSecretFor(ctx, adminActor(req), scope.projectSlug, parsed.data);
+        created = createSecretWithAccess(ctx, adminActor(req), scope.projectSlug, parsed.data, accessEntries(req));
       } catch (err) {
         if (!(err instanceof ConflictError)) throw err;
         // A name collision: the typed-in values (possibly sensitive) are never echoed back into
@@ -174,6 +194,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
             originalName: null,
             action: `${scope.prefix}/secrets`,
             hintKeys: NON_SENSITIVE_KEYS,
+            access: scopeAccessField(ctx, principal, scope.projectSlug, 'secret'),
             error: 'A secret with this name already exists — open it to edit.',
             form: {
               name: str(b, 'name'),
@@ -184,34 +205,22 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
           }),
         );
       }
-      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(created.name)}?done=created`, 302);
+      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(created.name)}?done=created${wsParam(req, scope.projectSlug === null)}`, 302);
     });
   }
 
   for (const base of ['/p/:slug/secrets', '/global/secrets']) {
     app.get<SecretParams>(`${base}/:name`, async (req, reply) => {
       const principal = requireAdmin(req);
-      const scope = scopeOf(req.params);
-      const secret = getSecretFor(ctx, principal, scope.projectSlug, req.params.name);
-      return reply.type('text/html').send(
-        renderPage('secret', {
-          ...pageContext(ctx, req, secret.name),
-          prefix: scope.prefix,
-          scopeLabel: scope.projectSlug ?? 'global',
-          secret,
-          access: recentSecretAccessFor(ctx, principal, scope.projectSlug, secret.name),
-          // A runnable `blindkey secret env <target> <name> --out .env`: `target` is the project slug
-          // or the literal `global` (see packages/cli/src/client.ts `scopedPath`), and `name` is
-          // POSIX single-quoted so a name containing spaces or quotes still pastes as one argument.
-          cliRef: `${scope.projectSlug ?? 'global'} ${shQuote(secret.name)} --out .env`,
-        }),
-      );
+      return reply.type('text/html').send(secretPage(ctx, req, principal, scopeOf(req.params), req.params.name, null));
     });
 
     app.get<SecretEditParams>(`${base}/:name/edit`, async (req, reply) => {
       const principal = requireAdmin(req);
       const scope = scopeOf(req.params);
       const secret = getSecretFor(ctx, principal, scope.projectSlug, req.params.name);
+      // Without write permission the form would only show blank rows that every save refuses.
+      if (!secretCaps(ctx, principal, scope.projectSlug, secret.name).canEdit) throw new PermissionError('public.write');
       const existingKeys = new Set(secret.fields.map((f) => f.key));
       // `secret_request_link` (spec §1.5) for a name that already exists points here instead of
       // `/new`, with the same `keys` param: any key not already on the secret gets an extra empty
@@ -296,7 +305,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
         if (err instanceof ConflictError) return rerender(err.message);
         throw err;
       }
-      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(updated.name)}?done=saved`, 302);
+      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(updated.name)}?done=saved${wsParam(req, scope.projectSlug === null)}`, 302);
     });
 
     app.post<SecretParams>(`${base}/:name/delete`, async (req, reply) => {
@@ -304,7 +313,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
       requireAdmin(req);
       const scope = scopeOf(req.params);
       deleteSecretFor(ctx, adminActor(req), scope.projectSlug, req.params.name);
-      return reply.redirect(scope.projectSlug ? `${scope.prefix}?tab=secrets&done=deleted` : '/global/secrets?done=deleted', 302);
+      return reply.redirect(scope.projectSlug ? `${scope.prefix}?tab=secrets&done=deleted` : `/global/secrets?done=deleted${wsParam(req, true)}`, 302);
     });
 
     app.post<SecretParams>(`${base}/:name/reveal`, async (req, reply) => {
