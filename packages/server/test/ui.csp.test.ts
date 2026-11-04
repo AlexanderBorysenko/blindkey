@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { makeTestApp, type TestCtx } from './helpers.js';
+import { makeTestApp, sessionFor, type TestCtx } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { createSecret } from '../src/repos/secrets.js';
@@ -28,8 +28,8 @@ export function assertNoInlineCode(html: string, label: string): void {
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
-  session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'blindkey_session')!.value;
+  t.enroll('alex');
+  session = sessionFor(t.db, 'alex');
   t.project('acme');
   const acme = getProjectBySlug(t.db, 'acme')!.id;
   createSecret(t.db, t.ring, { projectId: acme, name: 'DB', description: '', tags: [], fields: [{ key: 'host', value: 'db' }, { key: 'password', value: 'hunter2hunter2' }] });
@@ -87,15 +87,15 @@ describe('strict CSP', () => {
     assertNoInlineCode((await post('/p/acme/secrets/DB/reveal', { csrf, key: 'password' })).body, 'reveal partial');
     assertNoInlineCode((await post('/preview', { csrf, body_md: '<p style="x" onclick="y">z</p>', scope: '/p/acme' })).body, 'preview');
 
-    // 2FA pages, on a separate app instance so the rest of this file keeps a plain,
-    // never-enrolled login (existing UI tests log in with a password only).
+    // 2FA pages, on a separate app instance so the rest of this file keeps an
+    // enrolled owner; bob starts without 2FA and enrols through the gated settings page.
     const t2 = await makeTestApp();
     try {
       createAdmin(t2.db, 'bob', await hashPassword('pw'));
       const bobLogin = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'pw' } });
       const bobSession = bobLogin.cookies.find((c) => c.name === 'blindkey_session')!.value;
       const bobCookies = { blindkey_session: bobSession };
-      const bobHome = await t2.app.inject({ method: 'GET', url: '/', cookies: bobCookies });
+      const bobHome = await t2.app.inject({ method: 'GET', url: '/settings/2fa', cookies: bobCookies });
       const bobCsrf = /name="csrf" value="([^"]+)"/.exec(bobHome.body)![1]!;
 
       assertNoInlineCode((await t2.app.inject({ method: 'GET', url: '/settings/2fa', cookies: bobCookies })).body, '/settings/2fa (off)');

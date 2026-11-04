@@ -261,6 +261,13 @@ UPDATE api_tokens SET user_id = (SELECT id FROM admin ORDER BY id LIMIT 1);
 UPDATE connect_requests SET approved_by_user_id = (SELECT id FROM admin ORDER BY id LIMIT 1);
 `,
   },
+  {
+    id: 8,
+    sql: `
+-- A super user set up this user's two-factor (new account or 2FA reset): until it is confirmed the user cannot log in.
+ALTER TABLE admin ADD COLUMN twofactor_by_admin INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];
 
 export function runMigrations(db: Database.Database): number {

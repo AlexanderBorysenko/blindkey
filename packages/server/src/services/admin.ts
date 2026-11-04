@@ -11,7 +11,7 @@ import { getAdminByUsername } from '../repos/admin.js';
 import { verifyPassword } from '../crypto/passwords.js';
 import { assertNotImpersonating, auditAs } from './common.js';
 import { mustChangePassword } from './password.js';
-import { isSecondFactorLocked, isTotpEnabled, verifySecondFactor, type SecondFactor } from './twofactor.js';
+import { assertTwoFactorEnabled, isLoginBlockedBySetup, isSecondFactorLocked, isTotpEnabled, verifySecondFactor } from './twofactor.js';
 
 export interface PublicToken {
   id: number;
@@ -70,6 +70,7 @@ export const DEFAULT_TOKEN_DAYS = 90;
 export function createTokenFor(ctx: AppContext, actor: Actor, input: TokenInput): PublicToken & { token: string } {
   assertScope(actor.principal, 'admin');
   assertNotImpersonating(actor.principal);
+  assertTwoFactorEnabled(ctx, actor.principal.userId);
   const projectIds = tokenProjectIds(ctx, accessFor(ctx.db, actor.principal), input.projects);
   const nowTs = Date.now();
   const expiresAt = input.expires_at === undefined ? nowTs + DEFAULT_TOKEN_DAYS * DAY_MS : input.expires_at;
@@ -143,31 +144,33 @@ export function listAuditFor(ctx: AppContext, principal: Principal, query: Audit
 
 export type ExchangeResult =
   | { ok: true; token: string; id: number; name: string; expires_at: number }
-  | { ok: false; reason: 'invalid' | 'totp_required' | 'totp_locked' | 'password_change_required' };
+  | { ok: false; reason: 'invalid' | 'totp_required' | 'totp_locked' | 'password_change_required' | 'totp_setup_required' };
 
 export async function exchangePassword(ctx: AppContext, input: AuthTokenRequest, ip: string, userAgent: string): Promise<ExchangeResult> {
   const admin = getAdminByUsername(ctx.db, input.username);
   const ok = admin ? await verifyPassword(admin.password_hash, input.password) : false;
-  // A disabled user fails like a wrong password.
-  if (!admin || !ok || admin.disabled_at !== null) {
+  // A disabled user, or one whose two-factor a super user is still setting up, fails like a wrong password.
+  if (!admin || !ok || admin.disabled_at !== null || isLoginBlockedBySetup(ctx, admin.id)) {
     writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin?.id ?? null, action: 'auth.login_failed', ip, user_agent: userAgent, meta: { username: input.username } });
     return { ok: false, reason: 'invalid' };
   }
-  let secondFactor: SecondFactor | undefined;
-  if (isTotpEnabled(ctx, admin.id)) {
-    // spec §2: written as soon as the password verifies for a 2FA admin, before the lock and
-    // code checks, so the operator can see the password is known even when every code guess fails.
-    writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.password_ok', ip, user_agent: userAgent, meta: { via: 'api' } });
-    if (isSecondFactorLocked(ctx, admin.id) !== null) return { ok: false, reason: 'totp_locked' };
-    if (input.totp === undefined) return { ok: false, reason: 'totp_required' };
-    const used = await verifySecondFactor(ctx, admin.id, input.totp);
-    if (!used) {
-      writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_failed', ip, user_agent: userAgent, meta: { via: 'api' } });
-      return { ok: false, reason: 'invalid' };
-    }
-    if (used === 'recovery') writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.recovery_used', ip, user_agent: userAgent, meta: { via: 'api' } });
-    secondFactor = used;
+  // Two-factor is mandatory: no API token until the user has enrolled in the web UI (after the password change, if one is due).
+  if (!isTotpEnabled(ctx, admin.id)) {
+    const reason = mustChangePassword(ctx, admin.id) ? 'password_change_required' : 'totp_setup_required';
+    writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.login_blocked', ip, user_agent: userAgent, meta: { via: 'api', reason } });
+    return { ok: false, reason };
   }
+  // spec §2: written as soon as the password verifies for a 2FA admin, before the lock and
+  // code checks, so the operator can see the password is known even when every code guess fails.
+  writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.password_ok', ip, user_agent: userAgent, meta: { via: 'api' } });
+  if (isSecondFactorLocked(ctx, admin.id) !== null) return { ok: false, reason: 'totp_locked' };
+  if (input.totp === undefined) return { ok: false, reason: 'totp_required' };
+  const secondFactor = await verifySecondFactor(ctx, admin.id, input.totp);
+  if (!secondFactor) {
+    writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_failed', ip, user_agent: userAgent, meta: { via: 'api' } });
+    return { ok: false, reason: 'invalid' };
+  }
+  if (secondFactor === 'recovery') writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.recovery_used', ip, user_agent: userAgent, meta: { via: 'api' } });
   // A temporary / reset password only opens the browser's change-password page; no API token comes of it.
   if (mustChangePassword(ctx, admin.id)) {
     writeAudit(ctx.db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.login_blocked', ip, user_agent: userAgent, meta: { via: 'api', reason: 'password_change_required' } });
@@ -176,7 +179,7 @@ export async function exchangePassword(ctx: AppContext, input: AuthTokenRequest,
   const { token, row } = createToken(ctx.db, { userId: admin.id, name: input.name, scopes: ['admin'], projectIds: null, expiresAt: Date.now() + input.expires_days * DAY_MS });
   writeAudit(ctx.db, {
     actor_type: 'admin', actor_id: admin.id, action: 'auth.login', target_type: 'token', target_id: row.id, ip, user_agent: userAgent,
-    meta: { name: row.name, ...(secondFactor ? { second_factor: secondFactor } : {}) },
+    meta: { name: row.name, second_factor: secondFactor },
   });
   return { ok: true, token, id: row.id, name: row.name, expires_at: row.expires_at as number };
 }

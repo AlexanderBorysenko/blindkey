@@ -1,6 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { makeTestApp, type TestCtx } from './helpers.js';
+import { makeTestApp, sessionFor, type TestCtx } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { createSecret } from '../src/repos/secrets.js';
@@ -19,8 +19,8 @@ function sidebar(body: string): string {
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
-  const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-  session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
+  t.enroll('alex');
+  session = sessionFor(t.db, 'alex');
   t.project('acme');
   const acme = getProjectBySlug(t.db, 'acme')!;
   createSecret(t.db, t.ring, { projectId: acme.id, name: 'DB', description: '', tags: [], fields: [{ key: 'password', value: 'hunter2hunter2' }] });

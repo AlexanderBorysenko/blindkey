@@ -42,6 +42,7 @@ beforeAll(async () => {
   createAdmin(t.db, 'alex', await hashPassword('super-password-1'));
   createUser(t.db, { username: 'bob', passwordHash: await hashPassword('bob-password-1') });
   createUser(t.db, { username: 'carol', passwordHash: await hashPassword('carol-password-1') });
+  for (const u of ['alex', 'bob', 'carol']) t.enroll(u);
   alex = sessionFor('alex');
   bob = sessionFor('bob');
   alexCsrf = csrfOf((await get(alex, '/')).body);
@@ -78,12 +79,14 @@ describe('sidebar: switcher, projects, global', () => {
     expect(side).toContain('href="/admin/users"');
   });
 
-  it('the switcher posts to /workspace/switch with csrf and a safe next path; the submit button is no-JS fallback', async () => {
+  it('the switcher posts to /workspace/switch with csrf and a safe next path; works without JS', async () => {
     const side = sidebar((await get(alex, '/?status=active')).body);
     expect(side).toContain('action="/workspace/switch"');
-    expect(side).toContain('name="workspace"');
-    expect(side).toContain('data-autosubmit');
-    expect(side).toContain('data-js-hide');
+    expect(side).toContain('<details class="ws-switch">');
+    expect(side).toContain('aria-label="Switch workspace"');
+    expect(side).not.toContain('<select');
+    expect(side).not.toContain('data-autosubmit');
+    expect(side).toContain('class="ws-role">owner<');
     expect(side).toContain(`name="csrf" value="${alexCsrf}"`);
     expect(side).toContain('name="next" value="/?status=active"');
     // item pages would 404 in another workspace, so they send you to the list
@@ -105,7 +108,9 @@ describe('sidebar: switcher, projects, global', () => {
     expect(inSide).toContain('href="/p/side-one"');
     expect(inSide).not.toContain('href="/p/proj-12"');
     expect(inSide).toContain('href="/global/docs?workspace=side-hustle"');
-    expect(inSide).toContain('<option value="side-hustle" selected>Side Hustle</option>');
+    expect(inSide).toContain('<span class="ws-name">Side Hustle</span>');
+    expect(inSide).toContain('value="default" name="workspace"');
+    expect(inSide).toContain('class="ws-row active" type="submit" value="side-hustle" name="workspace" aria-current="true"');
 
     const sw = await asAlex('/workspace/switch', { workspace: 'default', next: '/' }, { blindkey_ws: 'side-hustle' });
     expect(sw.statusCode).toBe(302);
@@ -145,6 +150,9 @@ describe('member view', () => {
     expect(side).not.toContain('href="/p/proj-12"');
     expect(side).not.toContain('class="nav-add"');
     expect(side).not.toContain('/members');
+    expect(side).not.toContain('/settings"');
+    expect(side).toContain('class="ws-role">member<');
+    expect(side).toContain('href="/workspaces/new"');
     expect(side).toContain('Show all');
     expect(main(home.body)).toContain('href="/p/shared-app"');
     expect(main(home.body)).not.toContain('href="/p/proj-12"');

@@ -45,6 +45,7 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext): void
       if (!result.ok) {
         if (result.reason === 'totp_required') throw new AppError(401, 'totp_required', 'two-factor code required');
         if (result.reason === 'password_change_required') throw new AppError(403, 'password_change_required', 'you must change your password in the web UI before an API token can be issued');
+        if (result.reason === 'totp_setup_required') throw new AppError(403, 'totp_setup_required', 'two-factor authentication must be set up first');
         if (result.reason === 'totp_locked') throw new AppError(429, 'totp_locked', 'too many wrong codes — try again later');
         throw new UnauthorizedError('invalid credentials');
       }

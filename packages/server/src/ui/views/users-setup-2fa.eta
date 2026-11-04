@@ -1,0 +1,25 @@
+<div class="page-head">
+  <div>
+    <h1>Set up two-factor for <%= it.setup.username %></h1>
+    <p class="lede">The user scans this QR code on their own phone; you confirm with the code it shows.</p>
+  </div>
+</div>
+
+<% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+
+<div class="panel">
+  <h3>Scan this QR code</h3>
+  <p class="note"><%= it.setup.username %> cannot log in until this is confirmed. Have them scan the code with an authenticator app, or enter the secret manually, then type the 6-digit code they see.</p>
+  <img class="qr" src="<%= it.qr %>" alt="QR code for the authenticator app" width="200" height="200" />
+  <p>
+    <code id="totp-secret" class="mono secret-text"><%= it.secretText %></code>
+    <button class="btn sm ghost" type="button" data-action="copy-text" data-copy-target="totp-secret">Copy</button>
+  </p>
+  <form method="post" action="/admin/users/<%= it.setup.id %>/setup-2fa" class="form-grid">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <% if (it.tempPassword) { %><input type="hidden" name="temp_password" value="<%= it.tempPassword %>" /><% } %>
+    <label>Code <input name="code" autocomplete="off" inputmode="numeric" required /></label>
+    <button class="btn primary" type="submit">Confirm and finish</button>
+    <a class="btn" href="/admin/users">Later</a>
+  </form>
+</div>

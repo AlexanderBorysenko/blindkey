@@ -52,7 +52,7 @@ Blindkey also stores each project's documentation (architecture notes, runbooks,
 - **Scoped tokens:** per-project, per-scope API tokens with expiry. Agent tokens are approved in the browser through a device-code flow.
 - **MCP endpoint and REST API:** a server-side MCP server plus a local stdio bridge for Claude Code.
 - **Claude Code plugin:** session context, guard and redaction hooks, slash commands, and a skill that teaches the rules.
-- **Admin web UI:** browse and edit everything, audited one-field reveal, token management, an audit log, and TOTP two-factor with recovery codes. It runs under a strict CSP with no CDN.
+- **Admin web UI:** browse and edit everything, audited one-field reveal, token management, an audit log, and mandatory TOTP two-factor with recovery codes. It runs under a strict CSP with no CDN.
 - **Operations:** a Docker image, Caddy or bring-your-own reverse proxy, scheduled integrity-checked backups, and master-key rotation.
 
 ## Security model
@@ -78,7 +78,7 @@ These don't depend on the agent behaving:
 ### Credentials and login
 
 - The admin password is hashed with **argon2id** (64 MiB, t=3).
-- Optional **TOTP two-factor** with one-time recovery codes. Ten wrong codes lock code entry for 15 minutes.
+- **TOTP two-factor is mandatory** for every user, with one-time recovery codes. Ten wrong codes lock code entry for 15 minutes.
 - On the agent's machine the token lives in the **OS credential store** (macOS Keychain, Windows Credential Manager). It is never written to a file, printed, or returned by a tool.
 
 ### Web hardening
@@ -120,7 +120,7 @@ The agent-side layers are heuristics, not a sandbox:
 | Database file or backup stolen without the master key | **Yes.** Values are AES-256-GCM encrypted. |
 | Server host compromised (root, with the master key) | **No.** Whoever controls the server controls the secrets. |
 | An agent deliberately trying to exfiltrate a value it is allowed to use | **No.** Mitigated only by scope, audit and revocation. |
-| Admin UI attacks (XSS, CSRF, brute force) | **Yes.** Strict CSP, CSRF tokens, rate limits, argon2id, optional 2FA. |
+| Admin UI attacks (XSS, CSRF, brute force) | **Yes.** Strict CSP, CSRF tokens, rate limits, argon2id, mandatory 2FA. |
 
 Found a vulnerability? See [SECURITY.md](SECURITY.md).
 
@@ -222,13 +222,19 @@ open http://localhost:8080/login
 - The UI runs under `script-src 'self'; style-src 'self'` with no exception for inline code: no view renders an inline `<script>`, an `on*=` handler or a `style=` attribute — all client-side behaviour lives in the one delegated file `/assets/app.js`.
 - A project sidebar lists every project by status, plus global docs/secrets, tokens and audit — the same nav collapses to a `Menu` drawer below 800px. Each secret page shows its own recent-access panel (who revealed which field, and when), and a revealed field auto-hides itself after a short countdown.
 
+### Users
+
+Super users add accounts at `/admin/users` in two steps. Step 1: a username and a temporary password (typed or generated). The account exists but cannot log in yet; the next page shows a QR code for the new user to scan on their own phone. Step 2: type the code their authenticator shows, and the page that follows shows — once, never stored or logged — the generated temporary password (if any) and the recovery codes, to hand over. At first login the user enters the temporary password and a code, must change the password, and is then in. Until step 2 is done the login is refused exactly like a wrong password, and the users page shows "2FA pending" with a "Continue setup" button. The first super user created by `init` has no second factor yet: at first login they are sent straight to enrollment on `/settings/2fa`, and every other page stays closed until it is done.
+
 ### Two-factor authentication
 
-- Set up TOTP two-factor at `/settings/2fa` (linked from the sidebar as "Two-factor"): scan the QR code with an authenticator app, or copy the text secret in by hand, then confirm with a 6-digit code. Confirming shows 10 one-time recovery codes — save them now, since each works only once and they are never shown again. Turning 2FA on signs out your other browser sessions; existing API tokens stay valid, so revoke old admin tokens you no longer need (the `never expires` pill marks the risky ones).
+Two-factor authentication is mandatory: a user without it can only reach the enrollment page, and no API token, agent token or `blindkey login` can be issued for them (`403 totp_setup_required`) until they have enrolled. There is no way for a user to turn it off. "Re-enroll two-factor" on `/settings/2fa` rotates the authenticator secret (password plus a current code, then a code from the new secret); it signs out other sessions and issues new recovery codes.
+
+- Set up TOTP two-factor at `/settings/2fa` (first login sends you there; linked from the sidebar as "Two-factor"): scan the QR code with an authenticator app, or copy the text secret in by hand, then confirm with a 6-digit code. Confirming shows 10 one-time recovery codes — save them now, since each works only once and they are never shown again. Turning 2FA on signs out your other browser sessions; existing API tokens stay valid, so revoke old admin tokens you no longer need (the `never expires` pill marks the risky ones).
 - Once enabled, the login page asks for a code after the username and password — a 6-digit TOTP code or a recovery code — and `blindkey login` prompts for `2FA code:` the same way.
 - 10 wrong codes in a row lock code entry for 15 minutes; `blindkey-server 2fa reset` or `blindkey-server passwd` clears it.
-- "Regenerate recovery codes" and "Turn off two-factor" (both on `/settings/2fa`) each require the current password plus a fresh second factor (a TOTP code or an unused recovery code), so an admin who lost the authenticator but kept a recovery code can still regenerate codes or turn 2FA off.
-- Emergency reset — if both the authenticator and every recovery code are lost — from a shell on the host: `blindkey-server 2fa reset` (Docker: `docker compose run --rm --no-deps server 2fa reset`). It turns two-factor off for the admin account; log back in with the password and set it up again.
+- "Regenerate recovery codes" (on `/settings/2fa`) requires the current password plus a fresh second factor (a TOTP code or an unused recovery code). A super user can "Reset 2FA" for another user on `/admin/users`: it removes their authenticator, signs them out, revokes all their API and agent tokens and opens the same QR page as creating a user; they cannot log in until a super user confirms the new secret with a code.
+- Emergency reset — if both the authenticator and every recovery code are lost — from a shell on the host: `blindkey-server 2fa reset` (Docker: `docker compose run --rm --no-deps server 2fa reset`). It removes two-factor for the admin account; log back in with the password and you are taken straight to enrollment again.
 
 ### Changing the password
 
@@ -455,7 +461,7 @@ docker compose exec server rm -r "/data/pre-restore-<timestamp>"
 
 Every stack start also runs a backup and prunes the oldest by count, so repeated restore attempts push old backups out — copy the ones you care about off the host first.
 
-**Two-factor and restores:** restoring a backup taken before 2FA was enabled brings the server back without 2FA — the enrollment banner reappears, so enroll again. Running an older blindkey binary against a 2FA-enabled database ignores 2FA.
+**Two-factor and restores:** restoring a backup taken before 2FA was enabled brings the server back without 2FA for that user — the next login goes straight to enrollment. Running an older blindkey binary against a 2FA-enabled database ignores 2FA.
 
 **Passwords, sessions and restores:** after a restore, the admin password and every session are as of the backup — anything changed since is gone. If the password changed since the backup (or you are restoring because of a suspected compromise), run `blindkey-server passwd` (Docker: `docker compose run --rm --no-deps server passwd`), which also signs out every session. API tokens are as of the backup too — review `/tokens`.
 

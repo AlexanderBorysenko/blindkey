@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { makeTestApp, type TestCtx } from './helpers.js';
+import { getTotp, isTwoFactorByAdmin, openTotpSecret } from '../src/repos/twofactor.js';
+import { base32Encode, hotp, stepAt } from '../src/auth/totp.js';
 import { createAdmin, createSession, createUser, getUserByUsername, getSession, setUserDisabled, setUserSuper } from '../src/repos/admin.js';
 import { createToken, listTokensForUser } from '../src/repos/tokens.js';
 import { createSecret } from '../src/repos/secrets.js';
@@ -23,12 +25,27 @@ const login = async (username: string, password: string) =>
 // The login form is rate limited (10/min); tests that are not about logging in open sessions directly.
 const sessionFor = (username: string) => createSession(t.db, getUserByUsername(t.db, username)!.id, 3_600_000, '127.0.0.1', 'test');
 const idOf = (username: string) => getUserByUsername(t.db, username)!.id;
+const secretOf = (username: string) => openTotpSecret(t.ring, getTotp(t.db, idOf(username))!);
+/** The code of the user's (pending or enabled) authenticator for the current step plus `d` (-1, 0, 1). */
+const codeOf = (username: string, d = 0) => hotp(secretOf(username), stepAt(Date.now()) + d);
 const asSuper = (url: string, extra: Record<string, unknown> = {}) => post(superSession, url, { csrf: superCsrf, ...extra });
+
+/**
+ * Both steps of creating a user: the form (account + pending 2FA), then the super user's confirmation with
+ * a code from the new user's phone. `done` is the result page (temp password if generated, recovery codes).
+ */
+async function createViaUi(username: string, extra: Record<string, unknown> = { password: 'temp-password-123' }) {
+  const step1 = await asSuper('/admin/users', { username, ...extra });
+  const temp = /name="temp_password" value="([^"]+)"/.exec(step1.body)?.[1];
+  const done = await asSuper(`/admin/users/${idOf(username)}/setup-2fa`, { code: codeOf(username), ...(temp ? { temp_password: temp } : {}) });
+  return { step1, done, temp };
+}
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('super-password-1'));
-  superSession = await login('alex', 'super-password-1');
+  t.enroll('alex');
+  superSession = sessionFor('alex');
   superCsrf = csrfOf((await get(superSession, '/')).body);
 });
 afterAll(async () => {
@@ -51,7 +68,7 @@ describe('users page access', () => {
   });
 
   it('a non-super gets 404 on every users route and sees no Users link', async () => {
-    createUser(t.db, { username: 'plain', passwordHash: await hashPassword('plain-password-1') });
+    t.enroll(createUser(t.db, { username: 'plain', passwordHash: await hashPassword('plain-password-1') }).id);
     const s = sessionFor('plain');
     const home = await get(s, '/');
     expect(home.body).not.toContain('/admin/users');
@@ -66,17 +83,89 @@ describe('users page access', () => {
   });
 });
 
-describe('create user and forced password change', () => {
-  it('creates a user with a typed temp password; they must change it before browsing', async () => {
+describe('create user: two steps, then forced password change', () => {
+  it('step 1 creates the account with a pending 2FA enrollment and shows the QR page; nothing secret is audited', async () => {
     const res = await asSuper('/admin/users', { username: 'dana', password: 'temp-password-123' });
     expect(res.statusCode).toBe(200);
-    expect(main(res.body)).toContain('User created');
-    expect(main(res.body)).not.toContain('temp-password-123');
+    expect(res.headers['cache-control']).toContain('no-store');
+    const m = main(res.body);
+    expect(m).toContain('Set up two-factor for dana');
+    expect(m).toContain('data:image/svg+xml;base64,');
+    expect(m).toContain(`action="/admin/users/${idOf('dana')}/setup-2fa"`);
+    expect(m).not.toContain('temp-password-123');
+    expect(m).not.toContain('name="temp_password"'); // typed passwords are not carried along
     const row = getUserByUsername(t.db, 'dana')!;
     expect(row.must_change_password).toBe(true);
+    const pending = getTotp(t.db, row.id)!;
+    expect(pending.enabled_at).toBeNull();
+    expect(isTwoFactorByAdmin(t.db, row.id)).toBe(true);
+    // the manual secret is on the page for the super user, and nowhere in the audit log
+    const secretText = /id="totp-secret"[^>]*>([^<]+)</.exec(m)?.[1]?.replace(/\s+/g, '') ?? '';
+    expect(secretText).toBe(base32Encode(secretOf('dana')));
+    expect(JSON.stringify(listAudit(t.db, { limit: 1000 }))).not.toContain(secretText);
+  });
 
-    const s = await login('dana', 'temp-password-123');
-    expect(s).not.toBe('');
+  it('until the setup is confirmed the user cannot log in: refused exactly like a wrong password', async () => {
+    const wrong = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'dana', password: 'not-the-password' } });
+    const pendingLogin = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'dana', password: 'temp-password-123' } });
+    expect(pendingLogin.statusCode).toBe(401);
+    expect(pendingLogin.statusCode).toBe(wrong.statusCode);
+    expect(pendingLogin.body).toBe(wrong.body);
+    expect(pendingLogin.cookies).toEqual([]);
+    expect(pendingLogin.headers.location).toBeUndefined();
+    // the API token exchange is refused the same way
+    const api = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'dana', password: 'temp-password-123' } });
+    const apiWrong = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'dana', password: 'not-the-password' } });
+    expect(api.statusCode).toBe(401);
+    expect(api.json()).toEqual(apiWrong.json());
+    expect(listAudit(t.db, { action: 'auth.login_failed', limit: 10 }).filter((r) => r.actor_id === idOf('dana')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the users page marks the pending user and links "Continue setup" to step 2, which renders again', async () => {
+    const m = main((await get(superSession, '/admin/users')).body);
+    expect(m).toContain('2FA pending');
+    expect(m).toContain(`href="/admin/users/${idOf('dana')}/setup-2fa"`);
+    expect(m).toContain('Continue setup');
+    const again = await get(superSession, `/admin/users/${idOf('dana')}/setup-2fa`);
+    expect(again.statusCode).toBe(200);
+    expect(main(again.body)).toContain('Set up two-factor for dana');
+    expect(again.headers['cache-control']).toContain('no-store');
+  });
+
+  it('a wrong code keeps the user pending; the right one enables 2FA, shows recovery codes once and audits it without secrets', async () => {
+    const wrong = await asSuper(`/admin/users/${idOf('dana')}/setup-2fa`, { code: '000000' });
+    expect(wrong.statusCode).toBe(400);
+    expect(main(wrong.body)).toContain('Invalid code.');
+    expect(getTotp(t.db, idOf('dana'))!.enabled_at).toBeNull();
+
+    const done = await asSuper(`/admin/users/${idOf('dana')}/setup-2fa`, { code: codeOf('dana') });
+    expect(done.statusCode).toBe(200);
+    expect(done.headers['cache-control']).toContain('no-store');
+    const m = main(done.body);
+    expect(m).toContain('Hand these to dana. They will change the password at first login.');
+    const codes = [...m.matchAll(/<li>([^<]+)<\/li>/g)].map((x) => x[1]!);
+    expect(codes).toHaveLength(10);
+    expect(m).not.toContain('Temporary password'); // typed, so nothing to show
+    expect(getTotp(t.db, idOf('dana'))!.enabled_at).not.toBeNull();
+    expect(isTwoFactorByAdmin(t.db, idOf('dana'))).toBe(false);
+    const audit = listAudit(t.db, { action: 'user.2fa_enrolled_by_super' });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ actor_id: idOf('alex'), target_id: idOf('dana') });
+    const everything = JSON.stringify(listAudit(t.db, { limit: 1000 }));
+    for (const c of codes) expect(everything).not.toContain(c);
+    expect(everything).not.toContain(base32Encode(secretOf('dana')));
+    // the page is not reachable a second time, and the codes are gone from the users page
+    expect((await get(superSession, `/admin/users/${idOf('dana')}/setup-2fa`)).statusCode).toBe(404);
+    expect((await asSuper(`/admin/users/${idOf('dana')}/setup-2fa`, { code: codeOf('dana', 1) })).statusCode).toBe(409);
+    for (const c of codes) expect((await get(superSession, '/admin/users')).body).not.toContain(c);
+  });
+
+  it('now the password step of login accepts them and asks for the code; they must change the temp password before browsing', async () => {
+    const pw = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'dana', password: 'temp-password-123' } });
+    expect(pw.statusCode).toBe(302);
+    expect(pw.headers.location).toBe('/login/2fa');
+
+    const s = sessionFor('dana');
     const redirect = await get(s, '/');
     expect(redirect.statusCode).toBe(302);
     expect(redirect.headers.location).toBe('/settings/password');
@@ -90,30 +179,43 @@ describe('create user and forced password change', () => {
     // assets stay reachable
     expect((await get(s, '/assets/app.css')).statusCode).toBe(200);
 
-    const changed = await post(s, '/settings/password', { csrf: c, current: 'temp-password-123', next: 'my-own-password-9', confirm: 'my-own-password-9' });
+    const changed = await post(s, '/settings/password', { csrf: c, current: 'temp-password-123', next: 'my-own-password-9', confirm: 'my-own-password-9', code: codeOf('dana', 1) });
     expect(changed.statusCode).toBe(303);
     expect(getUserByUsername(t.db, 'dana')!.must_change_password).toBe(false);
+    // 2FA is already on, so nothing more stands in the way
     expect((await get(s, '/')).statusCode).toBe(200);
   });
 
   it('logout stays reachable while forced', async () => {
-    await asSuper('/admin/users', { username: 'ed', password: 'temp-password-456' });
+    await createViaUi('ed', { password: 'temp-password-456' });
     const s = sessionFor('ed');
     const c = csrfOf((await get(s, '/settings/password')).body);
     expect((await post(s, '/logout', { csrf: c })).statusCode).toBe(302);
   });
 
-  it('generated password is shown once, works, and is not in the audit log', async () => {
-    const res = await asSuper('/admin/users', { username: 'gina', generate: 'on' });
-    expect(res.statusCode).toBe(200);
-    const shown = /id="new-user-password">([^<]+)</.exec(res.body)?.[1];
-    expect(shown).toBeTruthy();
-    expect(shown!.length).toBeGreaterThanOrEqual(24);
-    expect(res.headers['cache-control']).toContain('no-store');
-    expect(await login('gina', shown!)).not.toBe('');
+  it('a generated password is carried to the result page only, shown once, and is not in the audit log', async () => {
+    const step1 = await asSuper('/admin/users', { username: 'gina', generate: 'on' });
+    expect(step1.statusCode).toBe(200);
+    expect(main(step1.body)).not.toContain('id="new-user-password"'); // not shown yet
+    const generated = /name="temp_password" value="([^"]+)"/.exec(step1.body)?.[1];
+    expect(generated).toBeTruthy();
+    expect(generated!.length).toBeGreaterThanOrEqual(24);
+    expect(step1.headers['cache-control']).toContain('no-store');
+    // a wrong code re-renders step 2 with the password still carried
+    const wrong = await asSuper(`/admin/users/${idOf('gina')}/setup-2fa`, { code: '000000', temp_password: generated });
+    expect(wrong.statusCode).toBe(400);
+    expect(wrong.body).toContain(`name="temp_password" value="${generated}"`);
+
+    const done = await asSuper(`/admin/users/${idOf('gina')}/setup-2fa`, { code: codeOf('gina'), temp_password: generated });
+    const shown = /id="new-user-password">([^<]+)</.exec(done.body)?.[1];
+    expect(shown).toBe(generated);
+    expect(done.headers['cache-control']).toContain('no-store');
+    // the password really is the stored one: login's password step now passes
+    const pw = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'gina', password: generated } });
+    expect(pw.headers.location).toBe('/login/2fa');
     const again = await get(superSession, '/admin/users');
-    expect(again.body).not.toContain(shown!);
-    expect(JSON.stringify(listAudit(t.db, { limit: 1000 }))).not.toContain(shown!);
+    expect(again.body).not.toContain(generated!);
+    expect(JSON.stringify(listAudit(t.db, { limit: 1000 }))).not.toContain(generated!);
   });
 
   it('reset password with generate shows it once, forces change, kills sessions', async () => {
@@ -125,7 +227,9 @@ describe('create user and forced password change', () => {
     expect(getSession(t.db, s)).toBeNull();
     expect(getUserByUsername(t.db, 'dana')!.must_change_password).toBe(true);
     expect(JSON.stringify(listAudit(t.db, { limit: 1000 }))).not.toContain(shown!);
-    const s2 = await login('dana', shown!);
+    const pw = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'dana', password: shown! } });
+    expect(pw.headers.location).toBe('/login/2fa');
+    const s2 = sessionFor('dana');
     expect((await get(s2, '/')).headers.location).toBe('/settings/password');
   });
 
@@ -138,21 +242,42 @@ describe('create user and forced password change', () => {
     expect(dup.statusCode).toBe(409);
     expect(main(dup.body)).toContain('role="alert"');
   });
+
+  it('every new POST needs CSRF, and a non-super gets 404 on the setup pages', async () => {
+    await asSuper('/admin/users', { username: 'pending-one', password: 'temp-password-p1' });
+    const id = idOf('pending-one');
+    const before = getTotp(t.db, id)!.secret_enc.toString('hex');
+    for (const payload of [{ code: codeOf('pending-one') }, { code: codeOf('pending-one'), csrf: 'nope' }]) {
+      expect((await post(superSession, `/admin/users/${id}/setup-2fa`, payload)).statusCode).toBe(403);
+    }
+    expect(getTotp(t.db, id)!.enabled_at).toBeNull();
+    expect(getTotp(t.db, id)!.secret_enc.toString('hex')).toBe(before);
+    createUser(t.db, { username: 'plain2', passwordHash: await hashPassword('plain-password-2') });
+    t.enroll('plain2');
+    const s = sessionFor('plain2');
+    const c = csrfOf((await get(s, '/')).body);
+    expect((await get(s, `/admin/users/${id}/setup-2fa`)).statusCode).toBe(404);
+    expect((await post(s, `/admin/users/${id}/setup-2fa`, { csrf: c, code: codeOf('pending-one') })).statusCode).toBe(404);
+    expect(getTotp(t.db, id)!.enabled_at).toBeNull();
+    await asSuper(`/admin/users/${id}/delete`, { confirmed: '1' });
+  });
 });
 
 describe('user actions', () => {
   it('disable kills their session and blocks login; enable restores it', async () => {
-    await asSuper('/admin/users', { username: 'fred', password: 'temp-password-fred' });
+    await createViaUi('fred', { password: 'temp-password-fred' });
     const s = sessionFor('fred');
     expect(getSession(t.db, s)).not.toBeNull();
     const res = await asSuper(`/admin/users/${idOf('fred')}/disable`);
     expect(res.statusCode).toBe(303);
     expect(getSession(t.db, s)).toBeNull();
     expect((await get(s, '/')).statusCode).toBe(302);
-    expect(await login('fred', 'temp-password-fred')).toBe('');
+    const blocked = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'fred', password: 'temp-password-fred' } });
+    expect(blocked.statusCode).toBe(401);
     expect(main((await get(superSession, '/admin/users')).body)).toContain('disabled');
     await asSuper(`/admin/users/${idOf('fred')}/enable`);
-    expect(await login('fred', 'temp-password-fred')).not.toBe('');
+    const open = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'fred', password: 'temp-password-fred' } });
+    expect(open.headers.location).toBe('/login/2fa');
   });
 
   it('promote, demote and reset 2FA redirect and are audited', async () => {
@@ -161,7 +286,9 @@ describe('user actions', () => {
     expect(getUserByUsername(t.db, 'fred')!.is_super).toBe(true);
     expect((await asSuper(`/admin/users/${id}/demote`)).statusCode).toBe(303);
     expect(getUserByUsername(t.db, 'fred')!.is_super).toBe(false);
-    expect((await asSuper(`/admin/users/${id}/reset-2fa`)).statusCode).toBe(303);
+    const reset = await asSuper(`/admin/users/${id}/reset-2fa`);
+    expect(reset.statusCode).toBe(303);
+    expect(reset.headers.location).toBe(`/admin/users/${id}/setup-2fa`); // straight on to the new QR
     const actions = listAudit(t.db, { limit: 1000 }).map((r) => r.action);
     expect(actions).toEqual(expect.arrayContaining(['user.promote', 'user.demote', 'user.2fa_reset']));
   });
@@ -194,6 +321,53 @@ describe('user actions', () => {
       expect(m, path).toContain('role="alert"');
       expect(m, path).toContain(text);
     }
+  });
+});
+
+describe('reset 2FA', () => {
+  it('kills sessions and tokens, starts a new pending enrollment, refuses login until a super confirms it with a code from the new secret', async () => {
+    await createViaUi('rita', { password: 'temp-password-rita' });
+    const id = idOf('rita');
+    const oldSecret = secretOf('rita');
+    const session = sessionFor('rita');
+    const token = createToken(t.db, { userId: id, name: 'cli', scopes: ['admin'], projectIds: null, expiresAt: null }).token;
+    createToken(t.db, { userId: id, name: 'claude', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
+    expect((await t.app.inject({ method: 'GET', url: '/api/v1/me', headers: { authorization: `Bearer ${token}` } })).statusCode).toBe(200);
+
+    const reset = await asSuper(`/admin/users/${id}/reset-2fa`);
+    expect(reset.statusCode).toBe(303);
+    expect(reset.headers.location).toBe(`/admin/users/${id}/setup-2fa`);
+    expect(getSession(t.db, session)).toBeNull();
+    expect((await t.app.inject({ method: 'GET', url: '/api/v1/me', headers: { authorization: `Bearer ${token}` } })).statusCode).toBe(401);
+    expect(listTokensForUser(t.db, id).filter((x) => x.revoked_at === null)).toEqual([]);
+    expect(getTotp(t.db, id)!.enabled_at).toBeNull();
+    expect(secretOf('rita').equals(oldSecret)).toBe(false);
+    const row = listAudit(t.db, { action: 'user.2fa_reset' })[0]!;
+    expect(row.meta).toMatchObject({ username: 'rita', tokens_revoked: 2 });
+
+    // pending again: password alone no longer logs in, same answer as a wrong password
+    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'rita', password: 'temp-password-rita' } });
+    expect(login.statusCode).toBe(401);
+    expect(main((await get(superSession, '/admin/users')).body)).toContain('Continue setup');
+
+    // the step-2 page shows the NEW secret; the old authenticator's code does not confirm it
+    const page = await get(superSession, `/admin/users/${id}/setup-2fa`);
+    expect(main(page.body)).toContain('Set up two-factor for rita');
+    const oldCode = hotp(oldSecret, stepAt(Date.now()));
+    expect((await asSuper(`/admin/users/${id}/setup-2fa`, { code: oldCode })).statusCode).toBe(400);
+    const done = await asSuper(`/admin/users/${id}/setup-2fa`, { code: codeOf('rita') });
+    expect(done.statusCode).toBe(200);
+    expect(getTotp(t.db, id)!.enabled_at).not.toBeNull();
+    const ok = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'rita', password: 'temp-password-rita' } });
+    expect(ok.headers.location).toBe('/login/2fa');
+  });
+
+  it('a super cannot reset their own 2FA (it would sign them out of the page that finishes it)', async () => {
+    const res = await asSuper(`/admin/users/${idOf('alex')}/reset-2fa`);
+    expect(res.statusCode).toBe(409);
+    expect(main(res.body)).toContain('role="alert"');
+    expect(getTotp(t.db, idOf('alex'))!.enabled_at).not.toBeNull();
+    expect(getSession(t.db, superSession)).not.toBeNull();
   });
 });
 
@@ -292,6 +466,7 @@ describe('impersonation', () => {
 
   it('a demoted super user loses their impersonation session immediately', async () => {
     const carol = createUser(t.db, { username: 'carol', passwordHash: await hashPassword('carol-password-1'), isSuper: true });
+    t.enroll(carol.id);
     createUser(t.db, { username: 'vic', passwordHash: await hashPassword('vic-password-123') });
     const cs = sessionFor('carol');
     const cc = csrfOf((await get(cs, '/')).body);
@@ -319,7 +494,7 @@ describe('impersonation edge cases', () => {
   });
 
   it('a disabled user session without an impersonator can never reach the stop route', async () => {
-    createUser(t.db, { username: 'eve', passwordHash: await hashPassword('eve-password-123') });
+    t.enroll(createUser(t.db, { username: 'eve', passwordHash: await hashPassword('eve-password-123') }).id);
     const eve = sessionFor('eve');
     const eveCsrf = csrfOf((await get(eve, '/')).body);
     setUserDisabled(t.db, idOf('eve'), true);

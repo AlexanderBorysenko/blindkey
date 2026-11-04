@@ -8,8 +8,10 @@ import { createAdmin, deleteAllSessions, getAdmin, getAdminByUsername, getOldest
 import { getDocument, upsertDocument } from './repos/documents.js';
 import { getDefaultWorkspace } from './repos/workspaces.js';
 import { rewrapAllSecrets, secretKeyVersionReport } from './repos/secrets.js';
-import { deleteChallengesFor, deleteTwoFactor, resetFactorFailures, rewrapTotpSecrets, totpKeyVersionReport } from './repos/twofactor.js';
+import { deleteChallengesFor, deleteTwoFactor, resetFactorFailures, setTwoFactorByAdmin, rewrapTotpSecrets, totpKeyVersionReport } from './repos/twofactor.js';
 import { writeAudit } from './repos/audit.js';
+import { revokeTokensForUser } from './repos/tokens.js';
+import { deleteApprovedConnectRequestsFor } from './repos/connect.js';
 import { hashPassword } from './crypto/passwords.js';
 import { validateNewPassword } from './services/password.js';
 import { GUIDELINES_MD } from './seed/guidelines.js';
@@ -74,7 +76,12 @@ function recoveryTarget(db: Db, username?: string): AdminRow {
 export function runTotpReset(db: Db, username?: string): string {
   const admin = recoveryTarget(db, username);
   deleteTwoFactor(db, admin.id);
-  writeAudit(db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_reset', meta: { via: 'shell' } });
+  // Tokens were minted under the old factor: they die with it, as do approvals not yet collected.
+  const tokens = revokeTokensForUser(db, admin.id);
+  deleteApprovedConnectRequestsFor(db, admin.id);
+  // Shell recovery means first-login onboarding again, not a pending super-user setup.
+  setTwoFactorByAdmin(db, admin.id, false);
+  writeAudit(db, { actor_type: 'admin', actor_id: admin.id, action: 'auth.totp_reset', meta: { via: 'shell', tokens_revoked: tokens } });
   return admin.username;
 }
 

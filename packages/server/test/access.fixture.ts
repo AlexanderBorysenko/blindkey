@@ -31,7 +31,12 @@ const fields = (host: string, secret: string, key = 'password') => [
 export async function makeShared(): Promise<Shared> {
   const t = await makeTestApp();
   t.owner();
-  const mk = (name: string): UserRow => createUser(t.db, { username: name, passwordHash: 'h' });
+  // Two-factor is mandatory, so every fixture user has it on.
+  const mk = (name: string): UserRow => {
+    const user = createUser(t.db, { username: name, passwordHash: 'h' });
+    t.enroll(user.id);
+    return user;
+  };
   const alpha = t.project('alpha');
   const beta = t.project('beta');
   const gamma = t.project('gamma');

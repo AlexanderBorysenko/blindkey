@@ -5,32 +5,61 @@
   <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
   <input type="search" name="q" placeholder="Search" aria-label="Search" />
 </form>
-<% var ws = it.nav.active; var wsEnc = ws ? encodeURIComponent(ws.slug) : ''; %>
+<% var ws = it.nav.active; var wsEnc = ws ? encodeURIComponent(ws.slug) : '';
+   var wsTint = function(slug){ var h = 2166136261; for (var i = 0; i < slug.length; i++) { h ^= slug.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h % 8; };
+   var wsInit = function(name){ var t = String(name).trim(); return (t.length ? t.slice(0, 2) : '?').toUpperCase(); }; %>
 <div class="navgroup workspace-group">
-  <h4>Workspace</h4>
   <% if (it.nav.workspaces.length > 0) { %>
-  <form class="ws-switch" method="post" action="/workspace/switch">
-    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
-    <input type="hidden" name="next" value="<%= it.switchNext %>" />
-    <select name="workspace" aria-label="Workspace" data-autosubmit>
-      <% it.nav.workspaces.forEach(function(w){ %>
-      <option value="<%= w.slug %>"<%~ ws && ws.slug === w.slug ? ' selected' : '' %>><%= w.name %></option>
+  <details class="ws-switch">
+    <summary aria-label="Switch workspace">
+      <% if (ws) { %>
+      <span class="ws-avatar ws-tint-<%= wsTint(ws.slug) %>" aria-hidden="true"><%= wsInit(ws.name) %></span>
+      <span class="ws-meta">
+        <span class="ws-name"><%= ws.name %></span>
+        <span class="ws-role"><%= ws.owner ? 'owner' : 'member' %></span>
+      </span>
+      <% } else { %>
+      <span class="ws-avatar ws-tint-none" aria-hidden="true">?</span>
+      <span class="ws-meta"><span class="ws-name">Select workspace</span></span>
+      <% } %>
+      <svg class="i ws-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="ws-menu">
+      <% it.nav.workspaces.forEach(function(w){ var active = ws && ws.slug === w.slug; %>
+      <form method="post" action="/workspace/switch">
+        <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+        <input type="hidden" name="next" value="<%= it.switchNext %>" />
+        <button class="ws-row<%= active ? ' active' : '' %>" type="submit" value="<%= w.slug %>" name="workspace"<%~ active ? ' aria-current="true"' : '' %>>
+          <span class="ws-avatar ws-tint-<%= wsTint(w.slug) %>" aria-hidden="true"><%= wsInit(w.name) %></span>
+          <span class="ws-name"><%= w.name %></span>
+          <% if (active) { %><svg class="i ws-check" aria-hidden="true"><use href="#i-check"/></svg><% } %>
+        </button>
+      </form>
       <% }); %>
-    </select>
-    <button class="btn sm" type="submit" data-js-hide>Switch</button>
-  </form>
-  <% } %>
-  <% if (ws && ws.owner) { %>
-  <a href="/w/<%= wsEnc %>/members" <%~ it.path.startsWith('/w/' + wsEnc + '/members') ? 'aria-current="page"' : '' %>>
-    <span>Members</span>
-  </a>
-  <a href="/w/<%= wsEnc %>/settings" <%~ it.path === '/w/' + wsEnc + '/settings' ? 'aria-current="page"' : '' %>>
-    <span>Workspace settings</span>
-  </a>
-  <% } %>
-  <a href="/workspaces/new" <%~ it.path === '/workspaces/new' ? 'aria-current="page"' : '' %>>
+      <hr class="ws-sep" />
+      <% if (ws && ws.owner) { %>
+      <a class="ws-row" href="/w/<%= wsEnc %>/members" <%~ it.path.startsWith('/w/' + wsEnc + '/members') ? 'aria-current="page"' : '' %>>
+        <svg class="i" aria-hidden="true"><use href="#i-users"/></svg>
+        <span>Members</span>
+      </a>
+      <a class="ws-row" href="/w/<%= wsEnc %>/settings" <%~ it.path === '/w/' + wsEnc + '/settings' ? 'aria-current="page"' : '' %>>
+        <svg class="i" aria-hidden="true"><use href="#i-gear"/></svg>
+        <span>Settings</span>
+      </a>
+      <% } %>
+      <a class="ws-row" href="/workspaces/new" <%~ it.path === '/workspaces/new' ? 'aria-current="page"' : '' %>>
+        <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>
+        <span>New workspace</span>
+      </a>
+    </div>
+  </details>
+  <% } else { %>
+  <p class="note ws-none">No workspace</p>
+  <a class="ws-row" href="/workspaces/new" <%~ it.path === '/workspaces/new' ? 'aria-current="page"' : '' %>>
+    <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>
     <span>New workspace</span>
   </a>
+  <% } %>
 </div>
 <% if (ws) { %>
 <div class="navgroup">

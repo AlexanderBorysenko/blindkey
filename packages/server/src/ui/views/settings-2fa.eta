@@ -1,11 +1,15 @@
 <div class="page-head">
   <div>
     <h1>Two-factor authentication</h1>
-    <p class="lede">Protects the admin UI and the creation of admin API tokens.</p>
+    <p class="lede">Required for every account. Protects the admin UI and the creation of API and agent tokens.</p>
   </div>
 </div>
 
 <% if (it.error) { %><p role="alert" class="alert"><%= it.error %></p><% } %>
+
+<% if (it.view.state === 'off' || it.view.state === 'setup') { %>
+<p class="alert warn" role="status">Two-factor authentication is required. Scan the QR code with an authenticator app to finish setting up your account.</p>
+<% } %>
 
 <% if (it.view.state === 'off') { %>
 <div class="panel">
@@ -39,6 +43,25 @@
 </div>
 <% } %>
 
+<% if (it.view.state === 'reenroll') { %>
+<div class="panel">
+  <h3>Scan the new QR code</h3>
+  <p class="note">Your old authenticator entry keeps working until you confirm. Scan this with your authenticator app, or enter the secret manually, then confirm with a 6-digit code from the new entry. Your other sessions will be signed out and new recovery codes issued.</p>
+  <img class="qr" src="<%= it.view.qr %>" alt="QR code for your authenticator app" width="200" height="200" />
+  <p>
+    <code id="totp-secret" class="mono secret-text"><%= it.view.secret %></code>
+    <button class="btn sm ghost" type="button" data-action="copy-text" data-copy-target="totp-secret">Copy</button>
+  </p>
+  <form method="post" action="/settings/2fa/reenroll/confirm" class="form-grid">
+    <input type="hidden" name="csrf" value="<%= it.csrf %>" />
+    <input type="hidden" name="token" value="<%= it.view.token %>" />
+    <label>Code <input name="code" autocomplete="one-time-code" inputmode="numeric" required /></label>
+    <button class="btn primary" type="submit">Replace authenticator</button>
+  </form>
+  <p><a href="/settings/2fa">Cancel</a></p>
+</div>
+<% } %>
+
 <% if (it.view.state === 'codes') { %>
 <div class="panel">
   <h2>Recovery codes</h2>
@@ -47,7 +70,7 @@
     <% it.view.codes.forEach(function (c) { %><li><%= c %></li><% }) %>
   </ol>
   <button class="btn sm ghost" type="button" data-action="copy-text" data-copy-target="recovery-codes">Copy</button>
-  <p><a href="/settings/2fa">Done</a></p>
+  <p><a class="btn primary" href="/">Continue</a></p>
 </div>
 <% } %>
 
@@ -69,13 +92,13 @@
 </div>
 
 <div class="panel">
-  <h3>Turn off two-factor</h3>
-  <p class="note">Removes two-factor authentication from this account.</p>
-  <form method="post" action="/settings/2fa/disable" class="form-grid">
+  <h3>Re-enroll two-factor</h3>
+  <p class="note">Rotate your authenticator secret (e.g. after an admin set it up for you).</p>
+  <form method="post" action="/settings/2fa/reenroll" class="form-grid">
     <input type="hidden" name="csrf" value="<%= it.csrf %>" />
     <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
     <label>Code <input name="code" autocomplete="one-time-code" inputmode="text" required /></label>
-    <button class="btn danger solid" type="submit">Turn off two-factor</button>
+    <button class="btn" type="submit">Re-enroll two-factor</button>
   </form>
 </div>
 <% } %>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { makeTestApp, auth, type TestCtx } from './helpers.js';
+import { sessionFor, makeTestApp, auth, type TestCtx } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { listTokens } from '../src/repos/tokens.js';
@@ -9,8 +9,8 @@ const main = (html: string) => html.split('<main')[1]?.split('</main>')[0] ?? ht
 
 async function adminSession(t: TestCtx) {
   createAdmin(t.db, 'alex', await hashPassword('pw'));
-  const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-  const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    t.enroll('alex');
+  const session = sessionFor(t.db, 'alex');
   const page = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
   const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
   const get = (url: string) => t.app.inject({ method: 'GET', url, cookies: { blindkey_session: session } });

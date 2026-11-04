@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomBytes } from 'node:crypto';
-import { makeTestApp, type TestCtx } from './helpers.js';
-import { createAdmin } from '../src/repos/admin.js';
+import { makeTestApp, sessionFor, type TestCtx } from './helpers.js';
+import { createAdmin, createUser, getUserByUsername } from '../src/repos/admin.js';
+import { createToken } from '../src/repos/tokens.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { listAudit } from '../src/repos/audit.js';
 import { openDb } from '../src/db/connection.js';
@@ -11,14 +12,16 @@ import type { KeyRing } from '../src/config.js';
 
 let t: TestCtx;
 
-async function login(username = 'alex', password = 'correct horse'): Promise<string | undefined> {
-  const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username, password } });
-  return res.cookies.find((c) => c.name === 'blindkey_session')?.value;
+// `alex` has no two-factor yet (first-login onboarding: the password alone opens a session, see the cookie
+// tests below). Tests that browse pages use `zed`, who is enrolled, with a session opened directly.
+async function login(): Promise<string | undefined> {
+  return sessionFor(t.db, 'zed');
 }
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('correct horse'));
+  t.enroll(createUser(t.db, { username: 'zed', passwordHash: await hashPassword('correct horse') }).id);
 });
 afterAll(async () => {
   await t.app.close();
@@ -112,7 +115,9 @@ describe('ui auth', () => {
   });
 
   it('leaves the bearer API untouched', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: { authorization: `Bearer ${t.token(['projects:read'])}` } });
+    // `alex` has no second factor yet, so his tokens do not work; `zed` is enrolled
+    const token = createToken(t.db, { userId: getUserByUsername(t.db, 'zed')!.id, name: 'test', scopes: ['projects:read'], projectIds: null, expiresAt: null }).token;
+    const res = await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: { authorization: `Bearer ${token}` } });
     expect(res.statusCode).toBe(200);
   });
 

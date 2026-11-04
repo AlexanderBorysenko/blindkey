@@ -4,11 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeServer, runCliAsync, runCliKeepStdinOpen, runCliWithFileStdin } from './helpers.js';
-import { startEnrollment, confirmEnrollment } from '../../server/src/services/twofactor.js';
-import { getTotp, openTotpSecret } from '../../server/src/repos/twofactor.js';
-import { hotp, stepAt } from '../../server/src/auth/totp.js';
-import type { Actor } from '../../server/src/auth/principal.js';
-import type { AppContext } from '../../server/src/http/context.js';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const baseEnv = (dir: string) => ({ PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', BLINDKEY_CONFIG_HOME: dir });
@@ -22,12 +17,12 @@ const baseEnv = (dir: string) => ({ PATH: process.env.PATH ?? '', HOME: process.
  * pipe, never via the in-process `io` fixture.
  */
 describe('blindkey login — piped (non-interactive) stdin', () => {
-  it('answers a piped username + password prompt sequence (no 2FA)', async () => {
+  it('answers a piped username + password + code prompt sequence (the code is mandatory)', async () => {
     const s = await makeServer();
     try {
       await s.admin('alex', 'correct horse battery');
       const dir = mkdtempSync(join(tmpdir(), 'blindkey-piped-'));
-      const r = await runCliAsync(['login', s.url], baseEnv(dir), repoRoot, 'alex\ncorrect horse battery\n');
+      const r = await runCliAsync(['login', s.url], baseEnv(dir), repoRoot, `alex\ncorrect horse battery\n${s.loginCode()}\n`);
       expect(r.status).toBe(0);
       const saved = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { token: string };
       expect(saved.token).toMatch(/^bk_/);
@@ -42,13 +37,7 @@ describe('blindkey login — piped (non-interactive) stdin', () => {
     const s = await makeServer();
     try {
       await s.admin('jo', 'correct horse battery');
-      const adminId = (s.db.prepare('SELECT id FROM admin WHERE username = ?').get('jo') as { id: number }).id;
-      const ctx: AppContext = { db: s.db, ring: s.ring };
-      const actor: Actor = { principal: { kind: 'admin', id: adminId, userId: adminId, isSuper: true, impersonatorId: null, scopes: ['admin'], projectIds: null, agent: false }, ip: '1.1.1.1', userAgent: 't' };
-      startEnrollment(ctx, adminId);
-      const enrollSecret = openTotpSecret(s.ring, getTotp(s.db, adminId)!);
-      await confirmEnrollment(ctx, actor, hotp(enrollSecret, stepAt(Date.now())));
-      const code = hotp(openTotpSecret(s.ring, getTotp(s.db, adminId)!), stepAt(Date.now()) + 1);
+      const code = s.loginCode();
 
       const dir = mkdtempSync(join(tmpdir(), 'blindkey-piped-2fa-'));
       const r = await runCliAsync(['login', s.url], baseEnv(dir), repoRoot, `jo\ncorrect horse battery\n${code}\n`);
@@ -76,7 +65,7 @@ describe('blindkey login — piped (non-interactive) stdin', () => {
       try {
         await s.admin('robin', 'correct horse battery');
         const dir = mkdtempSync(join(tmpdir(), 'blindkey-piped-keepopen-'));
-        const r = await runCliKeepStdinOpen(['login', s.url], baseEnv(dir), repoRoot, 'robin\ncorrect horse battery\n', 5000);
+        const r = await runCliKeepStdinOpen(['login', s.url], baseEnv(dir), repoRoot, `robin\ncorrect horse battery\n${s.loginCode()}\n`, 5000);
         expect(r.timedOut).toBe(false);
         expect(r.status).toBe(0);
         const saved = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as { token: string };
@@ -99,7 +88,7 @@ describe('blindkey login — piped (non-interactive) stdin', () => {
       await s.admin('dana', 'correct horse battery');
       const dir = mkdtempSync(join(tmpdir(), 'blindkey-file-stdin-'));
       const answersFile = join(dir, 'answers.txt');
-      writeFileSync(answersFile, 'dana\ncorrect horse battery\n');
+      writeFileSync(answersFile, `dana\ncorrect horse battery\n${s.loginCode()}\n`);
       const r = await runCliWithFileStdin(['login', s.url], baseEnv(dir), repoRoot, answersFile);
       expect(r.stderr).not.toContain('TypeError');
       expect(r.status).toBe(0);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeTestApp, type TestCtx } from './helpers.js';
+import { makeTestApp, sessionFor, type TestCtx } from './helpers.js';
 import { createAdmin, createSession, getAdmin } from '../src/repos/admin.js';
 import { SESSION_TTL_MS } from '../src/ui/session.js';
 import { startEnrollment, confirmEnrollment, MAX_FACTOR_FAILURES, FACTOR_LOCK_MS } from '../src/services/twofactor.js';
@@ -13,7 +13,7 @@ function main(html: string): string {
 }
 
 async function refreshCsrf(t: TestCtx, session: string): Promise<string> {
-  const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
+  const res = await t.app.inject({ method: 'GET', url: '/settings/password', cookies: { blindkey_session: session } });
   return /name="csrf" value="([^"]+)"/.exec(res.body)![1]!;
 }
 
@@ -25,6 +25,8 @@ describe('ui password change — no 2FA', () => {
   beforeAll(async () => {
     t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('old-password!!'));
+    // Without two-factor the password page is only reachable on the way in: a temporary password (the gate sends everything else to 2FA enrollment).
+    t.db.prepare(`UPDATE admin SET must_change_password = 1`).run();
     const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'old-password!!' } });
     session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
     csrf = await refreshCsrf(t, session);
@@ -102,7 +104,7 @@ describe('ui password change — no 2FA', () => {
 
   it('6. success redirects 303, revokes other sessions, keeps the current one, and audits sessions_revoked', async () => {
     const other = createSession(t.db, 1, SESSION_TTL_MS, '', '');
-    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: other } })).statusCode).toBe(200);
+    expect((await t.app.inject({ method: 'GET', url: '/settings/password', cookies: { blindkey_session: other } })).statusCode).toBe(200);
 
     const res = await t.app.inject({
       method: 'POST',
@@ -111,15 +113,18 @@ describe('ui password change — no 2FA', () => {
       payload: { csrf, current: 'old-password!!', next: 'brand-new-pass1', confirm: 'brand-new-pass1' },
     });
     expect(res.statusCode).toBe(303);
-    expect(res.headers.location).toBe('/settings/password?done=saved');
+    // first login: the new password is followed straight by the mandatory two-factor enrollment
+    expect(res.headers.location).toBe('/settings/2fa');
 
     const oldLogin = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'old-password!!' } });
     expect(oldLogin.statusCode).toBe(401);
     const newLogin = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'brand-new-pass1' } });
     expect(newLogin.statusCode).toBe(302);
 
-    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: other } })).statusCode).toBe(302);
-    expect((await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } })).statusCode).toBe(200);
+    const otherAfter = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: other } });
+    expect(otherAfter.statusCode).toBe(302);
+    expect(otherAfter.headers.location).toContain('/login');
+    expect((await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } })).statusCode).toBe(200);
 
     const rows = listAudit(t.db, { action: 'auth.password_changed', limit: 1 });
     expect(rows).toHaveLength(1);
@@ -130,6 +135,8 @@ describe('ui password change — no 2FA', () => {
   });
 
   it('F4: a pending login challenge for the admin is deleted on a successful password change', async () => {
+    // test 6 finished the first-login change; a password reset puts the user back on a temporary password
+    t.db.prepare(`UPDATE admin SET must_change_password = 1`).run();
     const admin = getAdmin(t.db)!;
     const challenge = createChallenge(t.db, admin.id, 60_000, '', '');
     expect(getChallenge(t.db, challenge)).not.toBeNull();
@@ -159,9 +166,7 @@ describe('ui password change — with 2FA enabled', () => {
   beforeAll(async () => {
     t = await makeTestApp();
     createAdmin(t.db, 'bob', await hashPassword('correct-password1'));
-    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: 'correct-password1' } });
-    session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
-    csrf = await refreshCsrf(t, session);
+    session = sessionFor(t.db, 'bob');
     startEnrollment(t.ctx, 1);
     const codes = await confirmEnrollment(
       t.ctx,
@@ -171,6 +176,7 @@ describe('ui password change — with 2FA enabled', () => {
     );
     expect(codes).not.toBeNull();
     recoveryCodes = codes!;
+    csrf = await refreshCsrf(t, session);
   });
 
   it('1. GET shows a code field when 2FA is on', async () => {

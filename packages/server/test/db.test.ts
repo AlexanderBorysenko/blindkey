@@ -30,7 +30,7 @@ describe('db', () => {
     // Applies migration 3 (this test's subject), migration 4 (api_tokens.kind, spec §1.1) and
     // migration 5 (connect_requests, spec §1.3) — all three are pending from this seeded
     // "post-migration-2" state.
-    expect(runMigrations(db)).toBe(5); // + migration 6 (token labels) + migration 7 (workspaces)
+    expect(runMigrations(db)).toBe(6); // + migration 6 (token labels) + migration 7 (workspaces) + migration 8 (2FA set up by admin)
     expect(db.prepare(`SELECT failed_count, locked_until FROM admin_totp WHERE admin_id = 1`).get()).toEqual({ failed_count: 0, locked_until: null });
   });
   it('migration 4 adds api_tokens.kind defaulting to user', () => {
@@ -43,7 +43,7 @@ describe('db', () => {
     db.prepare(`INSERT INTO api_tokens (name, prefix, token_hash, scopes, project_ids, expires_at, created_at) VALUES ('t', 'p', 'h', '[]', NULL, NULL, 0)`).run();
     // Applies migration 4 (this test's subject) and migration 5 (connect_requests, spec §1.3) —
     // both are pending from this seeded "post-migration-3" state.
-    expect(runMigrations(db)).toBe(4); // + migration 6 (token labels) + migration 7 (workspaces)
+    expect(runMigrations(db)).toBe(5); // + migration 6 (token labels) + migration 7 (workspaces) + migration 8 (2FA set up by admin)
     expect(db.prepare(`SELECT kind FROM api_tokens`).get()).toEqual({ kind: 'user' });
   });
   it('migration 5 creates connect_requests (spec §1.3)', () => {
@@ -53,7 +53,7 @@ describe('db', () => {
       db.exec(m.sql);
       db.prepare(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, 0)`).run(m.id);
     }
-    expect(runMigrations(db)).toBe(3); // + migration 6 (token labels) + migration 7 (workspaces)
+    expect(runMigrations(db)).toBe(4); // + migration 6 (token labels) + migration 7 (workspaces) + migration 8 (2FA set up by admin)
     const cols = db.prepare(`SELECT name FROM pragma_table_info('connect_requests')`).all().map((r) => (r as { name: string }).name);
     for (const c of [
       'id', 'device_hash', 'user_code', 'name', 'scopes', 'projects', 'expires_days', 'status',
@@ -97,5 +97,19 @@ describe('db', () => {
     ins.run(null, 1);
     expect(() => ins.run(null, 1)).toThrow(/UNIQUE/);
     expect(() => ins.run(null, 2)).not.toThrow();
+  });
+});
+
+describe('migration 8', () => {
+  it('adds admin.twofactor_by_admin defaulting to 0 for existing users', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`);
+    for (const m of MIGRATIONS.filter((x) => x.id <= 7)) {
+      db.exec(m.sql);
+      db.prepare(`INSERT INTO schema_migrations (id, applied_at) VALUES (?, 0)`).run(m.id);
+    }
+    db.prepare(`INSERT INTO admin (id, username, password_hash, created_at) VALUES (1, 'a', 'h', 0)`).run();
+    expect(runMigrations(db)).toBe(1);
+    expect(db.prepare(`SELECT twofactor_by_admin AS v FROM admin WHERE id = 1`).get()).toEqual({ v: 0 });
   });
 });

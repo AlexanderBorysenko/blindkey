@@ -5,9 +5,11 @@ import { AppError, NotFoundError } from '../../errors.js';
 import { deleteSession, getUserById } from '../../repos/admin.js';
 import { mustChangePassword } from '../../services/password.js';
 import { isTotpEnabled } from '../../services/twofactor.js';
+import { isTwoFactorByAdmin } from '../../repos/twofactor.js';
+import { qrDataUri } from '../qr.js';
 import {
-  createUserFor, deleteUserFor, listUsersFor, resetUserPasswordFor, resetUserTwoFactorFor, setUserDisabledFor, setUserSuperFor,
-  startImpersonation, stopImpersonation,
+  confirmUserSetupFor, createUserFor, deleteUserFor, listUsersFor, resetUserPasswordFor, resetUserTwoFactorFor, setUserDisabledFor, setUserSuperFor,
+  startImpersonation, stopImpersonation, userSetupFor,
 } from '../../services/users.js';
 import { adminActor, clearSessionCookie, requireAdmin, setSessionCookie, uiSessionId } from '../session.js';
 import { assertCsrf } from '../csrf.js';
@@ -58,7 +60,10 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     const principal = superOnly(req);
     return renderPage('users', {
       ...pageContext(ctx, req, 'Users'),
-      users: listUsersFor(ctx, principal).map((u) => ({ ...u, twofactor: isTotpEnabled(ctx, u.id) })),
+      users: listUsersFor(ctx, principal).map((u) => {
+        const twofactor = isTotpEnabled(ctx, u.id);
+        return { ...u, twofactor, setup_pending: !twofactor && isTwoFactorByAdmin(ctx.db, u.id) };
+      }),
       selfId: principal.userId,
       created: null,
       error: null,
@@ -68,7 +73,7 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
   };
 
   /** Runs a service action; a 4xx guard error is shown on the page instead of becoming an error screen. */
-  async function act(req: FastifyRequest, reply: FastifyReply, run: () => void | Promise<void>, extra: () => Record<string, unknown> = () => ({})) {
+  async function act(req: FastifyRequest, reply: FastifyReply, run: () => void | Promise<void>, extra: () => Record<string, unknown> = () => ({}), redirectTo = '/admin/users?done=saved') {
     assertCsrf(ctx, req);
     superOnly(req);
     try {
@@ -81,21 +86,72 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     }
     const shown = extra();
     if (Object.keys(shown).length > 0) return reply.header('cache-control', 'no-store').type('text/html').send(usersPage(req, shown));
-    return reply.redirect('/admin/users?done=saved', 303);
+    return reply.redirect(redirectTo, 303);
   }
 
   const idOf = (req: FastifyRequest<{ Params: { id: string } }>) => Number.parseInt(req.params.id, 10);
 
   app.get('/admin/users', async (req, reply) => reply.type('text/html').send(usersPage(req, {})));
 
+  /** Step 2 of creating a user (and of a 2FA reset): the QR for the super user to have scanned, and the code field. */
+  async function setupPage(req: FastifyRequest, reply: FastifyReply, id: number, tempPassword: string | null, error: string | null, status = 200) {
+    const setup = userSetupFor(ctx, superOnly(req), id);
+    if (!setup) throw new NotFoundError('no two-factor setup in progress for this user');
+    return reply.status(status).header('cache-control', 'no-store').type('text/html').send(renderPage('users-setup-2fa', {
+      ...pageContext(ctx, req, 'Users'),
+      setup: { id, username: setup.username },
+      qr: await qrDataUri(setup.uri),
+      secretText: setup.secret.replace(/(.{4})(?=.)/g, '$1 '),
+      tempPassword,
+      error,
+    }));
+  }
+
+  // Step 1: the account exists with a pending 2FA enrollment and cannot log in; step 2 confirms it.
   app.post('/admin/users', limited, async (req, reply) => {
+    assertCsrf(ctx, req);
+    superOnly(req);
     const b = body(req);
     const username = str(b, 'username');
     const generate = bool(b, 'generate');
     const password = generate ? generatePassword() : str(b, 'password');
-    return act(req, reply, async () => {
-      await createUserFor(ctx, adminActor(req), { username, password });
-    }, () => ({ created: { username: username.trim(), password: generate ? password : null } }));
+    let id: number;
+    try {
+      id = (await createUserFor(ctx, adminActor(req), { username, password })).id;
+    } catch (err) {
+      if (err instanceof AppError && err.status < 500) {
+        return reply.status(err.status).type('text/html').send(usersPage(req, { error: errorText(err) }));
+      }
+      throw err;
+    }
+    return setupPage(req, reply, id, generate ? password : null, null);
+  });
+
+  app.get<{ Params: { id: string } }>('/admin/users/:id/setup-2fa', async (req, reply) => setupPage(req, reply, idOf(req), null, null));
+
+  app.post<{ Params: { id: string } }>('/admin/users/:id/setup-2fa', limited, async (req, reply) => {
+    assertCsrf(ctx, req);
+    superOnly(req);
+    const b = body(req);
+    const id = idOf(req);
+    // Only displayed again on the result page (never stored): a tampered value can only mislead the super user's own screen.
+    const tempPassword = str(b, 'temp_password') || null;
+    let codes: string[] | null;
+    try {
+      codes = await confirmUserSetupFor(ctx, adminActor(req), id, str(b, 'code'));
+    } catch (err) {
+      if (err instanceof AppError && err.status < 500) {
+        return reply.status(err.status).type('text/html').send(usersPage(req, { error: errorText(err) }));
+      }
+      throw err;
+    }
+    if (!codes) return setupPage(req, reply, id, tempPassword, 'Invalid code.', 400);
+    return reply.header('cache-control', 'no-store').type('text/html').send(renderPage('users-2fa-done', {
+      ...pageContext(ctx, req, 'Users'),
+      username: getUserById(ctx.db, id)?.username ?? '',
+      tempPassword,
+      codes,
+    }));
   });
 
   type IdReq = FastifyRequest<{ Params: { id: string } }>;
@@ -109,7 +165,7 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.post<{ Params: { id: string } }>('/admin/users/:id/demote', limited, async (req, reply) =>
     act(req, reply, () => setUserSuperFor(ctx, adminActor(req), idOf(req), false)));
   app.post<{ Params: { id: string } }>('/admin/users/:id/reset-2fa', limited, async (req, reply) =>
-    act(req, reply, () => resetUserTwoFactorFor(ctx, adminActor(req), idOf(req))));
+    act(req, reply, () => resetUserTwoFactorFor(ctx, adminActor(req), idOf(req)), () => ({}), `/admin/users/${idOf(req)}/setup-2fa`));
 
   app.post<{ Params: { id: string } }>('/admin/users/:id/reset-password', limited, async (req: IdReq, reply) => {
     const b = body(req);

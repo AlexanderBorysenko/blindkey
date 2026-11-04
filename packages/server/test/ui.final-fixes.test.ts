@@ -40,6 +40,7 @@ beforeAll(async () => {
   for (const name of ['dave', 'fay', 'cliuser', 'docwriter', 'reader', 'docreader', 'gone']) {
     createUser(t.db, { username: name, passwordHash: await hashPassword(`${name}-password-1`) });
   }
+  for (const name of ['alex', 'dave', 'fay', 'cliuser', 'docwriter', 'reader', 'docreader', 'gone']) t.enroll(name);
   alex = sessionFor('alex');
   t.project('qa-proj');
 });

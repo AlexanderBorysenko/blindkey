@@ -58,7 +58,7 @@
         <td><strong><%= u.username %></strong><% if (u.id === it.selfId) { %> <span class="tag">you</span><% } %></td>
         <td><%= u.is_super ? 'yes' : 'no' %></td>
         <td><%= u.disabled ? 'disabled' : 'active' %></td>
-        <td><%= u.twofactor ? 'on' : 'off' %></td>
+        <td><% if (u.twofactor) { %>on<% } else if (u.setup_pending) { %>2FA pending <a class="btn sm" href="/admin/users/<%= u.id %>/setup-2fa">Continue setup</a><% } else { %>pending setup<% } %></td>
         <td><%= u.must_change_password ? 'yes' : 'no' %></td>
         <td><time datetime="<%= it.fmt.iso(u.created_at) %>" title="<%= it.fmt.iso(u.created_at) %>"><%= it.fmt.ago(u.created_at) %></time></td>
         <td>

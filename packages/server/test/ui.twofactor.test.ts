@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { makeTestApp, type TestCtx } from './helpers.js';
-import { createAdmin, createSession } from '../src/repos/admin.js';
+import { createAdmin, createSession, createUser } from '../src/repos/admin.js';
 import { SESSION_TTL_MS } from '../src/ui/session.js';
 import { confirmEnrollment, startEnrollment, verifySecondFactor, MAX_FACTOR_FAILURES } from '../src/services/twofactor.js';
 import { hashPassword } from '../src/crypto/passwords.js';
@@ -34,7 +34,8 @@ function login2fa(cookie: string, code: string) {
 
 /** The CSRF token is an HMAC of the session id, so it changes every time `session` is reassigned. */
 async function refreshCsrf(): Promise<void> {
-  const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
+  // /settings/2fa is reachable both while enrolling (the 2FA gate) and afterwards.
+  const res = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
   csrf = /name="csrf" value="([^"]+)"/.exec(res.body)![1]!;
 }
 
@@ -67,15 +68,16 @@ describe('ui two-factor', () => {
     await refreshCsrf();
   });
 
-  it('1. shows the enrollment banner on the home page', async () => {
+  it('1. the gate sends every other page to the enrollment page, where the required notice is shown', async () => {
     const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
-    const body = main(res.body);
-    expect(body).toContain('Two-factor authentication is off');
-    expect(body).toContain('href="/settings/2fa"');
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe('/settings/2fa');
+    const page = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
+    expect(main(page.body)).toContain('Two-factor authentication is required. Scan the QR code with an authenticator app to finish setting up your account.');
   });
 
   it('1. the sidebar links to /settings/2fa', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
+    const res = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     const sidebar = res.body.split('<aside')[1]!.split('</aside>')[0]!;
     expect(sidebar).toContain('href="/settings/2fa"');
   });
@@ -108,9 +110,10 @@ describe('ui two-factor', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it('3. a pending enrollment still shows the banner and still logs in with no challenge', async () => {
+  it('3. a pending (self-started) enrollment keeps the gate shut and still logs in with no challenge', async () => {
     const home = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
-    expect(main(home.body)).toContain('Two-factor authentication is off');
+    expect(home.statusCode).toBe(302);
+    expect(home.headers.location).toBe('/settings/2fa');
 
     const res = await login();
     expect(res.statusCode).toBe(302);
@@ -147,12 +150,13 @@ describe('ui two-factor', () => {
     expect(res.headers['cache-control']).toContain('no-store');
   });
 
-  it('4. settings now shows Enabled since / unused codes, and the banner is gone', async () => {
+  it('4. settings now shows Enabled since / unused codes, and the gate is open', async () => {
     const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     expect(main(settings.body)).toContain('Enabled since');
     expect(main(settings.body)).toContain('10 unused recovery codes');
     const home = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
-    expect(main(home.body)).not.toContain('Two-factor authentication is off');
+    expect(home.statusCode).toBe(200);
+    expect(main(settings.body)).not.toContain('Two-factor authentication is required');
   });
 
   it('F5c: the recovery/disable code inputs use inputmode text (they accept recovery codes)', async () => {
@@ -291,27 +295,25 @@ describe('ui two-factor', () => {
     expect(main(res.body)).toContain('Invalid password or code.');
   });
 
-  it('11. disable requires the right password and a fresh code, then removes 2FA', async () => {
+  it('11. there is no way to turn 2FA off: no form on the page, and the old route is gone', async () => {
+    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
+    expect(main(settings.body)).not.toMatch(/turn off/i);
+    expect(main(settings.body)).not.toContain('/settings/2fa/disable');
     const res = await t.app.inject({
       method: 'POST',
       url: '/settings/2fa/disable',
       cookies: { blindkey_session: session },
       payload: { csrf, password: 'pw', code: newRecoveryCodes[0] },
     });
-    expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/settings/2fa?done=saved');
-
-    const settings = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
-    expect(main(settings.body)).toContain('Set up two-factor');
-    const home = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
-    expect(main(home.body)).toContain('Two-factor authentication is off');
+    expect(res.statusCode).toBe(404);
+    expect(main((await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } })).body)).toContain('Enabled since');
   });
 
-  it('11. login needs no second step once 2FA is off', async () => {
+  it('11. login still needs the second step', async () => {
     const res = await login();
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe('/');
-    expect(res.cookies.find((c) => c.name === 'blindkey_2fa')).toBeUndefined();
+    expect(res.headers.location).toBe('/login/2fa');
+    expect(res.cookies.find((c) => c.name === 'blindkey_2fa')).toBeDefined();
   });
 
   it('12. GET /login/2fa without any cookie redirects to /login', async () => {
@@ -337,7 +339,7 @@ describe('R7: malformed code body on POST /login/2fa', () => {
 
     const login1 = await t2.app.inject({ method: 'POST', url: '/login', payload: { username: 'carol', password: 'pw' } });
     const session2 = login1.cookies.find((c) => c.name === 'blindkey_session')!.value;
-    const home = await t2.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session2 } });
+    const home = await t2.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session2 } });
     const csrf2 = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
 
     await t2.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { blindkey_session: session2 }, payload: { csrf: csrf2 } });
@@ -433,8 +435,8 @@ describe('F2: enrolling revokes the other sessions', () => {
       const admin = createAdmin(t4.db, 'erin', await hashPassword('pw'));
       const a = createSession(t4.db, admin.id, SESSION_TTL_MS, '', '');
       const b = createSession(t4.db, admin.id, SESSION_TTL_MS, '', '');
-      expect((await t4.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: b } })).statusCode).toBe(200);
-      const home = await t4.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: a } });
+      expect((await t4.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: b } })).statusCode).toBe(200);
+      const home = await t4.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: a } });
       const csrfA = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
       await t4.app.inject({ method: 'POST', url: '/settings/2fa/start', cookies: { blindkey_session: a }, payload: { csrf: csrfA } });
       const code = hotp(openTotpSecret(t4.ring, getTotp(t4.db, admin.id)!), stepAt(Date.now()));
@@ -496,17 +498,27 @@ describe('F4: parallel guesses on one challenge', () => {
 // F5d: every settings POST is rate limited to 10/min. A dedicated instance deliberately sends
 // an 11th request to each route (the same pattern as http.admin.test.ts for /auth/token).
 describe('F5d: settings POSTs are rate limited', () => {
-  it('the 11th POST within a minute to start, confirm, recovery and disable gets 429', async () => {
+  it('the 11th POST within a minute to start, confirm, recovery, reenroll and reenroll/confirm gets 429', async () => {
     const t6 = await makeTestApp();
     try {
+      // `gail` enrolls (start/confirm); `gwen` and `gus` are enrolled and each hammer one re-authenticating route
+      // (a wrong code locks the factor after 10 failures, so a route needs its own user).
       const admin = createAdmin(t6.db, 'gail', await hashPassword('pw'));
-      const s6 = createSession(t6.db, admin.id, SESSION_TTL_MS, '', '');
-      const home = await t6.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: s6 } });
-      const csrf6 = /name="csrf" value="([^"]+)"/.exec(home.body)![1]!;
-      for (const route of ['start', 'confirm', 'recovery', 'disable']) {
+      const others = ['gwen', 'gus'].map((name) => createUser(t6.db, { username: name, passwordHash: 'h' }));
+      for (const u of others) t6.enroll(u.id);
+      const csrfOf6 = async (sid: string) => /name="csrf" value="([^"]+)"/.exec((await t6.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: sid } })).body)![1]!;
+      const targets: [string, string][] = [
+        ['start', createSession(t6.db, admin.id, SESSION_TTL_MS, '', '')],
+        ['confirm', createSession(t6.db, admin.id, SESSION_TTL_MS, '', '')],
+        ['reenroll/confirm', createSession(t6.db, others[0]!.id, SESSION_TTL_MS, '', '')],
+        ['reenroll', createSession(t6.db, others[0]!.id, SESSION_TTL_MS, '', '')],
+        ['recovery', createSession(t6.db, others[1]!.id, SESSION_TTL_MS, '', '')],
+      ];
+      for (const [route, sid] of targets) {
+        const csrf6 = await csrfOf6(sid);
         const statuses: number[] = [];
         for (let i = 0; i < 11; i++) {
-          const r = await t6.app.inject({ method: 'POST', url: `/settings/2fa/${route}`, cookies: { blindkey_session: s6 }, payload: { csrf: csrf6, code: '000000', password: 'x' } });
+          const r = await t6.app.inject({ method: 'POST', url: `/settings/2fa/${route}`, cookies: { blindkey_session: sid }, payload: { csrf: csrf6, code: '000000', password: 'x', token: 'x' } });
           statuses.push(r.statusCode);
         }
         expect(statuses.slice(0, 10), route).not.toContain(429);

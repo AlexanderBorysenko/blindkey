@@ -5,6 +5,7 @@ import { lookupTokenByValue, touchToken } from '../repos/tokens.js';
 import { getUserById } from '../repos/admin.js';
 import { writeAudit } from '../repos/audit.js';
 import { parseTokenPrefix } from '../crypto/tokens.js';
+import { isTotpEnabled } from '../services/twofactor.js';
 import type { AppContext } from './context.js';
 
 declare module 'fastify' {
@@ -117,6 +118,8 @@ export function registerAuth(app: FastifyInstance, ctx: AppContext): void {
     // A token acts as its owner: one whose owner is gone or disabled stops working at once.
     const owner = row.user_id === null ? null : getUserById(ctx.db, row.user_id);
     if (!owner || owner.disabled_at !== null) throw new UnauthorizedError();
+    // Tokens are minted under 2FA: a user without it (reset, shell recovery) has no working token, whatever the table says.
+    if (!isTotpEnabled(ctx, owner.id)) throw new UnauthorizedError();
     touchToken(ctx.db, row.id);
     req.principal = {
       kind: 'token',

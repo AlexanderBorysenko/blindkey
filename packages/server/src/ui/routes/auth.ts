@@ -14,7 +14,7 @@ import {
   claimChallengeAttempt, createChallenge, deleteChallenge, getChallenge, purgeExpiredChallenges,
 } from '../../repos/twofactor.js';
 import {
-  CHALLENGE_TTL_MS, MAX_CHALLENGE_ATTEMPTS, isSecondFactorLocked, isTotpEnabled, verifySecondFactor,
+  CHALLENGE_TTL_MS, MAX_CHALLENGE_ATTEMPTS, isLoginBlockedBySetup, isSecondFactorLocked, isTotpEnabled, verifySecondFactor,
 } from '../../services/twofactor.js';
 
 type LoginBody = { Body: { username?: string; password?: string; next?: string } };
@@ -48,7 +48,8 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
       const admin = username ? getAdminByUsername(ctx.db, username) : null;
       const ok = admin ? await verifyPassword(admin.password_hash, password) : false;
       // A disabled user is refused like a wrong password (no hint that the account exists).
-      if (!admin || !ok || admin.disabled_at !== null) {
+      // A user whose two-factor a super user is still setting up cannot log in yet; refused the same way.
+      if (!admin || !ok || admin.disabled_at !== null || isLoginBlockedBySetup(ctx, admin.id)) {
         writeAudit(ctx.db, {
           actor_type: 'admin',
           actor_id: admin?.id ?? null,

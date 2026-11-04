@@ -61,7 +61,7 @@ describe('migration 7', () => {
     ).run();
     raw.prepare(`INSERT INTO sessions (id, admin_id, expires_at, created_at) VALUES ('sess', 1, 9999999999999, 1)`).run();
 
-    expect(runMigrations(raw)).toBe(1);
+    expect(runMigrations(raw)).toBe(MIGRATIONS.filter((x) => x.id > 6).length);
 
     const home = (raw.prepare(`SELECT id FROM workspaces WHERE slug = 'default'`).get() as { id: number }).id;
     const count = (sql: string) => (raw.prepare(sql).get() as { n: number }).n;

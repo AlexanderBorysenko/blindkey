@@ -24,7 +24,9 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
       // headers, and the value-bearing paths of every secrets request body.
       // The MCP JSON-RPC surface carries the same fields nested one level
       // deeper under params.arguments (spec §5). `current`/`next`/`confirm`
-      // (F6) cover /settings/password's plaintext password fields.
+      // (F6) cover /settings/password's plaintext password fields; `temp_password` carries a
+      // generated password between the two steps of creating a user, `token` the sealed new
+      // authenticator secret of a 2FA re-enrollment.
       redact: [
         'req.headers.authorization',
         'req.headers.cookie',
@@ -38,6 +40,8 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
         'req.body.next',
         'req.body.confirm',
         'req.body.device_code',
+        'req.body.temp_password',
+        'req.body.token',
         'req.body.params.arguments.value',
         'req.body.params.arguments.fields',
         'req.body.params.arguments.password',
@@ -52,6 +56,8 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
         'body.next',
         'body.confirm',
         'body.device_code',
+        'body.temp_password',
+        'body.token',
         'body.params.arguments.value',
         'body.params.arguments.fields',
         'body.params.arguments.password',

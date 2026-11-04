@@ -8,10 +8,12 @@ import { listAudit } from '../src/repos/audit.js';
 const DAY = 86_400_000;
 let t: TestCtx;
 let admin: string;
+let totp: ReturnType<TestCtx['enroll']>;
 
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
+  totp = t.enroll('alex');
   admin = t.token(['admin']);
 });
 afterAll(async () => {
@@ -22,13 +24,13 @@ const near = (value: number, expected: number) => expect(Math.abs(value - expect
 
 describe('login tokens', () => {
   it('expire after 30 days by default', async () => {
-    const res = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'pw', name: 'cli' } });
+    const res = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'pw', name: 'cli', totp: totp.code() } });
     expect(res.statusCode).toBe(201);
     near(res.json().expires_at, Date.now() + 30 * DAY);
   });
 
   it('accept expires_days between 1 and 365 only', async () => {
-    const ok = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'pw', expires_days: 365 } });
+    const ok = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'pw', expires_days: 365, totp: totp.code(1) } });
     near(ok.json().expires_at, Date.now() + 365 * DAY);
     for (const bad of [0, 366, 1.5]) {
       const res = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'pw', expires_days: bad } });

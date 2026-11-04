@@ -9,6 +9,8 @@ import { getTotp, openTotpSecret } from '../src/repos/twofactor.js';
 import { hotp, stepAt } from '../src/auth/totp.js';
 import { ConflictError } from '../src/errors.js';
 import { listAudit } from '../src/repos/audit.js';
+import * as twofactorService from '../src/services/twofactor.js';
+import { runTotpReset } from '../src/ops.js';
 import {
   isTotpEnabled,
   startEnrollment,
@@ -16,7 +18,6 @@ import {
   confirmEnrollment,
   verifySecondFactor,
   regenerateRecoveryCodes,
-  disableTwoFactor,
   countUnusedRecoveryCodes,
   isSecondFactorLocked,
   MAX_FACTOR_FAILURES,
@@ -115,16 +116,17 @@ describe('twofactor service', () => {
     expect(listAudit(ctx.db, { action: 'auth.recovery_regenerated' })).toHaveLength(1);
   });
 
-  it('disableTwoFactor: isTotpEnabled false, getTotp null, audit auth.totp_disabled', async () => {
+  it('two-factor is mandatory: the service has no self-disable path, and shell recovery (2fa reset) turns it off for onboarding again', async () => {
     const { ctx, admin, actor } = setup();
     startEnrollment(ctx, admin.id);
     await confirmEnrollment(ctx, actor, codeForStep(ctx, admin.id, 0));
     expect(countUnusedRecoveryCodes(ctx, admin.id)).toBe(10);
+    expect(Object.keys(twofactorService).filter((k) => /disable/i.test(k))).toEqual([]);
 
-    disableTwoFactor(ctx, actor);
+    expect(runTotpReset(ctx.db, 'alex')).toBe('alex');
     expect(isTotpEnabled(ctx, admin.id)).toBe(false);
     expect(getTotp(ctx.db, admin.id)).toBeNull();
-    expect(listAudit(ctx.db, { action: 'auth.totp_disabled' })).toHaveLength(1);
+    expect(() => twofactorService.assertTwoFactorEnabled(ctx, admin.id)).toThrow(expect.objectContaining({ status: 403, code: 'totp_setup_required' }));
   });
 
   // F1: persistent per-admin second-factor lockout.
@@ -212,11 +214,11 @@ describe('twofactor service', () => {
     expect(isSecondFactorLocked(ctx, admin.id)).toBeNull();
   });
 
-  it('lockout: disableTwoFactor clears the lock (the row is deleted)', async () => {
-    const { ctx, admin, actor } = await enrolled();
+  it('lockout: the shell 2fa reset clears the lock (the row is deleted)', async () => {
+    const { ctx, admin } = await enrolled();
     for (let i = 0; i < MAX_FACTOR_FAILURES; i++) await verifySecondFactor(ctx, admin.id, '000000');
     expect(isSecondFactorLocked(ctx, admin.id)).not.toBeNull();
-    disableTwoFactor(ctx, actor);
+    runTotpReset(ctx.db, 'alex');
     expect(isSecondFactorLocked(ctx, admin.id)).toBeNull();
   });
 

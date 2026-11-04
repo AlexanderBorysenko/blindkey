@@ -11,6 +11,7 @@ import { isUniqueViolation } from '../repos/util.js';
 import { getProjectBySlug, listProjects, type ProjectRow } from '../repos/projects.js';
 import { createToken, revokeAgentTokensByName, DAY_MS, latestAgentLabel } from '../repos/tokens.js';
 import { parseTokenLabel } from './admin.js';
+import { assertTwoFactorEnabled } from './twofactor.js';
 import {
   approveConnectRequest,
   claimApprovedConnectRequest,
@@ -130,6 +131,8 @@ function issueAgentToken(ctx: AppContext, requestId: number, ip: string, userAge
     // A reconnect under the same name keeps the label the admin gave the session it supersedes.
     // The token acts as whoever approved it; an approver deleted in the meantime leaves nobody to act as.
     if (claimed.approved_by_user_id === null) throw new AppError(400, 'invalid_request', 'the approving user no longer exists');
+    // Approved before a 2FA reset: no token until the approver has enrolled again.
+    assertTwoFactorEnabled(ctx, claimed.approved_by_user_id);
     const label = claimed.approved_label ?? latestAgentLabel(ctx.db, claimed.approved_by_user_id, claimed.name);
     revokeAgentTokensByName(ctx.db, claimed.approved_by_user_id, claimed.name);
     const expiresAt = Date.now() + (claimed.approved_expires_days ?? claimed.expires_days) * DAY_MS;
@@ -228,6 +231,7 @@ export function approveConnect(
   labelInput = '',
 ): void {
   assertNotImpersonating(actor.principal);
+  assertTwoFactorEnabled(ctx, actor.principal.userId);
   const row = mustPendingConnectRequest(ctx, code);
   const label = parseTokenLabel(labelInput);
   const parsedScopes = agentScopesSchema.safeParse(scopeInputs);

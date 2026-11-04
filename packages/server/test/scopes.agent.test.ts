@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
-import { makeTestApp, auth } from './helpers.js';
+import { makeTestApp, auth, sessionFor } from './helpers.js';
 import { createToken } from '../src/repos/tokens.js';
 import { registerAuth } from '../src/http/auth.js';
 import type { Principal } from '../src/auth/principal.js';
@@ -44,14 +44,14 @@ describe('agent token kind (spec §1.1)', () => {
     const { createAdmin } = await import('../src/repos/admin.js');
     const { hashPassword } = await import('../src/crypto/passwords.js');
     createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.enroll('alex');
     const { registerSessionResolver } = await import('../src/ui/session.js');
 
     const app = Fastify();
     await app.register(cookie);
     registerSessionResolver(app, t.ctx);
     app.get('/tokens', async (req) => (req as unknown as { principal: Principal }).principal ?? null);
-    const loginRes = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = loginRes.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const session = sessionFor(t.db, 'alex');
     const res = await app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } });
     expect(res.json().kind).toBe('admin');
     expect(res.json().agent).toBe(false);
@@ -63,8 +63,8 @@ describe('agent token kind (spec §1.1)', () => {
     const { createAdmin } = await import('../src/repos/admin.js');
     const { hashPassword } = await import('../src/crypto/passwords.js');
     createAdmin(t.db, 'alex', await hashPassword('pw'));
-    const session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-      .cookies.find((c) => c.name === 'blindkey_session')!.value;
+    t.enroll('alex');
+    const session = sessionFor(t.db, 'alex');
     createToken(t.db, { userId: t.owner().id, name: 'the-agent-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'agent' });
     createToken(t.db, { userId: t.owner().id, name: 'the-user-token', scopes: ['projects:read'], projectIds: null, expiresAt: null, kind: 'user' });
     const res = await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } });
@@ -84,8 +84,8 @@ describe('agent token kind (spec §1.1)', () => {
     const { createAdmin } = await import('../src/repos/admin.js');
     const { hashPassword } = await import('../src/crypto/passwords.js');
     createAdmin(t.db, 'alex', await hashPassword('pw'));
-    const session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-      .cookies.find((c) => c.name === 'blindkey_session')!.value;
+    t.enroll('alex');
+    const session = sessionFor(t.db, 'alex');
     const res = await t.app.inject({ method: 'GET', url: '/tokens', cookies: { blindkey_session: session } });
     for (const scope of ['projects:write', 'secrets:meta-write', 'secrets:use']) {
       expect(res.body).toContain(`value="${scope}"`);

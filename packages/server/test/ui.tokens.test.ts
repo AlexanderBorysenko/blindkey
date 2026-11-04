@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { makeTestApp, type TestCtx } from './helpers.js';
+import { makeTestApp, sessionFor, type TestCtx } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { listTokens, DAY_MS } from '../src/repos/tokens.js';
@@ -16,8 +16,8 @@ const csrfOf = (b: string) => /name="csrf" value="([^"]+)"/.exec(b)?.[1] ?? '';
 beforeAll(async () => {
   t = await makeTestApp();
   createAdmin(t.db, 'alex', await hashPassword('pw'));
-  session = (await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } }))
-    .cookies.find((c) => c.name === 'blindkey_session')!.value;
+  t.enroll('alex');
+  session = sessionFor(t.db, 'alex');
   t.project('acme');
   csrf = csrfOf((await page('/tokens')).body);
 });

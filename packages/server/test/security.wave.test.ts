@@ -17,7 +17,7 @@ import { runPasswordReset } from '../src/ops.js';
 import { approveConnect, pollConnect, startConnect } from '../src/services/connect.js';
 import { createTokenFor, listAuditFor, renameTokenFor, revokeTokenFor, updateTokenProjectsFor } from '../src/services/admin.js';
 import { changePassword, mustChangePassword } from '../src/services/password.js';
-import { confirmEnrollment, disableTwoFactor, regenerateRecoveryCodes, startEnrollment } from '../src/services/twofactor.js';
+import { beginReenrollment, confirmEnrollment, confirmReenrollment, regenerateRecoveryCodes, startEnrollment } from '../src/services/twofactor.js';
 import { startImpersonation, stopImpersonation } from '../src/services/users.js';
 import { searchFor } from '../src/services/search.js';
 
@@ -78,10 +78,11 @@ describe('2. impersonation sessions do not survive the super\'s credential reset
     const owner = t.owner();
     t.db.prepare(`UPDATE admin SET password_hash = ?, must_change_password = 0 WHERE id = ?`).run(await hashPassword('Old-password-1'), owner.id);
     const real = createSession(t.db, owner.id, 60_000, '', '');
+    const factor = t.enroll(owner.id);
 
     // UI password change by the super
     const a = startImpersonation(t.ctx, actorOf(owner), t.bob.id);
-    const res = await changePassword(t.ctx, actorOf(owner), { current: 'Old-password-1', next: 'New-password-12', confirm: 'New-password-12', code: '' }, real);
+    const res = await changePassword(t.ctx, actorOf(owner), { current: 'Old-password-1', next: 'New-password-12', confirm: 'New-password-12', code: factor.code() }, real);
     expect(res.ok).toBe(true);
     expect(getSession(t.db, a)).toBeNull();
     expect(getSession(t.db, real)).not.toBeNull();
@@ -135,7 +136,8 @@ describe('3. no credential or token management while impersonating', () => {
       ['2fa start', () => startEnrollment(t.ctx, t.bob.id, act.principal)],
       ['2fa confirm', () => confirmEnrollment(t.ctx, act, '123456')],
       ['2fa recovery', () => regenerateRecoveryCodes(t.ctx, act)],
-      ['2fa disable', () => disableTwoFactor(t.ctx, act)],
+      ['2fa re-enroll', () => beginReenrollment(t.ctx, act, 'bob')],
+      ['2fa re-enroll confirm', () => confirmReenrollment(t.ctx, act, 'x', '123456', 'sid')],
       ['password', () => changePassword(t.ctx, act, { current: 'a', next: 'New-password-12', confirm: 'New-password-12', code: '' }, 'sid')],
     ];
     for (const [name, call] of calls) {
@@ -153,32 +155,46 @@ describe('3. no credential or token management while impersonating', () => {
     const session = startImpersonation(t.ctx, actorOf(t.owner()), t.bob.id);
     const page = await t.app.inject({ method: 'GET', url: '/settings/2fa', cookies: { blindkey_session: session } });
     const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
-    for (const url of ['/settings/2fa/start', '/settings/2fa/confirm', '/settings/2fa/recovery', '/settings/2fa/disable']) {
+    for (const url of ['/settings/2fa/start', '/settings/2fa/confirm', '/settings/2fa/recovery', '/settings/2fa/reenroll', '/settings/2fa/reenroll/confirm']) {
       const res = await t.app.inject({ method: 'POST', url, cookies: { blindkey_session: session }, payload: { csrf, code: '123456', password: 'x' } });
       expect(res.statusCode, url).toBe(403);
     }
-    expect((t.db.prepare(`SELECT COUNT(*) AS n FROM admin_totp`).get() as { n: number }).n).toBe(0);
+    // only the fixture users' own (enabled) factors exist: nothing was started or replaced
+    expect((t.db.prepare(`SELECT COUNT(*) AS n FROM admin_totp WHERE enabled_at IS NULL`).get() as { n: number }).n).toBe(0);
   });
 });
 
 describe('4. must_change_password blocks the API token exchange', () => {
   it('no token is minted until the password has been changed', async () => {
     t = await makeShared();
+    const factor = t.enroll(t.bob.id);
     t.db.prepare(`UPDATE admin SET password_hash = ?, must_change_password = 1 WHERE id = ?`).run(await hashPassword(PW), t.bob.id);
     expect(mustChangePassword(t.ctx, t.bob.id)).toBe(true);
     expect(mustChangePassword(t.ctx, t.carol.id)).toBe(false);
     const before = listTokens(t.db).length;
-    const res = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'bob', password: PW, name: 'cli' } });
+    const res = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'bob', password: PW, name: 'cli', totp: factor.code(-1) } });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toMatchObject({ error: 'password_change_required' });
     expect(res.json().message).toMatch(/change your password/);
     expect(listTokens(t.db)).toHaveLength(before);
     // a wrong password stays an ordinary 401 (the flag is not an oracle without the password)
     expect((await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'bob', password: 'wrong-password-1', name: 'cli' } })).statusCode).toBe(401);
-    const changed = await changePassword(t.ctx, actorOf(t.bob), { current: PW, next: 'Brand-new-pass-1', confirm: 'Brand-new-pass-1', code: '' }, 'sid');
+    const changed = await changePassword(t.ctx, actorOf(t.bob), { current: PW, next: 'Brand-new-pass-1', confirm: 'Brand-new-pass-1', code: factor.code() }, 'sid');
     expect(changed.ok).toBe(true);
     expect(mustChangePassword(t.ctx, t.bob.id)).toBe(false);
-    expect((await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'bob', password: 'Brand-new-pass-1', name: 'cli' } })).statusCode).toBe(201);
+    expect((await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'bob', password: 'Brand-new-pass-1', name: 'cli', totp: factor.code(1) } })).statusCode).toBe(201);
+  });
+
+  it('a user without two-factor who must change the password hears password_change_required first, then totp_setup_required', async () => {
+    t = await makeShared();
+    const fresh = createUser(t.db, { username: 'fresh', passwordHash: await hashPassword(PW), mustChangePassword: true });
+    const exchange = (password: string) => t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'fresh', password, name: 'cli' } });
+    expect((await exchange(PW)).json()).toMatchObject({ error: 'password_change_required' });
+    const changed = await changePassword(t.ctx, actorOf(fresh), { current: PW, next: 'Brand-new-pass-1', confirm: 'Brand-new-pass-1', code: '' }, 'sid');
+    expect(changed.ok).toBe(true);
+    const after = await exchange('Brand-new-pass-1');
+    expect(after.statusCode).toBe(403);
+    expect(after.json()).toMatchObject({ error: 'totp_setup_required' });
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { makeTestApp, auth, type TestCtx } from './helpers.js';
+import { makeTestApp, sessionFor, auth, type TestCtx } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 
@@ -39,12 +39,12 @@ describe('ui skeleton', () => {
   });
 
   it('renders an HTML 404 page for an unknown UI path', async () => {
-    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'blindkey_session')?.value;
+    t.enroll('alex');
+    const session = sessionFor(t.db, 'alex');
     const res = await t.app.inject({
       method: 'GET',
       url: '/no-such-page',
-      cookies: { blindkey_session: session! },
+      cookies: { blindkey_session: session },
     });
     expect(res.statusCode).toBe(404);
     expect(res.headers['content-type']).toContain('text/html');

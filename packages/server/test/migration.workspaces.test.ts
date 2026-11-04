@@ -39,7 +39,7 @@ describe('migration 7 (multi-user + workspaces) on a populated database', () => 
     db.prepare(`INSERT INTO sessions (id, admin_id, expires_at, created_at) VALUES ('s1', 1, 99, 0), ('s2', 2, 99, 0)`).run();
     db.prepare(`INSERT INTO audit_log (ts, actor_type, actor_id, action) VALUES (1, 'admin', 1, 'old.event')`).run();
 
-    expect(runMigrations(db)).toBe(1);
+    expect(runMigrations(db)).toBe(2); // 7 (this test) + 8 (2FA set up by admin)
 
     const home = (db.prepare(`SELECT id FROM workspaces WHERE slug = 'default'`).get() as { id: number }).id;
     expect(db.prepare(`SELECT slug, name FROM workspaces ORDER BY slug`).all()).toEqual([

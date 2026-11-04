@@ -14,7 +14,7 @@ import { registerProjectRoutes } from './routes/projects.js';
 import { registerSecretRoutes } from './routes/secrets.js';
 import { registerForcedPasswordChange, registerUserRoutes } from './routes/users.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
-import { registerTwoFactorRoutes } from './routes/twofactor.js';
+import { registerTwoFactorGate, registerTwoFactorRoutes } from './routes/twofactor.js';
 
 const require = createRequire(import.meta.url);
 
@@ -85,6 +85,7 @@ export async function registerUi(app: FastifyInstance, ctx: AppContext): Promise
   });
 
   registerForcedPasswordChange(app, ctx);
+  registerTwoFactorGate(app, ctx);
   registerAuthRoutes(app, ctx);
   registerConnectRoutes(app, ctx);
   registerProjectRoutes(app, ctx);

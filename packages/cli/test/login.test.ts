@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,29 +6,27 @@ import { runLogin } from '../src/commands/login.js';
 import { configPath } from '../src/config.js';
 import { CliError } from '../src/errors.js';
 import { makeServer, type ServerFixture } from './helpers.js';
-import { startEnrollment, confirmEnrollment } from '../../server/src/services/twofactor.js';
 import { getTotp, openTotpSecret } from '../../server/src/repos/twofactor.js';
 import { hotp, stepAt } from '../../server/src/auth/totp.js';
-import type { Actor } from '../../server/src/auth/principal.js';
-import type { AppContext } from '../../server/src/http/context.js';
 
 let s: ServerFixture;
 let home: string;
 const env = () => ({ BLINDKEY_CONFIG_HOME: home }) as NodeJS.ProcessEnv;
+// Two-factor is mandatory, so the fixture admin is enrolled and every login asks for a code.
 const io = (password: string, username = 'alex') => ({
   prompt: async () => username,
-  promptHidden: async () => password,
+  promptHidden: async (question: string) => (question === '2FA code: ' ? s.loginCode() : password),
 });
 
-beforeAll(async () => {
+// A fresh server per test: with the mandatory second factor every login is two /auth/token requests
+// (password, then password + code), so one shared server would run into its 5/min rate limit.
+beforeEach(async () => {
   s = await makeServer();
   await s.admin('alex', 'correct horse battery');
-});
-afterAll(async () => {
-  await s.close();
-});
-beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'blindkey-login-'));
+});
+afterEach(async () => {
+  await s.close();
 });
 
 describe('runLogin', () => {
@@ -64,12 +62,20 @@ describe('runLogin', () => {
     expect(() => readFileSync(configPath(env()), 'utf8')).toThrow();
   });
 
+  it('says two-factor must be set up first (403 totp_setup_required) for a user who has not enrolled, and writes no config', async () => {
+    s.db.prepare('DELETE FROM admin_totp').run();
+    const err = await runLogin(s.url, {}, env(), io('correct horse battery')).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect((err as CliError).message).toContain('two-factor authentication must be set up first');
+    expect(() => readFileSync(configPath(env()), 'utf8')).toThrow();
+  });
+
   it('takes the username from --username without prompting', async () => {
     const io2 = {
       prompt: async () => {
         throw new Error('should not prompt for a username');
       },
-      promptHidden: async () => 'correct horse battery',
+      promptHidden: async (question: string) => (question === '2FA code: ' ? s.loginCode() : 'correct horse battery'),
     };
     await expect(runLogin(s.url, { username: 'alex' }, env(), io2)).resolves.toBeTruthy();
   });
@@ -105,12 +111,7 @@ describe('with 2FA', () => {
   beforeAll(async () => {
     s2 = await makeServer();
     await s2.admin('jo', 'correct horse battery');
-    adminId = (s2.db.prepare('SELECT id FROM admin WHERE username = ?').get('jo') as { id: number }).id;
-    const ctx: AppContext = { db: s2.db, ring: s2.ring };
-    const actor: Actor = { principal: { kind: 'admin', id: adminId, userId: adminId, isSuper: true, impersonatorId: null, scopes: ['admin'], projectIds: null, agent: false }, ip: '1.1.1.1', userAgent: 't' };
-    startEnrollment(ctx, adminId);
-    const secret = openTotpSecret(s2.ring, getTotp(s2.db, adminId)!);
-    await confirmEnrollment(ctx, actor, hotp(secret, stepAt(Date.now())));
+    adminId = (s2.db.prepare('SELECT id FROM admin WHERE username = ?').get('jo') as { id: number }).id; // enrolled by the fixture
   });
   afterAll(async () => {
     await s2.close();

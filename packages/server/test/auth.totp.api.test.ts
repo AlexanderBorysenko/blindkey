@@ -23,14 +23,16 @@ function codeForStep(t: TestCtx, adminId: number, deltaSteps: number): string {
 }
 
 describe('POST /api/v1/auth/token — 2FA', () => {
-  it('enrollment only started, not confirmed: password alone mints a token', async () => {
+  it('enrollment only started, not confirmed: no token, 403 totp_setup_required', async () => {
     const t = await makeTestApp();
     const admin = createAdmin(t.db, 'alex', await hashPassword('correct horse'));
     startEnrollment(t.ctx, admin.id);
 
     const r = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse' } });
-    expect(r.statusCode).toBe(201);
-    expect(r.json().token).toMatch(/^bk_/);
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error).toBe('totp_setup_required');
+    expect(r.json().message).toBe('two-factor authentication must be set up first');
+    expect(r.json().token).toBeUndefined();
   });
 
   it('enabled, no totp: 401 totp_required, no auth.login_failed or auth.totp_failed audit row, but auth.password_ok is written', async () => {
@@ -58,13 +60,16 @@ describe('POST /api/v1/auth/token — 2FA', () => {
     expect(listAudit(t.db, { action: 'auth.password_ok' })).toHaveLength(0);
   });
 
-  it('2FA off: a correct password writes no auth.password_ok row (only written when 2FA is on)', async () => {
+  it('2FA off: a correct password is refused 403 totp_setup_required, writes no auth.password_ok row and no token', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('correct horse'));
 
     const r = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse' } });
-    expect(r.statusCode).toBe(201);
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error).toBe('totp_setup_required');
     expect(listAudit(t.db, { action: 'auth.password_ok' })).toHaveLength(0);
+    expect(listAudit(t.db, { action: 'auth.login' })).toHaveLength(0);
+    expect(listAudit(t.db, { action: 'auth.login_blocked' })[0]?.meta).toEqual({ via: 'api', reason: 'totp_setup_required' });
   });
 
   it('wrong totp: 401 unauthorized, plus an auth.totp_failed audit row', async () => {

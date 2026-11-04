@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import { actorOf, jsonAs, makeShared, type Shared } from './access.fixture.js';
-import { auth } from './helpers.js';
+import { auth, sessionFor } from './helpers.js';
 import type { Principal } from '../src/auth/principal.js';
 import { createSession, createUser, getSession, getUserById, getUserByUsername, setUserDisabled, setUserSuper } from '../src/repos/admin.js';
 import { verifyPassword } from '../src/crypto/passwords.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { listAudit } from '../src/repos/audit.js';
-import { getTotp, savePendingTotp, enableTotp } from '../src/repos/twofactor.js';
+import { getTotp, isTwoFactorByAdmin, openTotpSecret } from '../src/repos/twofactor.js';
 import { getGrant } from '../src/repos/grants.js';
 import { listTokens } from '../src/repos/tokens.js';
 import { registerSessionResolver } from '../src/ui/session.js';
@@ -61,6 +61,7 @@ describe('user management (super only)', () => {
     t.db.prepare(`UPDATE admin SET password_hash = ? WHERE id = ?`).run(hash, t.bob.id);
     const session = createSession(t.db, t.bob.id, 60_000, '', '');
     const token = t.as(t.bob);
+    const factor = t.enroll(t.bob.id);
     const web = () => t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     expect((await web()).statusCode).toBe(200);
     setUserDisabledFor(t.ctx, actorOf(owner), t.bob.id, true);
@@ -68,11 +69,11 @@ describe('user management (super only)', () => {
     expect((await web()).statusCode).toBe(302);
     expect((await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth(token) })).statusCode).toBe(401);
     expect((await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'bob', password: PW } })).statusCode).toBe(401);
-    const api = await exchangePassword(t.ctx, { username: 'bob', password: PW, name: 'cli', expires_days: 1 }, '1.1.1.1', 'ua');
+    const api = await exchangePassword(t.ctx, { username: 'bob', password: PW, name: 'cli', expires_days: 1, totp: factor.code(-1) }, '1.1.1.1', 'ua');
     expect(api).toEqual({ ok: false, reason: 'invalid' });
     setUserDisabledFor(t.ctx, actorOf(owner), t.bob.id, false);
     expect((await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth(token) })).statusCode).toBe(200);
-    expect((await exchangePassword(t.ctx, { username: 'bob', password: PW, name: 'cli', expires_days: 1 }, '1.1.1.1', 'ua')).ok).toBe(true);
+    expect((await exchangePassword(t.ctx, { username: 'bob', password: PW, name: 'cli', expires_days: 1, totp: factor.code() }, '1.1.1.1', 'ua')).ok).toBe(true);
     expect(listAudit(t.db, { action: 'user.disable' })).toHaveLength(1);
     expect(listAudit(t.db, { action: 'user.enable' })).toHaveLength(1);
   });
@@ -106,12 +107,13 @@ describe('user management (super only)', () => {
     const owner = t.owner();
     t.db.prepare(`UPDATE admin SET password_hash = ?, must_change_password = 0 WHERE id = ?`).run(await hashPassword('Old-password-1'), t.bob.id);
     const session = createSession(t.db, t.bob.id, 60_000, '', '');
+    const factor = t.enroll(t.bob.id);
     await resetUserPasswordFor(t.ctx, actorOf(owner), t.bob.id, PW);
     expect(getSession(t.db, session)).toBeNull();
     expect(getUserById(t.db, t.bob.id)!.must_change_password).toBe(true);
     expect((await exchangePassword(t.ctx, { username: 'bob', password: 'Old-password-1', name: 'x', expires_days: 1 }, '', '')).ok).toBe(false);
     // the temporary password opens no API token until it has been changed
-    expect(await exchangePassword(t.ctx, { username: 'bob', password: PW, name: 'x', expires_days: 1 }, '', '')).toEqual({ ok: false, reason: 'password_change_required' });
+    expect(await exchangePassword(t.ctx, { username: 'bob', password: PW, name: 'x', expires_days: 1, totp: factor.code() }, '', '')).toEqual({ ok: false, reason: 'password_change_required' });
     await expect(resetUserPasswordFor(t.ctx, actorOf(owner), t.bob.id, 'short')).rejects.toThrow(ValidationError);
     await expect(resetUserPasswordFor(t.ctx, actorOf(owner), 99999, PW)).rejects.toThrow(NotFoundError);
     await expect(resetUserPasswordFor(t.ctx, actorOf(t.bob), t.erin.id, PW)).rejects.toThrow(PermissionError);
@@ -119,15 +121,29 @@ describe('user management (super only)', () => {
     expect(audit).not.toContain(PW);
   });
 
-  it('resets two-factor authentication', async () => {
+  it('resets two-factor authentication: sessions and tokens die, a fresh pending enrollment starts, login is refused until a super confirms it', async () => {
     t = await makeShared();
-    savePendingTotp(t.db, t.ring, t.bob.id, Buffer.from('12345678901234567890'));
-    enableTotp(t.db, t.bob.id, 1);
-    expect(getTotp(t.db, t.bob.id)?.enabled_at).toBeTruthy();
-    resetUserTwoFactorFor(t.ctx, actorOf(t.owner()), t.bob.id);
-    expect(getTotp(t.db, t.bob.id)).toBeNull();
-    expect(listAudit(t.db, { action: 'user.2fa_reset' })).toHaveLength(1);
+    const owner = t.owner();
+    const oldSecret = openTotpSecret(t.ring, getTotp(t.db, t.bob.id)!);
+    const session = createSession(t.db, t.bob.id, 60_000, '', '');
+    const token = t.as(t.bob);
+    expect(listTokens(t.db).filter((x) => x.user_id === t.bob.id && x.revoked_at === null).length).toBeGreaterThan(0);
+
+    resetUserTwoFactorFor(t.ctx, actorOf(owner), t.bob.id);
+
+    expect(getSession(t.db, session)).toBeNull();
+    expect((await t.app.inject({ method: 'GET', url: '/api/v1/projects', headers: auth(token) })).statusCode).toBe(401);
+    expect(listTokens(t.db).filter((x) => x.user_id === t.bob.id && x.revoked_at === null)).toEqual([]);
+    const pending = getTotp(t.db, t.bob.id)!;
+    expect(pending.enabled_at).toBeNull();
+    expect(openTotpSecret(t.ring, pending).equals(oldSecret)).toBe(false);
+    expect(isTwoFactorByAdmin(t.db, t.bob.id)).toBe(true);
+    const audit = listAudit(t.db, { action: 'user.2fa_reset' });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ actor_id: owner.id, target_id: t.bob.id });
     expect(() => resetUserTwoFactorFor(t.ctx, actorOf(t.erin), t.bob.id)).toThrow(PermissionError);
+    // not for yourself: it would sign you out of the page that finishes it
+    expect(() => resetUserTwoFactorFor(t.ctx, actorOf(owner), owner.id)).toThrow(ConflictError);
   });
 
   it('deletes a user with their tokens, sessions and grants; never the sole owner of a workspace', async () => {
@@ -299,8 +315,8 @@ describe('audit visibility', () => {
 });
 
 describe('connect approval binds the token to the approver', () => {
-  const login = async (username: string): Promise<string> =>
-    (await t.app.inject({ method: 'POST', url: '/login', payload: { username, password: 'pw' } })).cookies.find((c) => c.name === 'blindkey_session')!.value;
+  // Fixture users have two-factor on, so a browser session is opened directly instead of through the login form.
+  const login = async (username: string): Promise<string> => sessionFor(t.db, username);
 
   it('limits the project choices to what the approver sees and mints the token for them', async () => {
     t = await makeShared();

@@ -31,6 +31,7 @@ async function copyFrom(target: FakeElement): Promise<string> {
   const document = {
     addEventListener: (type: string, fn: (e: unknown) => void) => { listeners[type] = fn; },
     getElementById: (id: string) => (id === 'target' ? target : null),
+    querySelectorAll: () => [] as FakeElement[],
   };
   const navigator = { clipboard: { writeText: (s: string) => { copied.push(s); return Promise.resolve(); } } };
   const location = { search: '', pathname: '/', hash: '' };

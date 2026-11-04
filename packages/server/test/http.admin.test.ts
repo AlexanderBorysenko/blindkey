@@ -46,14 +46,14 @@ describe('admin routes', () => {
   });
   it('exchanges admin password for an admin token', async () => {
     const t = await makeTestApp();
-    createAdmin(t.db, 'alex', await hashPassword('correct horse'));
+    const enrolled = t.enroll(createAdmin(t.db, 'alex', await hashPassword('correct horse')).id);
     const bad = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'wrong' } });
     expect(bad.statusCode).toBe(401);
-    const ok = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse', name: 'cli-mac' } });
+    const ok = await t.app.inject({ method: 'POST', url: '/api/v1/auth/token', payload: { username: 'alex', password: 'correct horse', name: 'cli-mac', totp: enrolled.code() } });
     expect(ok.statusCode).toBe(201);
     const me = await t.app.inject({ method: 'GET', url: '/api/v1/me', headers: auth(ok.json().token) });
     expect(me.json()).toEqual({ kind: 'token', scopes: ['admin'], projects: null });
-    expect(listAudit(t.db, {}).map((a) => a.action)).toEqual(['auth.login', 'auth.login_failed']);
+    expect(listAudit(t.db, {}).map((a) => a.action)).toEqual(['auth.login', 'auth.password_ok', 'auth.login_failed']);
     expect(listAudit(t.db, { action: 'auth.login' })[0]?.actor_type).toBe('admin');
   });
 });

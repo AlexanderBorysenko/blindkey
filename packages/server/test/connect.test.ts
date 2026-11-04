@@ -1,14 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { makeTestApp } from './helpers.js';
+import { sessionFor, makeTestApp } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
 import { listAudit } from '../src/repos/audit.js';
 import { getConnectRequestByUserCode } from '../src/repos/connect.js';
 import { createToken } from '../src/repos/tokens.js';
 
-async function login(t: Awaited<ReturnType<typeof makeTestApp>>, username = 'alex', password = 'pw') {
-  const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username, password } });
-  return res.cookies.find((c) => c.name === 'blindkey_session')!.value;
+async function login(t: Awaited<ReturnType<typeof makeTestApp>>, username = 'alex') {
+  return sessionFor(t.db, username);
 }
 
 async function csrfFor(t: Awaited<ReturnType<typeof makeTestApp>>, session: string): Promise<string> {
@@ -141,6 +140,7 @@ describe('device flow: poll states (spec §1.3)', () => {
   it('a denied request → 403 access_denied, and the row is deleted (next poll is 400)', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.enroll('alex');
     const session = await login(t);
     const csrf = await csrfFor(t, session);
     const { device_code: deviceCode, user_code: userCode } = (await start(t, { name: 'x', scopes: ['projects:read'] })).json();
@@ -172,6 +172,7 @@ describe('device flow: poll states (spec §1.3)', () => {
 describe('device flow: approve then poll issues a token (spec §1.3)', () => {
   async function setupApprovedPoll(t: Awaited<ReturnType<typeof makeTestApp>>) {
     createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.enroll('alex');
     const session = await login(t);
     const csrf = await csrfFor(t, session);
     t.project('alpha');

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../http/context.js';
+import { isTotpEnabled } from '../../services/twofactor.js';
 import { changePassword, mustChangePassword } from '../../services/password.js';
 import { adminActor, requireAdmin, uiSessionId } from '../session.js';
 import { assertCsrf } from '../csrf.js';
@@ -28,6 +29,8 @@ export function registerPasswordRoutes(app: FastifyInstance, ctx: AppContext): v
         .type('text/html')
         .send(renderPage('settings-password', { ...pageContext(ctx, req, 'Password'), error: result.error, mustChange: mustChangePassword(ctx, requireAdmin(req).userId) }));
     }
+    // First login: the new password is followed straight by the mandatory two-factor enrollment.
+    if (!isTotpEnabled(ctx, requireAdmin(req).userId)) return reply.redirect('/settings/2fa', 303);
     return reply.redirect('/settings/password?done=saved', 303);
   });
 }

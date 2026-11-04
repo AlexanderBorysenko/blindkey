@@ -1,10 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { makeTestApp } from './helpers.js';
+import { makeTestApp, sessionFor } from './helpers.js';
 import { createAdmin } from '../src/repos/admin.js';
 import { hashPassword } from '../src/crypto/passwords.js';
-import { confirmEnrollment, startEnrollment } from '../src/services/twofactor.js';
-import { getTotp, openTotpSecret } from '../src/repos/twofactor.js';
-import { hotp, stepAt } from '../src/auth/totp.js';
 
 function main(html: string): string {
   return html.split('<main')[1]?.split('</main>')[0] ?? html;
@@ -33,23 +30,29 @@ describe('ui connect: GET /connect requires an admin session and preserves next 
     expect(res.body).toContain(`name="next" value="${next}"`);
   });
 
-  it('logging in (no 2FA) with that next lands back on /connect?code=...', async () => {
+  it('logging in with that next (through the mandatory 2FA step) lands back on /connect?code=...', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
+    const totp = t.enroll('alex');
     const { user_code: userCode } = await startConnect(t);
     const next = `/connect?code=${userCode}`;
     const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw', next } });
     expect(res.statusCode).toBe(302);
-    expect(res.headers.location).toBe(next);
-    const session = res.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    expect(res.headers.location).toBe(`/login/2fa?next=${encodeURIComponent(next)}`);
+    const challengeCookie = res.cookies.find((c) => c.name === 'blindkey_2fa')!.value;
+    const finish = await t.app.inject({ method: 'POST', url: '/login/2fa', cookies: { blindkey_2fa: challengeCookie }, payload: { code: totp.code(), next } });
+    expect(finish.statusCode).toBe(302);
+    expect(finish.headers.location).toBe(next);
+    const session = finish.cookies.find((c) => c.name === 'blindkey_session')!.value;
     const page = await t.app.inject({ method: 'GET', url: next, cookies: { blindkey_session: session } });
     expect(page.statusCode).toBe(200);
     expect(main(page.body)).toContain('Connect an agent');
   });
 
-  it('a next pointing off-site or to another path is ignored: login lands on / instead', async () => {
+  it('a next pointing off-site or to another path is ignored: login carries no next to the 2FA step', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.enroll('alex');
     for (const bad of [
       'https://evil.example.com/connect',
       '//evil.example.com',
@@ -61,19 +64,15 @@ describe('ui connect: GET /connect requires an admin session and preserves next 
     ]) {
       const res = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw', next: bad } });
       expect(res.statusCode, bad).toBe(302);
-      expect(res.headers.location, bad).toBe('/');
-      // Each successful login opens a fresh session; log back out isn't needed since /login
-      // re-authenticates independently of any existing cookie.
+      // 2FA is mandatory, so the password step always goes to the challenge; an unsafe next must not be carried along.
+      expect(res.headers.location, bad).toBe('/login/2fa');
     }
   });
 
   it('with 2FA on, next survives through the /login/2fa challenge and back', async () => {
     const t = await makeTestApp();
-    const admin = createAdmin(t.db, 'alex', await hashPassword('pw'));
-    const actor = { principal: { kind: 'admin' as const, id: admin.id, scopes: ['admin' as const], projectIds: null, agent: false, userId: admin.id, isSuper: true, impersonatorId: null }, ip: '', userAgent: '' };
-    startEnrollment(t.ctx, admin.id);
-    const secret = () => openTotpSecret(t.ring, getTotp(t.db, admin.id)!);
-    await confirmEnrollment(t.ctx, actor, hotp(secret(), stepAt(Date.now())));
+    createAdmin(t.db, 'alex', await hashPassword('pw'));
+    const totp = t.enroll('alex');
 
     const { user_code: userCode } = await startConnect(t);
     const next = `/connect?code=${userCode}`;
@@ -86,7 +85,7 @@ describe('ui connect: GET /connect requires an admin session and preserves next 
     const getChallenge = await t.app.inject({ method: 'GET', url: `/login/2fa?next=${encodeURIComponent(next)}`, cookies: { blindkey_2fa: challengeCookie } });
     expect(getChallenge.body).toContain(`name="next" value="${next}"`);
 
-    const code = hotp(secret(), stepAt(Date.now()) + 1);
+    const code = totp.code(1);
     const finish = await t.app.inject({ method: 'POST', url: '/login/2fa', cookies: { blindkey_2fa: challengeCookie }, payload: { code, next } });
     expect(finish.statusCode).toBe(302);
     expect(finish.headers.location).toBe(next);
@@ -97,8 +96,8 @@ describe('ui connect: the approve page', () => {
   it('unknown, expired or already-decided codes render an error page instead of the form', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
-    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    t.enroll('alex');
+    const session = sessionFor(t.db, 'alex');
 
     const res = await t.app.inject({ method: 'GET', url: '/connect?code=ZZZZ-ZZZZ', cookies: { blindkey_session: session } });
     expect(res.statusCode).toBe(200);
@@ -108,10 +107,10 @@ describe('ui connect: the approve page', () => {
   it('only offers AGENT_SCOPES checkboxes (never admin/secrets:reveal/secrets:write), and pre-checks the requested ones', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.enroll('alex');
     t.project('alpha');
     t.project('beta');
-    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const session = sessionFor(t.db, 'alex');
 
     const { user_code: userCode } = await startConnect(t, { name: 'claude', scopes: ['projects:read', 'docs:read'], projects: ['alpha', 'ghost'] });
     const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { blindkey_session: session } });
@@ -137,8 +136,8 @@ describe('ui connect: the approve page', () => {
   it('shows the user_code with a confirmation hint, and the request age', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
-    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    t.enroll('alex');
+    const session = sessionFor(t.db, 'alex');
     const { user_code: userCode } = await startConnect(t);
 
     const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { blindkey_session: session } });
@@ -151,8 +150,8 @@ describe('ui connect: the approve page', () => {
   it('an empty requested-projects list says "pick at least one" rather than "all-project scope"', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
-    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    t.enroll('alex');
+    const session = sessionFor(t.db, 'alex');
     const { user_code: userCode } = await startConnect(t, { name: 'x', scopes: ['projects:read'], projects: [] });
 
     const res = await t.app.inject({ method: 'GET', url: `/connect?code=${userCode}`, cookies: { blindkey_session: session } });
@@ -165,9 +164,9 @@ describe('ui connect: the approve page', () => {
 describe('ui connect: approve/deny outcomes', () => {
   async function loginAndStart(t: Awaited<ReturnType<typeof makeTestApp>>) {
     createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.enroll('alex');
     t.project('alpha');
-    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const session = sessionFor(t.db, 'alex');
     const page = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
     const { user_code: userCode } = await startConnect(t, { name: 'claude', scopes: ['projects:read'], projects: ['alpha'] });
@@ -211,10 +210,10 @@ describe('ui connect: approve/deny outcomes', () => {
   it('on a validation error, the re-rendered form keeps what the approver ticked, not the original request', async () => {
     const t = await makeTestApp();
     createAdmin(t.db, 'alex', await hashPassword('pw'));
+    t.enroll('alex');
     t.project('alpha');
     t.project('beta');
-    const login = await t.app.inject({ method: 'POST', url: '/login', payload: { username: 'alex', password: 'pw' } });
-    const session = login.cookies.find((c) => c.name === 'blindkey_session')!.value;
+    const session = sessionFor(t.db, 'alex');
     const page = await t.app.inject({ method: 'GET', url: '/', cookies: { blindkey_session: session } });
     const csrf = /name="csrf" value="([^"]+)"/.exec(page.body)![1]!;
     // Requested only projects:read/alpha, but the approver ticks docs:read/beta and drops all

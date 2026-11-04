@@ -158,3 +158,8 @@ export function listApprovedConnectRequests(db: Db, userId: number, nowTs: numbe
     db.prepare(`SELECT ${COLS} FROM connect_requests WHERE status = 'approved' AND approved_by_user_id = ? AND expires_at > ? ORDER BY id`).all(userId, nowTs) as RawRow[]
   ).map(toRow);
 }
+
+/** Deletes the approved-but-unclaimed requests a user approved, so their agent token can no longer be collected. Returns how many. */
+export function deleteApprovedConnectRequestsFor(db: Db, userId: number): number {
+  return db.prepare(`DELETE FROM connect_requests WHERE status = 'approved' AND approved_by_user_id = ?`).run(userId).changes;
+}

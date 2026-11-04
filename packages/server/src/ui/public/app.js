@@ -208,9 +208,23 @@
     'add-row': function (btn) { addRow(btn.getAttribute('data-key') || ''); }
   };
 
+  // Workspace switcher (<details class="ws-switch">): close on outside click and Escape.
+  function closeSwitchers(except) {
+    document.querySelectorAll('details.ws-switch[open]').forEach(function (d) { if (d !== except) d.removeAttribute('open'); });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var open = document.querySelector('details.ws-switch[open]');
+    if (!open) return;
+    open.removeAttribute('open');
+    var sum = open.querySelector('summary');
+    if (sum) sum.focus();
+  });
+
   document.addEventListener('click', function (e) {
     var target = e.target instanceof Element ? e.target : null;
     if (!target) return;
+    closeSwitchers(target.closest('details.ws-switch'));
     var opener = target.closest('[data-open-dialog]');
     if (opener) {
       var dlg = document.getElementById(opener.getAttribute('data-open-dialog') || '');
@@ -244,12 +258,6 @@
   document.addEventListener('change', function (e) {
     var target = e.target instanceof Element ? e.target : null;
     if (!target) return;
-    if (target.matches('select[data-autosubmit]')) {
-      var form = target.closest('form');
-      if (form && form.requestSubmit) form.requestSubmit();
-      else if (form) form.submit();
-      return;
-    }
     if (target.matches('input[data-perm-all]')) {
       // Unchecking "All" reveals the detail with everything ticked, ready to be narrowed down.
       var tree = target.closest('.perm-tree');

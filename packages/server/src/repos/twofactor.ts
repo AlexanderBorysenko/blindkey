@@ -46,6 +46,22 @@ export function savePendingTotp(db: Db, ring: KeyRing, adminId: number, secret: 
   ).run(adminId, enc, version, now());
 }
 
+/** Swaps the secret of an enabled enrollment for a new one (re-enrollment); the factor stays enabled. */
+export function replaceTotpSecret(db: Db, ring: KeyRing, adminId: number, secret: Buffer, step: number): void {
+  const { enc, version } = sealTotpSecret(ring, adminId, secret);
+  db.prepare(`UPDATE admin_totp SET secret_enc = ?, key_version = ?, last_used_step = ?, failed_count = 0, locked_until = NULL WHERE admin_id = ?`).run(enc, version, step, adminId);
+}
+
+/** Marks that a super user is setting up this user's two-factor, so the user cannot log in until it is confirmed. */
+export function setTwoFactorByAdmin(db: Db, adminId: number, on: boolean): void {
+  db.prepare(`UPDATE admin SET twofactor_by_admin = ? WHERE id = ?`).run(on ? 1 : 0, adminId);
+}
+
+export function isTwoFactorByAdmin(db: Db, adminId: number): boolean {
+  const r = db.prepare(`SELECT twofactor_by_admin AS v FROM admin WHERE id = ?`).get(adminId) as { v: number } | undefined;
+  return r?.v === 1;
+}
+
 export function enableTotp(db: Db, adminId: number, step: number, ts: number = now()): void {
   db.prepare(`UPDATE admin_totp SET enabled_at = ?, last_used_step = ? WHERE admin_id = ?`).run(ts, step, adminId);
 }

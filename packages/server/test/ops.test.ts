@@ -128,7 +128,7 @@ describe('ops', () => {
     expect(getTotp(db, admin.id)).toBeNull();
     const rows = listAudit(db, { action: 'auth.totp_reset' });
     expect(rows.length).toBe(1);
-    expect(rows[0]!.meta).toEqual({ via: 'shell' });
+    expect(rows[0]!.meta).toEqual({ via: 'shell', tokens_revoked: 0 });
   });
   it('2fa reset throws when there is no admin', () => {
     const db = openDb(':memory:');

@@ -14,6 +14,7 @@ import { upsertDocument } from '../../server/src/repos/documents.js';
 import { createAdmin, getAdmin, setAdminPasswordHash } from '../../server/src/repos/admin.js';
 import { addOwner, createWorkspace, getWorkspaceBySlug } from '../../server/src/repos/workspaces.js';
 import { hashPassword } from '../../server/src/crypto/passwords.js';
+import { enrollTotp, type Enrolled } from '../../server/test/helpers.js';
 
 export interface ServerFixture {
   url: string;
@@ -29,6 +30,13 @@ export interface ServerFixture {
   admin: (username: string, password: string) => Promise<void>;
   /** Id of the owner user (created on demand): tokens and approvals act as them. */
   userId: () => number;
+  /** The owner's second factor (two-factor is mandatory, so the owner is always enrolled). */
+  totp: () => Enrolled;
+  /**
+   * A valid login code for the owner. Resets the replay guard (`last_used_step`) first so a test file can log in
+   * many times within one 30 s step; replay protection itself is covered by the server tests.
+   */
+  loginCode: () => string;
   close: () => Promise<void>;
 }
 
@@ -39,7 +47,14 @@ export async function makeServer(): Promise<ServerFixture> {
   await app.listen({ port: 0, host: '127.0.0.1' });
   const { port } = app.server.address() as AddressInfo;
   const workspaceId = getWorkspaceBySlug(db, 'default')!.id;
-  const owner = () => getAdmin(db) ?? createAdmin(db, 'fixture-owner', 'hash');
+  let enrolled: Enrolled | null = null;
+  const owner = () => {
+    const existing = getAdmin(db);
+    if (existing) return existing;
+    const created = createAdmin(db, 'fixture-owner', 'hash');
+    enrolled = enrollTotp(db, ring, created.id);
+    return created;
+  };
   const wsId = (slug: string | undefined) => (slug === undefined ? workspaceId : getWorkspaceBySlug(db, slug)!.id);
   const workspaceOf = (slug: string) => getProjectBySlug(db, slug)!.workspace_id;
   const idOf = (slug: string | null) => (slug === null ? null : getProjectBySlug(db, slug)!.id);
@@ -71,7 +86,7 @@ export async function makeServer(): Promise<ServerFixture> {
       const hash = await hashPassword(password);
       const existing = getAdmin(db);
       if (!existing) {
-        createAdmin(db, username, hash);
+        enrolled = enrollTotp(db, ring, createAdmin(db, username, hash).id);
         return;
       }
       // A token fixture already created the owner: it becomes this admin (its tokens stay valid).
@@ -79,6 +94,15 @@ export async function makeServer(): Promise<ServerFixture> {
       setAdminPasswordHash(db, existing.id, hash);
     },
     userId: () => owner().id,
+    totp: () => {
+      owner();
+      return enrolled!;
+    },
+    loginCode: () => {
+      const id = owner().id;
+      db.prepare(`UPDATE admin_totp SET last_used_step = 0 WHERE admin_id = ?`).run(id);
+      return enrolled!.code();
+    },
     close: async () => {
       await app.close();
     },

@@ -1,0 +1,25 @@
+<div class="page-head">
+  <div>
+    <h1>Two-factor is on for <%= it.username %></h1>
+    <p class="lede">Hand these to <%= it.username %>. They will change the password at first login.</p>
+  </div>
+</div>
+
+<div class="panel lock">
+  <p class="alert warn">Shown once. They are not stored or logged and cannot be shown again.</p>
+  <% if (it.tempPassword) { %>
+  <h3>Temporary password</h3>
+  <div class="kv">
+    <div class="kv-row">
+      <div class="mono field-key">Temporary password</div>
+      <div><span class="field-value" id="new-user-password"><%= it.tempPassword %></span></div>
+    </div>
+  </div>
+  <% } %>
+  <h3>Recovery codes</h3>
+  <ol id="recovery-codes" class="codes mono">
+    <% it.codes.forEach(function (c) { %><li><%= c %></li><% }) %>
+  </ol>
+  <button class="btn sm ghost" type="button" data-action="copy-text" data-copy-target="recovery-codes">Copy</button>
+  <p><a class="btn primary" href="/admin/users">Back to users</a></p>
+</div>

@@ -18,7 +18,11 @@ import {
   type UserRow,
 } from '../repos/admin.js';
 import { revokeTokensForUser } from '../repos/tokens.js';
-import { deleteChallengesFor, deleteTwoFactor, resetFactorFailures } from '../repos/twofactor.js';
+import { deleteApprovedConnectRequestsFor } from '../repos/connect.js';
+import { deleteChallengesFor, deleteTwoFactor, getTotp, resetFactorFailures, savePendingTotp, setTwoFactorByAdmin } from '../repos/twofactor.js';
+import { activatePendingEnrollment, pendingEnrollment } from './twofactor.js';
+import { isTwoFactorByAdmin } from '../repos/twofactor.js';
+import { generateTotpSecret } from '../auth/totp.js';
 import { listOwnedWorkspaces, listOwnerIds } from '../repos/workspaces.js';
 import { hashPassword } from '../crypto/passwords.js';
 import { SESSION_TTL_MS } from '../ui/session.js';
@@ -69,14 +73,23 @@ export function listUsersFor(ctx: AppContext, principal: Principal): PublicUser[
   return listUsers(ctx.db).map(publicUser);
 }
 
-/** Creates a user with a temporary password they must change at their first login. */
+/**
+ * Creates a user with a temporary password they must change at their first login, plus a pending
+ * two-factor enrollment the super user finishes (`confirmUserSetupFor`) with the user's phone.
+ * Until then the user cannot log in at all.
+ */
 export async function createUserFor(ctx: AppContext, actor: Actor, input: { username: string; password: string }): Promise<PublicUser> {
   assertSuper(actor.principal);
   const name = usernameSchema.safeParse(input.username);
   if (!name.success) throw new ValidationError(name.error.issues);
   mustValidPassword(input.password);
   const hash = await hashPassword(input.password);
-  const user = createUser(ctx.db, { username: name.data, passwordHash: hash, mustChangePassword: true });
+  const user = ctx.db.transaction(() => {
+    const created = createUser(ctx.db, { username: name.data, passwordHash: hash, mustChangePassword: true });
+    savePendingTotp(ctx.db, ctx.ring, created.id, generateTotpSecret());
+    setTwoFactorByAdmin(ctx.db, created.id, true);
+    return created;
+  })();
   auditAs(ctx, actor, { action: 'user.create', target_type: 'user', target_id: user.id, meta: { username: user.username } });
   return publicUser(user);
 }
@@ -96,6 +109,7 @@ export function setUserDisabledFor(ctx: AppContext, actor: Actor, id: number, di
     assertNotLastSuper(ctx, target);
   }
   setUserDisabled(ctx.db, id, disabled);
+  if (disabled) deleteApprovedConnectRequestsFor(ctx.db, id);
   auditAs(ctx, actor, { action: disabled ? 'user.disable' : 'user.enable', target_type: 'user', target_id: id, meta: { username: target.username } });
 }
 
@@ -125,20 +139,66 @@ export async function resetUserPasswordFor(ctx: AppContext, actor: Actor, id: nu
     deleteAllSessions(ctx.db, id);
     deleteChallengesFor(ctx.db, id);
     resetFactorFailures(ctx.db, id);
+    deleteApprovedConnectRequestsFor(ctx.db, id);
     return revokeTokens ? revokeTokensForUser(ctx.db, id) : 0;
   })();
   auditAs(ctx, actor, { action: 'user.password_reset', target_type: 'user', target_id: id, meta: { username: target.username, tokens_revoked: revokeTokens ? revoked : false } });
 }
 
+/**
+ * Removes the user's second factor, signs them out everywhere, revokes all their API and agent
+ * tokens (they were minted under 2FA) and starts a fresh pending enrollment for a super user to
+ * finish (`confirmUserSetupFor`). Until then the user cannot log in. Not for yourself: that would sign you out of the very page that finishes it.
+ */
 export function resetUserTwoFactorFor(ctx: AppContext, actor: Actor, id: number): void {
   assertSuper(actor.principal);
   const target = mustUser(ctx, id);
-  ctx.db.transaction(() => {
+  if (target.id === actor.principal.userId) throw new ConflictError('use "Re-enroll" on your own two-factor page');
+  const { revoked, sessions } = ctx.db.transaction(() => {
     deleteTwoFactor(ctx.db, id);
     deleteChallengesFor(ctx.db, id);
-    resetFactorFailures(ctx.db, id);
+    savePendingTotp(ctx.db, ctx.ring, id, generateTotpSecret());
+    setTwoFactorByAdmin(ctx.db, id, true);
+    const deleted = deleteAllSessions(ctx.db, id);
+    // approvals made under the old factor must not mint a token later
+    deleteApprovedConnectRequestsFor(ctx.db, id);
+    return { revoked: revokeTokensForUser(ctx.db, id), sessions: deleted };
   })();
-  auditAs(ctx, actor, { action: 'user.2fa_reset', target_type: 'user', target_id: id, meta: { username: target.username } });
+  auditAs(ctx, actor, { action: 'user.2fa_reset', target_type: 'user', target_id: id, meta: { username: target.username, tokens_revoked: revoked, sessions_deleted: sessions } });
+}
+
+export interface UserSetup {
+  username: string;
+  secret: string;
+  uri: string;
+}
+
+/** The pending enrollment a super user is setting up for `id`; null when there is none (nothing to continue). */
+export function userSetupFor(ctx: AppContext, principal: Principal, id: number): UserSetup | null {
+  assertSuper(principal);
+  const target = mustUser(ctx, id);
+  // Only an enrollment a super user started (new account, reset): never a user's own pending self-enrollment.
+  if (!isTwoFactorByAdmin(ctx.db, id)) return null;
+  const pending = pendingEnrollment(ctx, id, target.username);
+  return pending ? { username: target.username, ...pending } : null;
+}
+
+/**
+ * Confirms the pending enrollment of `id` with a code from the user's phone. On success the user can log in,
+ * and the new recovery codes are returned for the super user to hand over (they are never stored or audited in clear).
+ */
+export async function confirmUserSetupFor(ctx: AppContext, actor: Actor, id: number, code: string): Promise<string[] | null> {
+  assertSuper(actor.principal);
+  const target = mustUser(ctx, id);
+  const row = getTotp(ctx.db, id);
+  if (!isTwoFactorByAdmin(ctx.db, id) || !row || row.enabled_at !== null) throw new ConflictError('there is no pending two-factor setup for this user');
+  const codes = await activatePendingEnrollment(ctx, id, code);
+  if (!codes) {
+    auditAs(ctx, actor, { action: 'user.2fa_enroll_failed', target_type: 'user', target_id: id, meta: { username: target.username } });
+    return null;
+  }
+  auditAs(ctx, actor, { action: 'user.2fa_enrolled_by_super', target_type: 'user', target_id: id, meta: { username: target.username } });
+  return codes;
 }
 
 /** Deletes a user with their sessions, tokens and grants. Not yourself, not the last enabled super, not a sole workspace owner. */
