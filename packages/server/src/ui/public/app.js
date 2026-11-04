@@ -132,6 +132,13 @@
     keyInput.setAttribute('aria-label', 'Key');
     card.appendChild(keyInput);
 
+    // A new row has no stored field behind it: the server skips it while its value box is empty.
+    var origInput = document.createElement('input');
+    origInput.type = 'hidden';
+    origInput.name = 'orig_key';
+    origInput.value = '';
+    card.appendChild(origInput);
+
     var valueArea = document.createElement('textarea');
     valueArea.name = 'value';
     valueArea.rows = 1;

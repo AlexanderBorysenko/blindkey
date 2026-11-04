@@ -19834,6 +19834,9 @@ var UPSTREAM_TOOL_DESCRIPTORS = [
               "value"
             ]
           }
+        },
+        "carryFields": {
+          "not": {}
         }
       },
       "required": [

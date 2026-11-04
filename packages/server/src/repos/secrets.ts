@@ -1,4 +1,5 @@
-import { defaultSensitive, type SecretInput, type SecretPatch } from '@blindkey/shared';
+import { z } from 'zod';
+import { defaultSensitive, secretKeySchema, secretPatchSchema, type SecretInput } from '@blindkey/shared';
 import type { Db } from '../db/connection.js';
 import type { KeyRing } from '../config.js';
 import { decryptField, encryptField, generateDek, unwrapDek, wrapDek } from '../crypto/envelope.js';
@@ -9,6 +10,17 @@ import { getWorkspaceById } from './workspaces.js';
 import { inList, isUniqueViolation, now, parseJsonArray, visibilitySql, type ItemVisibility } from './util.js';
 
 export type { KeyVersionStatus };
+
+/**
+ * The public patch (REST, MCP) plus `carryFields`, which only the admin UI's edit form may use: existing
+ * fields whose stored value is kept as is but re-stored under key `to` and/or a new sensitivity (the value
+ * never leaves the server). `from === to` only changes the sensitivity. Deliberately NOT in the shared
+ * `secretPatchSchema`, so the REST API and MCP reject it as an unknown key.
+ */
+export const secretEditPatchSchema = secretPatchSchema.extend({
+  carryFields: z.array(z.strictObject({ from: secretKeySchema, to: secretKeySchema, sensitive: z.boolean().optional() })).max(200).optional(),
+});
+export type SecretEditPatch = z.infer<typeof secretEditPatchSchema>;
 
 export interface SecretFieldMeta {
   key: string;
@@ -172,7 +184,7 @@ export function revealAllFields(db: Db, ring: KeyRing, secretId: number): Reveal
   });
 }
 
-export function updateSecret(db: Db, ring: KeyRing, id: number, patch: SecretPatch): SecretMeta {
+export function updateSecret(db: Db, ring: KeyRing, id: number, patch: SecretEditPatch): SecretMeta {
   return db.transaction(() => {
     const row = rawById(db, id);
     if (!row) throw new NotFoundError('secret not found');
@@ -189,9 +201,36 @@ export function updateSecret(db: Db, ring: KeyRing, id: number, patch: SecretPat
       if (isUniqueViolation(err)) throw new ConflictError(`secret "${patch.name}" already exists`);
       throw err;
     }
-    if (patch.removeFields?.length) {
+    // Carried fields are decrypted BEFORE anything is deleted (a swap of two keys reads both first),
+    // then re-stored under their new key/sensitivity. The plaintext never leaves this function.
+    const carried: { to: string; sensitive: boolean; plain: string }[] = [];
+    const carryFrom = new Set<string>();
+    if (patch.carryFields?.length) {
+      const dek = loadDek(ring, row);
+      const rows = db.prepare(`SELECT key, value_enc, is_sensitive FROM secret_fields WHERE secret_id = ?`).all(id) as RawField[];
+      const byKey = new Map(rows.map((r) => [r.key, r]));
+      const targets = new Set<string>();
+      for (const c of patch.carryFields) {
+        const src = byKey.get(c.from);
+        if (!src) throw new NotFoundError(`field "${c.from}" not found`);
+        if (carryFrom.has(c.from) || targets.has(c.to)) throw new ConflictError(`duplicate field key "${c.to}"`);
+        carryFrom.add(c.from);
+        targets.add(c.to);
+        carried.push({
+          to: c.to,
+          sensitive: c.sensitive ?? src.is_sensitive === 1,
+          plain: withSecret(id, () => decryptField(dek, id, c.from, src.value_enc)),
+        });
+      }
+      const freed = new Set([...carryFrom, ...(patch.removeFields ?? [])]);
+      const written = new Set((patch.fields ?? []).map((f) => f.key));
+      for (const to of targets) {
+        if ((byKey.has(to) && !freed.has(to)) || written.has(to)) throw new ConflictError(`field "${to}" already exists`);
+      }
+    }
+    if (patch.removeFields?.length || carryFrom.size) {
       const del = db.prepare(`DELETE FROM secret_fields WHERE secret_id = ? AND key = ?`);
-      for (const k of patch.removeFields) del.run(id, k);
+      for (const k of new Set([...(patch.removeFields ?? []), ...carryFrom])) del.run(id, k);
     }
     if (patch.fields?.length) {
       const dek = loadDek(ring, row);
@@ -207,6 +246,15 @@ export function updateSecret(db: Db, ring: KeyRing, id: number, patch: SecretPat
         const sensitive = f.sensitive ?? prior ?? defaultSensitive(f.key);
         sort += 1;
         upsert.run(id, f.key, encryptField(dek, id, f.key, f.value), sensitive ? 1 : 0, sort);
+      }
+    }
+    if (carried.length) {
+      const dek = loadDek(ring, row);
+      let sort = (db.prepare(`SELECT COALESCE(MAX(sort), -1) AS m FROM secret_fields WHERE secret_id = ?`).get(id) as { m: number }).m;
+      const ins = db.prepare(`INSERT INTO secret_fields (secret_id, key, value_enc, is_sensitive, sort) VALUES (?, ?, ?, ?, ?)`);
+      for (const c of carried) {
+        sort += 1;
+        ins.run(id, c.to, encryptField(dek, id, c.to, c.plain), c.sensitive ? 1 : 0, sort);
       }
     }
     if (patch.order?.length) {

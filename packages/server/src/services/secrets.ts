@@ -1,10 +1,10 @@
-import { defaultSensitive, PERMS, secretLookingKey, urlWithPassword, type Perm, type SecretInput, type SecretPatch } from '@blindkey/shared';
+import { defaultSensitive, PERMS, secretLookingKey, urlWithPassword, type Perm, type SecretInput } from '@blindkey/shared';
 import type { AppContext } from '../http/context.js';
 import { assertScope, hasScope, type Actor, type Principal } from '../auth/principal.js';
 import { accessFor, hasPerm, type Access } from '../auth/access.js';
 import { AppError, ForbiddenError, NotFoundError, PermissionError } from '../errors.js';
 import { getProjectBySlug, type ProjectRow } from '../repos/projects.js';
-import { createSecret, deleteSecret, getSecretMeta, listSecrets, revealAllFields, revealField, updateSecret, type SecretMeta } from '../repos/secrets.js';
+import { createSecret, deleteSecret, getSecretMeta, listSecrets, revealAllFields, revealField, updateSecret, type SecretEditPatch, type SecretMeta } from '../repos/secrets.js';
 import { listAuditForTarget, type AuditRow } from '../repos/audit.js';
 import { publicSecret, type PublicSecret } from '../http/serialize.js';
 import { auditAs } from './common.js';
@@ -207,7 +207,7 @@ function assertMetaWriteCreateAllowed(input: SecretInput): void {
  * two ways: the explicit overlap check below, and (mirroring that same delete-then-upsert order)
  * a re-added key's `willBeSensitive` never falls back to its pre-patch sensitivity.
  */
-function assertMetaWritePatchAllowed(existing: SecretMeta, patch: SecretPatch): void {
+function assertMetaWritePatchAllowed(existing: SecretMeta, patch: SecretEditPatch): void {
   assertNoVisibleSecretLookingKey(patch.fields ?? []);
   const priorSensitive = new Map(existing.fields.map((f) => [f.key, f.sensitive]));
   const removed = new Set(patch.removeFields ?? []);
@@ -220,6 +220,12 @@ function assertMetaWritePatchAllowed(existing: SecretMeta, patch: SecretPatch): 
   }
   for (const k of removed) {
     if (priorSensitive.get(k)) throw SENSITIVE_FORBIDDEN();
+  }
+  // A carried field is touched too: it may not be, or become, sensitive, nor take a credential-looking key while visible.
+  const carry = patch.carryFields ?? [];
+  assertNoVisibleSecretLookingKey(carry.map((c) => ({ key: c.to, sensitive: c.sensitive ?? false })));
+  for (const c of carry) {
+    if (priorSensitive.get(c.from) !== false || c.sensitive === true || removed.has(c.from)) throw SENSITIVE_FORBIDDEN();
   }
 }
 
@@ -252,18 +258,34 @@ export function createSecretFor(ctx: AppContext, actor: Actor, projectSlug: stri
   return publicSecret(s, showValues(actor.principal, access.secretPerms(s)));
 }
 
-export function updateSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, patch: SecretPatch, workspaceSlug?: string | null): PublicSecret {
+export function updateSecretFor(ctx: AppContext, actor: Actor, projectSlug: string | null, name: string, patch: SecretEditPatch, workspaceSlug?: string | null): PublicSecret {
   assertWriteScope(actor.principal);
   const access = accessFor(ctx.db, actor.principal);
   const { secret: existing, perms } = mustGet(ctx, access, targetOf(ctx, access, projectSlug, workspaceSlug), name);
   if (writeMode(actor.principal, perms) === 'meta') assertMetaWritePatchAllowed(existing, patch);
+  // Un-locking a carried field makes its stored value readable, so it needs the same right as revealing it.
+  for (const c of patch.carryFields ?? []) {
+    const prior = existing.fields.find((f) => f.key === c.from);
+    if (prior?.sensitive && c.sensitive === false && !hasPerm(perms, 'protected.read')) throw new PermissionError('protected.read');
+  }
   const s = updateSecret(ctx.db, ctx.ring, existing.id, patch);
   auditAs(ctx, actor, {
     action: 'secret.update',
     target_type: 'secret',
     target_id: s.id,
     workspace_id: s.workspace_id,
-    meta: { fields: patch.fields?.map((f) => f.key) ?? [], removed: patch.removeFields ?? [], meta: Object.keys(patch).filter((k) => k !== 'fields' && k !== 'removeFields') },
+    meta: {
+      fields: patch.fields?.map((f) => f.key) ?? [],
+      removed: patch.removeFields ?? [],
+      // Keys only, never values: which carried fields changed key, and which only changed sensitivity.
+      ...(patch.carryFields?.length
+        ? {
+            renamed: patch.carryFields.filter((c) => c.from !== c.to).map((c) => ({ from: c.from, to: c.to })),
+            resensitized: patch.carryFields.filter((c) => c.sensitive !== undefined).map((c) => c.to),
+          }
+        : {}),
+      meta: Object.keys(patch).filter((k) => k !== 'fields' && k !== 'removeFields' && k !== 'carryFields'),
+    },
   });
   return publicSecret(s, showValues(actor.principal, perms));
 }

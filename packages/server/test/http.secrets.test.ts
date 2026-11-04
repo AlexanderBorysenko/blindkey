@@ -102,6 +102,15 @@ describe('secrets routes', () => {
     const r = await t.app.inject({ method: 'PATCH', url: '/api/v1/projects/alpha/secrets/Other', headers: w, payload: { name: 'Staging server' } });
     expect(r.statusCode).toBe(409);
   });
+  it('rejects PATCH carrying carryFields (UI-only) with a 400 validation error', async () => {
+    const t = await makeTestApp();
+    t.project('alpha');
+    const w = auth(t.token(['secrets:write', 'secrets:meta'], ['alpha']));
+    await t.app.inject({ method: 'POST', url: '/api/v1/projects/alpha/secrets', headers: w, payload: staging });
+    const r = await t.app.inject({ method: 'PATCH', url: '/api/v1/projects/alpha/secrets/Staging%20server', headers: w, payload: { carryFields: [{ from: 'host', to: 'h2' }] } });
+    expect(r.statusCode).toBe(400);
+    expect(r.body).toContain('carryFields');
+  });
   it('hides out-of-scope projects as 404', async () => {
     const t = await makeTestApp();
     t.project('alpha');

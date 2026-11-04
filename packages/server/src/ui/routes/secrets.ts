@@ -2,9 +2,12 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Principal } from '../../auth/principal.js';
 import type { AppContext } from '../../http/context.js';
 import { labelActors } from '../actors.js';
-import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretKeySchema, secretPatchSchema } from '@blindkey/shared';
-import { deleteSecretFor, getSecretFor, listSecretsFor, recentSecretAccessFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
+import { NON_SENSITIVE_KEYS, defaultSensitive, secretInputSchema, secretKeySchema } from '@blindkey/shared';
+import { deleteSecretFor, findVisibleSecretFor, getSecretFor, listSecretsFor, recentSecretAccessFor, revealFieldFor, updateSecretFor } from '../../services/secrets.js';
 import { ConflictError, PermissionError } from '../../errors.js';
+import { accessFor, hasPerm } from '../../auth/access.js';
+import { hasScope } from '../../auth/principal.js';
+import { secretEditPatchSchema } from '../../repos/secrets.js';
 import { createSecretWithAccess } from '../../services/create-with-access.js';
 import { adminActor, requireAdmin } from '../session.js';
 import { accessEntries, globalMoveTargets, scopeAccessField } from '../workspace-ui.js';
@@ -23,6 +26,8 @@ interface FieldRow {
   key: string;
   value: string;
   sensitive: boolean;
+  /** The stored key this row started as ('' for a row added in the browser; rows are read positionally). */
+  origKey?: string;
 }
 
 /**
@@ -37,6 +42,8 @@ function fieldRows(b: Record<string, unknown>): FieldRow[] {
   const keys = list(b, 'key');
   const values = list(b, 'value');
   const sensitiveRaw = list(b, 'sensitive');
+  // Absent entirely (a hand-rolled POST) means "no row was renamed": the key itself names the stored field.
+  const origRaw = b.orig_key === undefined ? null : list(b, 'orig_key');
   const rows: FieldRow[] = [];
   keys.forEach((rawKey, i) => {
     const key = rawKey.trim();
@@ -53,9 +60,85 @@ function fieldRows(b: Record<string, unknown>): FieldRow[] {
           : defaultSensitive(key);
     // Browsers submit <textarea> line breaks as CRLF; store LF so multi-line values
     // (SSH keys, certificates) come back byte-identical to what was pasted.
-    rows.push({ key, value: (values[i] ?? '').replace(/\r\n?/g, '\n'), sensitive });
+    rows.push({ key, value: (values[i] ?? '').replace(/\r\n?/g, '\n'), sensitive, origKey: origRaw === null ? key : (origRaw[i] ?? '').trim() });
   });
   return rows;
+}
+
+interface EditRights {
+  /** `protected.write` (with the full write scope): may touch sensitive fields at all. */
+  writeProtected: boolean;
+  /** `protected.read`: may turn a locked field visible (which exposes its value). */
+  readProtected: boolean;
+}
+
+function secretEditRights(ctx: AppContext, principal: Principal, projectSlug: string | null, name: string): EditRights {
+  const secret = findVisibleSecretFor(ctx, principal, projectSlug, name);
+  const perms = secret ? accessFor(ctx.db, principal).secretPerms(secret) : [];
+  return {
+    writeProtected: hasScope(principal, 'secrets:write') && hasPerm(perms, 'protected.write'),
+    readProtected: hasPerm(perms, 'protected.read'),
+  };
+}
+
+interface EditPlan {
+  fields: { key: string; value: string; sensitive: boolean }[];
+  removeFields: string[];
+  carryFields: { from: string; to: string; sensitive?: boolean }[];
+  order: string[];
+  /** Locked fields that the user asked to make visible but may not reveal. */
+  stayedLocked: string[];
+  /** A key two rows end up with, or null. */
+  duplicate: string | null;
+}
+
+/** Turns the submitted rows into one patch; see the comment at the call site for the rules. */
+function planSecretEdit(stored: { key: string; sensitive: boolean }[], rows: FieldRow[], rights: EditRights): EditPlan {
+  const byKey = new Map(stored.map((f) => [f.key, f]));
+  const plan: EditPlan = { fields: [], removeFields: [], carryFields: [], order: [], stayedLocked: [], duplicate: null };
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (seen.has(r.key)) {
+      plan.duplicate = r.key;
+      return plan;
+    }
+    seen.add(r.key);
+  }
+  const claimed = new Set<string>();
+  const inPlace = new Set<string>();
+  const finalKeys = new Set<string>();
+  for (const row of rows) {
+    const orig = row.origKey && byKey.has(row.origKey) && !claimed.has(row.origKey) ? row.origKey : '';
+    if (orig) claimed.add(orig);
+    const prior = orig ? byKey.get(orig)! : null;
+    let finalKey = row.key;
+    if (row.value !== '') {
+      plan.fields.push({ key: row.key, value: row.value, sensitive: row.sensitive });
+    } else if (!prior) {
+      continue; // a new row with nothing in it: no field is created
+    } else if ((prior.sensitive || row.sensitive) && !rights.writeProtected) {
+      finalKey = orig; // may not touch sensitive fields: left exactly as stored
+    } else {
+      let sensitive = row.sensitive;
+      if (prior.sensitive && !sensitive && !rights.readProtected) {
+        sensitive = true; // un-locking would expose the value
+        plan.stayedLocked.push(orig);
+      }
+      if (orig !== row.key || sensitive !== prior.sensitive) {
+        plan.carryFields.push({ from: orig, to: row.key, ...(sensitive !== prior.sensitive ? { sensitive } : {}) });
+      }
+    }
+    if (prior && finalKey === orig) inPlace.add(orig);
+    if (finalKeys.has(finalKey)) {
+      plan.duplicate = finalKey;
+      return plan;
+    }
+    finalKeys.add(finalKey);
+    plan.order.push(finalKey);
+  }
+  const carried = new Set(plan.carryFields.map((c) => c.from));
+  plan.removeFields = stored.map((f) => f.key).filter((k) => !inPlace.has(k) && !carried.has(k));
+  return plan;
 }
 
 /**
@@ -93,8 +176,12 @@ function prefillRowsForNew(raw: string): FieldRow[] {
 /** The secret page; `moveError` shows an inline message when a move from it was refused. */
 export function secretPage(ctx: AppContext, req: FastifyRequest, principal: Principal, scope: UiScope, name: string, moveError: string | null): string {
   const secret = getSecretFor(ctx, principal, scope.projectSlug, name);
+  // `?stayed=a,b` (set by the edit save): shown only for keys that really are locked on this secret.
+  const lockedKeys = new Set(secret.fields.filter((f) => f.sensitive).map((f) => f.key));
+  const stayed = str((req.query ?? {}) as Record<string, unknown>, 'stayed').split(',').filter((k) => lockedKeys.has(k));
   return renderPage('secret', {
     ...pageContext(ctx, req, secret.name),
+    notice: stayed.length ? `${stayed.join(', ')} stayed locked: you can't reveal ${stayed.length > 1 ? 'them' : 'it'}.` : null,
     prefix: scope.prefix,
     scopeLabel: scope.projectSlug ?? 'global',
     secret,
@@ -242,7 +329,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
             name: secret.name,
             description: secret.description,
             tags: secret.tags.join(', '),
-            rows: [...secret.fields.map((f) => ({ key: f.key, value: f.sensitive ? '' : (f.value ?? ''), sensitive: f.sensitive })), ...extraRows],
+            rows: [...secret.fields.map((f) => ({ key: f.key, value: f.sensitive ? '' : (f.value ?? ''), sensitive: f.sensitive, origKey: f.key })), ...extraRows],
           },
         }),
       );
@@ -269,30 +356,20 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
             form: { name: str(b, 'name'), description: str(b, 'description'), tags: str(b, 'tags'), rows },
           }),
         );
-      // An empty value box means "leave the stored value alone" ONLY for a row that still
-      // names an existing stored field with the same sensitivity. A rename, a new row, or a
-      // sensitivity flip with no value supplied cannot be resolved safely (the stored sensitive
-      // value is never read back into the form), so it must be re-entered instead of silently
-      // dropped or silently kept under a mismatched key/flag.
-      const existingByKey = new Map(existing.fields.map((f) => [f.key, f]));
-      for (const row of rows) {
-        if (row.value === '') {
-          const stored = existingByKey.get(row.key);
-          if (!stored || stored.sensitive !== row.sensitive) {
-            return rerender(`Field "${row.key}": value must be re-entered (its key or sensitivity changed)`);
-          }
-        }
-      }
-      const keep = new Set(rows.map((r) => r.key));
-      const patch = secretPatchSchema.safeParse({
+      // An empty value box never errors: it means "do not change the value". The stored value is
+      // never read back into the form, so a renamed or re-flagged row is carried over server-side
+      // (decrypt + re-encrypt in one transaction) and a brand-new empty row is simply skipped.
+      const plan = planSecretEdit(existing.fields, rows, secretEditRights(ctx, principal, scope.projectSlug, existing.name));
+      if (plan.duplicate) return rerender(`Field "${plan.duplicate}": duplicate field key`);
+      const patch = secretEditPatchSchema.safeParse({
         name: str(b, 'name', req.params.name),
         description: str(b, 'description'),
         tags: parseTags(b.tags),
-        // An empty box means "leave the stored value alone", so those rows are not sent.
-        fields: rows.filter((r) => r.value !== '').map((r) => ({ key: r.key, value: r.value, sensitive: r.sensitive })),
-        removeFields: existing.fields.map((f) => f.key).filter((k) => !keep.has(k)),
+        fields: plan.fields,
+        removeFields: plan.removeFields,
+        ...(plan.carryFields.length ? { carryFields: plan.carryFields } : {}),
         // Rows with an empty box are not in `fields`, so the form order is sent separately.
-        order: rows.map((r) => r.key),
+        order: plan.order,
       });
       if (!patch.success) {
         return rerender(patch.error.issues.map((i) => `${i.path.join('.') || 'form'}: ${i.message}`).join('; '));
@@ -305,7 +382,7 @@ export function registerSecretRoutes(app: FastifyInstance, ctx: AppContext): voi
         if (err instanceof ConflictError) return rerender(err.message);
         throw err;
       }
-      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(updated.name)}?done=saved${wsParam(req, scope.projectSlug === null)}`, 302);
+      return reply.redirect(`${scope.prefix}/secrets/${encodeURIComponent(updated.name)}?done=saved${plan.stayedLocked.length ? `&stayed=${encodeURIComponent(plan.stayedLocked.join(','))}` : ''}${wsParam(req, scope.projectSlug === null)}`, 302);
     });
 
     app.post<SecretParams>(`${base}/:name/delete`, async (req, reply) => {

@@ -184,6 +184,8 @@ export function buildMcpServer(ctx: AppContext, actor: Actor, origin: string): M
           .array(z.object({ key: secretKeySchema, value: z.string().max(1_000_000), sensitive: z.literal(false).optional() }))
           .max(200)
           .optional(),
+        // Not an input of this tool: any value is a validation error rather than being silently dropped.
+        carryFields: z.never().optional(),
       },
     },
     async ({ project, workspace, name, description, tags, fields }) =>

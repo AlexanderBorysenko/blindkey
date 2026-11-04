@@ -319,6 +319,9 @@ export const UPSTREAM_TOOL_DESCRIPTORS: Tool[] = [
               "value"
             ]
           }
+        },
+        "carryFields": {
+          "not": {}
         }
       },
       "required": [

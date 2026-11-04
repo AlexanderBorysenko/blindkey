@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { makeTestApp, type TestCtx } from './helpers.js';
-import { createSecret } from '../src/repos/secrets.js';
+import { createSecret, getSecretMeta } from '../src/repos/secrets.js';
 import { upsertDocument } from '../src/repos/documents.js';
 import { listAudit } from '../src/repos/audit.js';
 
@@ -133,6 +133,20 @@ describe('mcp', () => {
     const crossProject = await client.callTool({ name: 'update_project', arguments: { slug: 'beta', summary: 'x' } });
     expect(crossProject.isError).toBe(true);
     expect(textOf(crossProject)).toContain('not_found');
+  });
+
+  it('upsert_secret_meta rejects carryFields (UI-only) instead of silently dropping it', async () => {
+    t = await makeTestApp();
+    const p = t.project('alpha');
+    createSecret(t.db, t.ring, { projectId: p.id, name: 'S1', description: '', tags: [], fields: [{ key: 'host', value: 'h1' }] });
+    const client = await connect(t.token(['secrets:meta', 'secrets:meta-write'], ['alpha']));
+    const res = await client.callTool({
+      name: 'upsert_secret_meta',
+      arguments: { project: 'alpha', name: 'S1', carryFields: [{ from: 'host', to: 'h2' }] },
+    });
+    expect(res.isError).toBe(true);
+    expect(textOf(res).toLowerCase()).toContain('carryfields');
+    expect(getSecretMeta(t.db, t.ring, p.id, 'S1')!.fields.map((f) => f.key)).toEqual(['host']);
   });
 
   it('upsert_secret_meta creates non-sensitive fields, patches them, and refuses anything sensitive (spec §1.1/§1.5)', async () => {
